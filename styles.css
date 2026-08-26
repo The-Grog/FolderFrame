@@ -24,8 +24,6 @@ button, select { font: inherit; }
 .btn-primary:hover { background:#3b82f6; box-shadow:0 0 12px rgba(37,99,235,.35); }
 .btn-secondary { background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.1); }
 .btn-secondary:hover:not(:disabled) { background:rgba(255,255,255,.16); border-color:rgba(255,255,255,.24); }
-.btn-donate { background:#0070ba; border-color:#169bd7; text-decoration:none; }
-.btn-donate:hover { background:#169bd7; border-color:#56bde9; box-shadow:0 0 12px rgba(22,155,215,.35); }
 .btn.is-active { background:rgba(37,99,235,.22); border-color:rgba(96,165,250,.7); color:#bfdbfe; }
 .btn-icon { background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.1); width:38px; padding:0; }
 .timer-control { display:flex; align-items:center; gap:7px; }
