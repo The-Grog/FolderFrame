@@ -1,5 +1,7 @@
 FOLDERFRAME — SETUP & USER GUIDE
 
+[![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-0070ba?logo=paypal&logoColor=white)](https://paypal.me/machogrog)
+
 OVERVIEW
 
 This is a lightweight, self-hosted photo and video gallery. It reads the
@@ -390,3 +392,9 @@ directory listing of private photos to the public Internet
 
 For a local-only family gallery, keeping the service accessible only
 from the trusted LAN is the simplest arrangement.
+
+SUPPORT FOLDERFRAME
+
+If FolderFrame is useful to you, you can support its continued development:
+
+    https://paypal.me/machogrog
