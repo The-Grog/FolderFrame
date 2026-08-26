@@ -80,13 +80,14 @@ the gallery needs, including listings for nested album folders.
 Stop the Python server with Ctrl+C.
 
 NOTE: Python’s built-in server is excellent for testing and trusted
-local-network use. For a permanent Unraid installation, Nginx is the
-recommended option.
+local-network use. For a permanent installation, use any static web
+server that can provide directory listings.
 
-OPTION 2 — PERMANENT NGINX / UNRAID HOSTING
+OPTION 2 — HOSTING ON A WEB SERVER OR UNRAID
 
-The gallery works well with the LinuxServer.io Nginx container on
-Unraid.
+FolderFrame is not tied to a specific web server. Apache, Nginx, Caddy,
+lighttpd, and similar servers can all work. On Unraid, use any suitable
+web-server container and map the FolderFrame directory into its web root.
 
 The web root should contain:
 
@@ -96,37 +97,23 @@ The web root should contain:
     heic2any.min.js
     photos/
 
-If using the layout previously configured for this gallery, the Unraid
-host directory can be mapped to:
+Configure the server to return a browsable directory listing for photos/
+and every nested folder beneath it. The exact setting may be called
+directory listing, directory browsing, autoindex, or indexes depending on
+the server. FolderFrame only requires normal static-file serving plus
+those directory listings; it does not require PHP, a database, or a
+server-side application.
 
-    /config/www
-
-inside the Nginx container.
-
-NGINX DIRECTORY LISTING
-
-The gallery requires Nginx directory indexing for photos/ so JavaScript
-can discover media files and album folders dynamically.
-
-Inside the Nginx server { } block, add:
-
-    location /photos/ {
-        autoindex on;
-        autoindex_exact_size off;
-        autoindex_localtime on;
-        try_files $uri $uri/ =404;
-    }
-
-The location applies to paths beneath /photos/ as well, allowing nested
-album folders to be browsed dynamically.
-
-After changing the Nginx configuration, restart the Nginx container.
+On Unraid, map the FolderFrame project directory to the container’s web
+root, enable directory listings for photos/, and restart the container.
+Consult the selected container or web server’s documentation for its
+specific configuration syntax.
 
 Test directory listing directly by visiting:
 
     http://SERVER-IP:PORT/photos/
 
-You should see an Nginx-generated list of the files and folders in
+You should see a server-generated list of the files and folders in
 photos/.
 
 Then open:
@@ -353,7 +340,8 @@ NO MEDIA FILES DETECTED
 2.  Open /photos/ directly in the browser.
 3.  Confirm that a directory listing appears.
 4.  Confirm the files use supported extensions.
-5.  If using Nginx, verify autoindex is enabled for /photos/.
+5.  Verify directory listing or directory browsing is enabled for
+    /photos/ and its subfolders.
 6.  If using Python, make sure python3 -m http.server 8000 was started
     from the FolderFrame project directory, not from inside photos/.
 
