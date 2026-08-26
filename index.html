@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#050505">
+    <title>FolderFrame</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="heic2any.min.js"></script>
+</head>
+<body>
+    <div id="gallery-wrapper">
+        <div id="media-viewport">
+            <div id="media-container">
+                <img id="gallery-image" alt="Gallery Image" style="display:none;">
+                <video id="gallery-video" style="display:none;" playsinline></video>
+            </div>
+
+            <div id="video-error-overlay" class="video-error-overlay" style="display:none;">
+                <div class="video-error-card">
+                    <h3>Playback Error</h3>
+                    <p id="video-error-text"></p>
+                    <div class="ffmpeg-box">
+                        <p>Possible FFmpeg conversion:</p>
+                        <code id="video-error-ffmpeg"></code>
+                    </div>
+                    <button id="btn-close-video-error" class="btn btn-secondary">Close Error</button>
+                </div>
+            </div>
+        </div>
+
+        <header id="overlay-header" class="overlay">
+            <div class="header-left">
+                <button id="btn-show-grid" class="btn btn-secondary" title="Back to Gallery">
+                    <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 11h5V5H4v6zm0 7h5v-6H4v6zm6 0h5v-6h-5v6zm6 0h5v-6h-5v6zm-6-7h5V5h-5v6zm6-6v6h5V5h-5z"/></svg>
+                    Gallery
+                </button>
+                <span id="media-title" class="title-text">Loading…</span>
+                <span id="media-index" class="index-text"></span>
+            </div>
+
+            <div class="header-right">
+                <button id="btn-play-pause" class="btn btn-secondary" title="Play/Pause slideshow">
+                    <span class="play-icon"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M8 5v14l11-7z"/></svg></span>
+                    <span class="pause-icon" style="display:none;"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg></span>
+                    <span id="slideshow-text">Play</span>
+                </button>
+
+                <button id="btn-shuffle" class="btn btn-secondary" aria-pressed="false" title="Shuffle slideshow order">
+                    <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M10.59 9.17 5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg>
+                    <span class="button-label">Shuffle</span>
+                </button>
+
+                <div class="timer-control">
+                    <label for="select-interval">Interval:</label>
+                    <select id="select-interval" class="custom-select">
+                        <option value="3">3s</option>
+                        <option value="5">5s</option>
+                        <option value="10">10s</option>
+                        <option value="15">15s</option>
+                        <option value="30">30s</option>
+                        <option value="60">60s</option>
+                    </select>
+                </div>
+
+                <button id="btn-reset-zoom" class="btn btn-secondary" title="Reset zoom and pan" disabled>Reset Zoom</button>
+                <button id="btn-image-mode" class="btn btn-secondary" title="Toggle Original Size / Fit Screen"><span id="image-mode-text">Fit Screen</span></button>
+
+                <button id="btn-fullscreen" class="btn btn-secondary" title="Enter fullscreen" aria-label="Toggle Fullscreen" aria-pressed="false">
+                    <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+                    <span class="button-label">Fullscreen</span>
+                </button>
+
+                <button id="btn-tv-mode" class="btn btn-secondary" aria-pressed="false" title="Start photo-frame mode">
+                    <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7v2H7v2h10v-2h-3v-2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>
+                    <span class="button-label">TV Mode</span>
+                </button>
+            </div>
+        </header>
+
+        <button id="nav-left" class="nav-arrow" aria-label="Previous media"><svg viewBox="0 0 24 24" width="36" height="36"><path fill="currentColor" d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button>
+        <button id="nav-right" class="nav-arrow" aria-label="Next media"><svg viewBox="0 0 24 24" width="36" height="36"><path fill="currentColor" d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button>
+
+        <div id="progress-container"><div id="progress-bar"></div></div>
+
+        <div id="grid-view-container">
+            <header id="grid-header" class="overlay">
+                <div class="grid-header-main">
+                    <div class="header-left grid-title-row">
+                        <span class="title-text">FolderFrame</span>
+                        <span id="grid-count" class="index-text">0 files</span>
+                    </div>
+                    <div class="gallery-path-bar" aria-label="Current gallery location">
+                        <span class="path-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="16" height="16">
+                                <path fill="currentColor" d="M10 4H2v16h20V6H12l-2-2zm10 14H4V6h5.17l2 2H20v10z"/>
+                            </svg>
+                        </span>
+                        <div id="breadcrumb" class="breadcrumb" aria-label="Album path"></div>
+                        <span id="grid-path" class="folder-path">Sorted by folder</span>
+                    </div>
+                </div>
+                <div class="header-right grid-actions">
+                    <span id="scan-status" class="scan-status">Ready</span>
+                    <button id="btn-view-mode" class="btn btn-secondary" aria-pressed="false" title="Show all media in this folder and all subfolders">
+                        <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M3 5h8v6H3V5zm10 0h8v6h-8V5zM3 13h8v6H3v-6zm10 0h8v6h-8v-6z"/></svg>
+                        <span class="button-label">By Folder</span>
+                    </button>
+                    <button id="btn-auto-refresh" class="btn btn-secondary" aria-pressed="true" title="Automatically rescan every 30 seconds">
+                        <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 6V3l-4 4 4 4V8c2.76 0 5 2.24 5 5 0 .75-.17 1.46-.46 2.1l1.46 1.46A6.96 6.96 0 0 0 19 13c0-3.87-3.13-7-7-7zm-5.54.9L5 5.44A6.96 6.96 0 0 0 4 9c0 3.87 3.13 7 7 7v3l4-4-4-4v3c-2.76 0-5-2.24-5-5 0-.75.17-1.46.46-2.1z"/></svg>
+                        <span class="button-label">Auto Refresh On</span>
+                    </button>
+                    <button id="btn-refresh-grid" class="btn btn-primary" title="Rescan current album now">
+                        <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.07 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                        Refresh Folder
+                    </button>
+                </div>
+            </header>
+            <div id="thumbnail-grid"></div>
+        </div>
+
+        <div id="help-hint"><span>Scroll to Zoom • Drag to Pan • ←/→ Browse • Space Play/Pause • Enter Fit/Original • F Fullscreen • G Gallery • S Shuffle</span></div>
+
+        <div id="warning-overlay" class="warning-container" style="display:none;">
+            <div class="warning-card">
+                <h2>No Media Detected</h2>
+                <p>The gallery could not find media or album folders in <code>photos/</code>.</p>
+                <div class="instructions">
+                    <h3>Web Server Required</h3>
+                    <p>This gallery requires directory listing to be enabled for <code>photos/</code> and any album subfolders.</p>
+                </div>
+                <p class="offline-note">Opening the HTML directly with <code>file://</code> will not work because browsers cannot scan local directories.</p>
+                <button id="btn-retry-warning" class="btn btn-primary">Scan Again</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js?v=20260826-enter-fit-original"></script>
+</body>
+</html>
