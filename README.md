@@ -114,6 +114,11 @@ server that provides directory listings for photos/ and its subfolders.
 
 PROJECT LAYOUT
 
+The photos/ folder included in the GitHub repository contains test photos and
+videos for checking various supported media formats. These sample files are
+not required to use FolderFrame; replace them with your own media or configure
+a different source folder.
+
 Keep the files arranged like this:
 
     FolderFrame/
