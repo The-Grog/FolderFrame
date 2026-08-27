@@ -6,7 +6,7 @@ manual checks; automated tests do not verify browser layout or codecs.
 - [x] **Refresh README screenshots** — Replaced viewer and grid previews with user-supplied screenshots of the updated interface. Full viewer first; no browser chrome or hosting URL.
 - [x] **README configuration example and settings reference** — Added complete JSON, all settings/defaults, source paths, profile overrides, recursion, autoplay, controls-free mode, and preference/URL precedence. Full details in CONFIGURATION.md.
 - [x] **Highlight key features in the overview** — Added a scannable list of implemented gallery, media, slideshow, mobile, embedding, configuration, loading, and hosting features.
-- [x] **Claude review of index/embed design** — User reports the review looked good.
+- [x] **3rd Party Ai review of code and design** — Completed
 - [x] **README roadmap link** — Links to this worklist and the contributing guide.
 - [x] **Contributing guide** — Added setup, checks, focused PR guidance, and media privacy notes.
 - [x] **Configuration: media paths and startup defaults** — Named sources, index/embed profiles, preferences, and URL overrides. Settings and startup regression coverage included.
