@@ -129,6 +129,7 @@ Omitted settings retain the lower-priority value.
 | `view` | `"folders"` | `"folders"` or `"all"` |
 | `autoplay` | `false` | Boolean: start slideshow and enter viewer |
 | `controls` | `true` | Boolean: false opens a controls-free viewer; pair with autoplay for a slideshow |
+| `showFilenames` | `true` | Boolean: show viewer filename and grid media captions |
 | `interval` | `5` | Seconds: 3, 5, 10, 15, 30, or 60 |
 | `imageMode` | `"fit"` | `"fit"` or `"original"` |
 | `shuffle` | `false` | Boolean |
@@ -164,6 +165,12 @@ override shuffle or autoplay that was configured separately.
 
 ## URL overrides
 
+Set `showFilenames: false` in defaults, index, or embed to hide the viewer's
+filename and grid media captions. Album names, accessible media labels, and
+error details remain available. This is a display preference, not a privacy
+or access-control feature. It is not saved in browser preferences.
+Override it with `?showFilenames=0` or `?showFilenames=1`.
+
 TV mode is not restored from saved browser preferences. Exiting fullscreen
 turns TV mode off and pauses its slideshow. Explicit config tvMode defaults
 or tv=1 URLs still apply on reload; use tv=0 to override them.
@@ -176,6 +183,7 @@ or tv=1 URLs still apply on reload; use tv=0 to override them.
 | `view=folders` or `view=all` | Album browsing or recursive media view |
 | `autoplay=1` or `autoplay=0` | Start playing or paused |
 | `controls=1` or `controls=0` | Show controls or use the controls-free viewer |
+| `showFilenames=1` or `showFilenames=0` | Show or hide viewer filenames and media captions |
 | `interval=10` | Slideshow interval in seconds |
 | `imageMode=fit` or `imageMode=original` | Initial image sizing |
 | `shuffle=1` or `shuffle=0` | Enable or disable Shuffle |

@@ -4,6 +4,8 @@
 #select-source { max-width: min(240px, 50vw); }
 #config-notice { position: fixed; bottom: 12px; left: 12px; right: 12px; z-index: 110; padding: 10px 14px; border: 1px solid #b7791f; border-radius: 8px; background: #30230b; color: #fff3cd; font-size: 13px; max-height: 25vh; overflow: auto; }
 :root { color-scheme: dark; }
+.hide-filenames #media-title, .hide-filenames .grid-item-caption { display:none; }
+.returned-tile { outline:3px solid #93c5fd; outline-offset:-3px; }
 .loading-note { position:absolute; bottom:15%; left:50%; transform:translateX(-50%); z-index:6; display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:20px; background:rgba(15,23,42,.9); color:#cbd5e1; font-size:13px; max-width:90%; pointer-events:none; }
 .scan-loading { display:flex; align-items:center; gap:10px; padding:12px 20px; color:#94a3b8; font-size:13px; flex-shrink:0; }
 .loading-spinner { display:inline-block; flex:0 0 16px; width:16px; height:16px; border:2px solid #475569; border-top-color:#93c5fd; border-radius:50%; animation:loading-spin 1s linear infinite; }

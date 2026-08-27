@@ -125,6 +125,63 @@ test('directory listings accept only direct child links within the requested dir
 });
 
 // Exercise recovery using the same minimal DOM/HTTP fixture as startup.
+test('fitted-photo swipes navigate, while vertical, short and cancelled gestures do not', async () => {
+    const app = await boot({ search: '?autoplay=1' });
+    vm.runInContext("mediaFiles.push('https://example.test/second.jpg')", app.context);
+    const viewport = app.get('media-viewport');
+    const point = (x, y) => ({ identifier: 1, clientX: x, clientY: y });
+    const swipe = (x, y) => {
+        viewport.listeners.touchstart({ touches: [point(200, 200)] });
+        viewport.listeners.touchend({ touches: [], changedTouches: [point(x, y)] });
+    };
+    swipe(100, 205);
+    assert.equal(vm.runInContext('currentIndex', app.context), 1);
+    swipe(300, 205);
+    assert.equal(vm.runInContext('currentIndex', app.context), 0);
+    swipe(190, 200);
+    swipe(170, 350);
+    assert.equal(vm.runInContext('currentIndex', app.context), 0);
+    viewport.listeners.touchstart({ touches: [point(200, 200)] });
+    viewport.listeners.touchcancel();
+    viewport.listeners.touchend({ touches: [], changedTouches: [point(100, 200)] });
+    assert.equal(vm.runInContext('currentIndex', app.context), 0);
+    vm.runInContext('zoom = 2', app.context);
+    swipe(100, 200);
+    assert.equal(vm.runInContext('currentIndex', app.context), 0);
+    vm.runInContext("zoom = 1; imageMode = 'original'", app.context);
+    swipe(100, 200);
+    assert.equal(vm.runInContext('currentIndex', app.context), 0);
+});
+
+test('filename setting validates booleans and supports profile and URL precedence', async () => {
+    const config = normalize({ embed: { showFilenames: false } });
+    assert.equal(api.resolveSettings(config, '').settings.showFilenames, true);
+    assert.equal(api.resolveSettings(config, '?profile=embed').settings.showFilenames, false);
+    assert.equal(api.resolveSettings(config, '?profile=embed&showFilenames=1').settings.showFilenames, true);
+    assert.throws(() => normalize({ defaults: { showFilenames: 'no' } }), /showFilenames/);
+    const app = await boot({ search: '?showFilenames=0&autoplay=1' });
+    assert.equal(app.get('gallery-image').alt, 'photo.jpg');
+});
+
+test('returning to the grid restores the original tile and scroll position after browsing', async () => {
+    const app = await boot();
+    app.get('grid-view-container').scrollTop = 640;
+    vm.runInContext("mediaFiles.push('https://example.test/second.jpg'); enterFullScreenViewer(0); nextMedia()", app.context);
+    app.get('grid-view-container').scrollTop = 0;
+    const create = app.context.document.createElement;
+    const marked = [];
+    app.context.document.createElement = () => {
+        const el = create();
+        el.classList.add = name => { if (name === 'returned-tile') marked.push(el); };
+        return el;
+    };
+    vm.runInContext('renderGridView()', app.context);
+    assert.equal(app.get('grid-view-container').scrollTop, 640);
+    assert.equal(marked.length, 1);
+    assert.equal(marked[0].children[0].src, 'https://example.test/frame/photos/photo.jpg');
+    assert.equal(vm.runInContext('gridReturn', app.context), null);
+});
+
 test('TV mode is not restored from saved preferences but explicit defaults still apply', () => {
     const saved = () => JSON.stringify({ tvMode: true, interval: 10 });
     const resolved = api.resolveSettings(normalize({}), '', saved);

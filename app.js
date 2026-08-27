@@ -8,6 +8,8 @@ let activeSource;
 let preferenceKey;
 let rememberPreferences = true;
 let controlsEnabled = true;
+let swipeStart = null;
+let gridReturn = null;
 const AUTO_REFRESH_MS = 30000;
 
 let mediaFiles = [];
@@ -138,6 +140,7 @@ async function loadConfiguration() {
     preferenceKey = resolved.preferenceKey;
     rememberPreferences = startupSettings.rememberPreferences;
     controlsEnabled = startupSettings.controls;
+    document.body.classList.toggle('hide-filenames', !startupSettings.showFilenames);
     document.body.classList.toggle('controls-free', !controlsEnabled);
     currentFolder = startupSettings.album;
     galleryViewMode = startupSettings.view;
@@ -451,7 +454,9 @@ function renderBreadcrumb() {
 
 async function navigateToFolder(folder) {
     if (isScanning) return;
+    gridReturn = null;
     currentFolder = folder;
+    gridViewContainer.scrollTop = 0;
     currentIndex = 0;
     isGridViewActive = true;
     stopSlideshow();
@@ -460,6 +465,9 @@ async function navigateToFolder(folder) {
 }
 
 function renderGridView() {
+    const returnPosition = !isGridViewActive && gridReturn &&
+        gridReturn.folder === currentFolder && gridReturn.view === galleryViewMode ? gridReturn : null;
+    let returnTile = null;
     setMediaLoading();
     if (!controlsEnabled) {
         gridViewContainer.style.display = 'none';
@@ -520,6 +528,7 @@ function renderGridView() {
         item.className = 'grid-item';
         item.type = 'button';
         item.setAttribute('aria-label', `Open ${filename}`);
+        if (returnPosition?.file === file) returnTile = item;
 
         if (isVideoFile(file)) {
             const vid = document.createElement('video');
@@ -576,6 +585,20 @@ function renderGridView() {
     });
 
     gridViewContainer.style.display = 'flex';
+    if (returnPosition) {
+        gridViewContainer.scrollTop = returnPosition.scrollTop;
+        if (returnTile) {
+            const tileRect = returnTile.getBoundingClientRect?.();
+            const gridRect = gridViewContainer.getBoundingClientRect?.();
+            if (tileRect && gridRect && (tileRect.top < gridRect.top || tileRect.bottom > gridRect.bottom)) {
+                returnTile.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+            }
+            returnTile.focus?.({ preventScroll: true });
+            returnTile.classList.add('returned-tile');
+            setTimeout(() => returnTile.classList.remove('returned-tile'), 1800);
+        }
+        gridReturn = null;
+    }
     viewport.style.display = 'none';
     $('overlay-header').style.display = 'none';
     navLeft.style.display = 'none';
@@ -590,6 +613,10 @@ function renderGridView() {
 function enterFullScreenViewer(index) {
     if (!mediaFiles.length) return;
     const openingViewer = isGridViewActive;
+    if (openingViewer && mediaFiles[index]) gridReturn = {
+        folder: currentFolder, view: galleryViewMode,
+        file: mediaFiles[index], scrollTop: gridViewContainer.scrollTop || 0
+    };
     isGridViewActive = false;
     gridViewContainer.style.display = 'none';
     viewport.style.display = 'flex';
@@ -624,6 +651,7 @@ function showMedia(index) {
     video.onwaiting = null; video.onstalled = null; video.oncanplay = null; video.onplaying = null;
     video.style.display = 'none'; video.pause(); video.src = '';
     mediaTitle.textContent = displayName;
+    img.alt = filename;
     mediaIndex.textContent = `${currentIndex + 1} / ${mediaFiles.length}`;
 
     if (isImageFile(filepath)) {
@@ -918,6 +946,7 @@ function handleMouseMove(e) { if (isDragging) { panX = startPanX + e.clientX - s
 function handleMouseUp() { isDragging = false; }
 
 function handleTouchStart(e) {
+    swipeStart = null;
     if (!controlsEnabled) return;
     if (mediaFailed) return;
     if (!isPhotoActive()) return;
@@ -935,6 +964,8 @@ function handleTouchStart(e) {
     } else if (e.touches.length === 1 && (zoom !== 1.0 || imageMode === 'original' || panX !== 0 || panY !== 0)) {
         isDragging = true; isPinching = false;
         startX = e.touches[0].clientX; startY = e.touches[0].clientY; startPanX = panX; startPanY = panY;
+    } else if (e.touches.length === 1 && imageMode === 'fit' && zoom === 1 && !panX && !panY) {
+        swipeStart = { x: e.touches[0].clientX, y: e.touches[0].clientY, id: e.touches[0].identifier };
     }
 }
 
@@ -966,9 +997,23 @@ function handleTouchMove(e) {
         applyTransform();
     }
 }
-function cancelTouchGesture() { isDragging = false; isPinching = false; }
+function cancelTouchGesture() { isDragging = false; isPinching = false; swipeStart = null; }
 function handleTouchEnd(e) {
-    if (e.touches.length === 0) { cancelTouchGesture(); return; }
+    if (e.touches.length === 0) {
+        const start = swipeStart;
+        const end = Array.from(e.changedTouches || []).find(touch => touch.identifier === start?.id);
+        const eligible = controlsEnabled && !mediaFailed && !isGridViewActive && isPhotoActive() &&
+            imageMode === 'fit' && zoom === 1 && !panX && !panY && !isPinching && !isDragging;
+        cancelTouchGesture();
+        if (start && end && eligible) {
+            const dx = end.clientX - start.x, dy = end.clientY - start.y;
+            if (Math.abs(dx) >= 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+                if (dx < 0) nextMedia(); else prevMedia();
+                resetIdleTimer();
+            }
+        }
+        return;
+    }
     if (e.touches.length === 1 && isPinching) {
         isPinching = false;
         isDragging = true;

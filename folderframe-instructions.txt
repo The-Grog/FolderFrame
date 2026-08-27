@@ -249,6 +249,17 @@ are respected. These indicators do not reduce the original download/decode cost.
 
 ZOOM AND PAN
 
+Swipe left/right on a fitted, unzoomed photo to browse. Once zoomed or panned,
+dragging pans instead; pinch gestures, short taps, and vertical swipes do not
+change photos. Swiping does not control videos or controls-free embeds.
+Returning to Gallery restores the originally opened tile and briefly highlights
+it, adjusting the scroll position if a refresh moved it.
+
+Set showFilenames to false in defaults, index, or embed to hide viewer filenames
+and grid media captions. Default: true. URL override: ?showFilenames=0 or 1.
+This setting is not saved in browser preferences; album names, accessible labels,
+and error details remain available. It is not a privacy or access-control feature.
+
 On phones and tablets, compact viewer controls align right and wrap as needed.
 The sizing button shows an icon with Fit or Original; Full toggles fullscreen.
 Long album breadcrumbs scroll sideways. Use the

@@ -13,6 +13,7 @@
     "tvMode": false,
     "autoplay": false,
     "controls": true,
+    "showFilenames": true,
     "rememberPreferences": true
   },
   "index": {},

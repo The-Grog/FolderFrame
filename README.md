@@ -1,5 +1,10 @@
 # FolderFrame
 
+FolderFrame works as a standalone, self-hosted photo and video gallery or as
+an embedded gallery or slideshow within your websites. Use it on its own,
+or add it to an existing page with a standard iframe—including an optional
+controls-free slideshow mode.
+
 [![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-0070ba?logo=paypal&logoColor=white)](https://paypal.me/machogrog)
 
 See the [project roadmap](TODO.md) for planned improvements to thumbnails, performance, mobile controls, and configuration. Interested in helping? Read the [contributing guide](CONTRIBUTING.md).
@@ -56,6 +61,7 @@ and starts the embed as a controls-free slideshow including subfolders:
     "tvMode": false,
     "autoplay": false,
     "controls": true,
+    "showFilenames": true,
     "rememberPreferences": true
   },
   "index": {},
@@ -88,6 +94,7 @@ Put settings in `defaults` for both profiles or in `index`/`embed` to override t
 | `tvMode` | `false` | Boolean: fit/shuffle/auto-refresh/autoplay preset |
 | `autoplay` | `false` | Boolean: enter viewer and start slideshow |
 | `controls` | `true` | Boolean: false opens viewer without controls; videos are muted |
+| `showFilenames` | `true` | Boolean: show viewer filename and grid media captions |
 | `rememberPreferences` | Index: `true`; embed: `false` | Boolean: read/write browser preferences |
 
 Precedence: built-in defaults → shared defaults → selected profile → saved
@@ -96,8 +103,13 @@ disables remembered preferences for embed. TV mode provides a preset; explicit
 settings in the same or higher-priority layer override that preset.
 
 Saved preferences cover album, interval, sizing, view, Shuffle, and Auto Refresh;
-not TV mode, autoplay, or controls visibility. Use `rememberPreferences: false`
-or `?remember=0` to ignore old preferences without deleting them.
+not TV mode, autoplay, controls visibility, or filename visibility.
+Use `rememberPreferences: false` or `?remember=0` to ignore old preferences
+without deleting them.
+
+Hide filenames with `showFilenames: false` in defaults/index/embed, or
+`?showFilenames=0` (use `showFilenames=1` to show them). Album names,
+accessible labels, and error details remain available.
 
 An iframe uses the embed profile only when its URL includes `?profile=embed`.
 For example, `?profile=embed&controls=0&autoplay=1&view=all`.
@@ -334,6 +346,13 @@ Controls-free slideshows hide loading indicators. Reduced-motion preferences
 are respected. These indicators do not reduce the original download/decode cost.
 
 ZOOM AND PAN
+
+Swipe left/right on a fitted, unzoomed photo to browse. Once zoomed or panned,
+dragging pans instead; pinch gestures, short taps, and vertical swipes do not
+change photos. Swiping does not control videos or controls-free embeds.
+Returning to Gallery restores the scroll position of the originally opened
+tile and briefly highlights it. If refreshed content moved the tile, it is
+scrolled into view; if removed, the saved scroll position is used instead.
 
 On phones and tablets, compact viewer controls align right and wrap as needed.
 The sizing button shows an icon with Fit or Original; Full toggles fullscreen.
