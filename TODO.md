@@ -19,4 +19,11 @@ manual checks; automated tests do not verify browser layout or codecs.
 - [ ] **Thumbnail generation (optional)** — Evaluate pre-generated thumbnails with original-image fallback for larger libraries. Preserve static-server hosting; client-side resizing still incurs original download/decode cost.
 - [ ] **Final device follow-up** — Confirm the latest slideshow visibility and TV-mode fixes, media failures/loading, and controls-free embeds in the target browsers.
 
+- [ ] **Docker packaging and Unraid templates** — Build a Docker image and an Unraid container template for easy deployment. Include configurable media/config mounts, port mapping, a web server with directory listings, and setup/update instructions. Keep ordinary static-server hosting supported.
+
+- [ ] **Swipe between photos** — Swipe left/right to browse when the photo is fitted and not zoomed or panned. When zoomed, dragging remains dedicated to panning; avoid conflicts with pinch gestures and controls.
+- [ ] **Album cover previews** — Show an image from inside each album instead of only the blue folder icon. Retain a small folder badge so albums remain recognizable, with a folder-icon fallback when no preview is available.
+- [ ] **Optional filename display in configuration** — Add a documented config option to show or hide filenames, supporting shared defaults and index/embed overrides. Reduce distractions from camera filenames while preserving accessible media labels.
+- [ ] **Remember grid scroll position** — Returning from the viewer restores the grid position at the opened photo and briefly highlights its tile. Handle folder changes and refreshed listings gracefully; respect reduced-motion preferences.
+
 Validation for this update: 33 automated settings/startup/media/gesture tests.
