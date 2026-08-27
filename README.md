@@ -1,4 +1,10 @@
-<h1><img src="docs/images/folderframe-logo.png" alt="FolderFrame" width="220"></h1>
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/folderframe-logo.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/folderframe-logo-light.png">
+    <img src="docs/images/folderframe-logo-light.png" alt="FolderFrame" width="220">
+  </picture>
+</h1>
 
 FolderFrame works as a standalone, self-hosted photo and video gallery or as
 an embedded gallery or slideshow within your websites. Use it on its own,
