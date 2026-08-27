@@ -27,5 +27,7 @@ manual checks; automated tests do not verify browser layout or codecs.
 - [x] **Optional filename display in configuration** — Added showFilenames (default true), shared/index/embed support, and showFilenames=0/1 URL overrides. Hides viewer filenames and media captions, retaining album names, accessible labels, and error details. Documented; local only.
 - [x] **Remember grid scroll position** — Restores the originally opened tile and saved scroll position, with a brief static highlight. Adjusts for moved tiles; falls back to scroll position if removed, and resets on folder navigation. Local only; device verification pending.
 
+- [x] **Sorting: Newest, Oldest, Filename** — Added the cycling gallery button between By Folder and Auto Refresh; Newest is the default. Config defaults/index/embed, saved preferences, and sort URL overrides supported. Uses bounded/cached Last-Modified HEAD lookups with filename ties and missing dates last. Documented and regression-tested; user supplied updated screenshots for publication.
+
 User tested and approved the swipe, filename visibility, and grid-return update.
-Validation for this update: 41 automated settings/startup/media/gesture tests.
+Validation for this update: 46 automated settings/startup/media/gesture/sorting tests.

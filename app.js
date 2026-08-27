@@ -98,6 +98,8 @@ let slideshowAnimationFrame = null, slideshowStartedAt = 0;
 let uiVisible = true, idleTimer = null, imageMode = 'fit', isGridViewActive = true;
 let shuffleEnabled = false, autoRefreshEnabled = true, tvModeEnabled = false;
 let galleryViewMode = 'folders'; // 'folders' or 'all'
+let sortMode = 'newest';
+const modifiedDateCache = new Map();
 let autoRefreshTimer = null;
 let isScanning = false;
 let scannedFolders = 0, scannedFiles = 0;
@@ -186,7 +188,7 @@ function savePreferences() {
         localStorage.setItem(preferenceKey, JSON.stringify({
             album: currentFolder, interval: slideshowInterval, imageMode,
             shuffle: shuffleEnabled, autoRefresh: autoRefreshEnabled,
-            view: galleryViewMode
+            view: galleryViewMode, sort: sortMode
         }));
     } catch (error) {
         // Storage can be unavailable in privacy modes and embedded contexts.
@@ -218,6 +220,7 @@ async function loadConfiguration() {
     document.body.classList.toggle('controls-free', !controlsEnabled);
     currentFolder = startupSettings.album;
     galleryViewMode = startupSettings.view;
+    sortMode = startupSettings.sort;
     slideshowInterval = startupSettings.interval;
     imageMode = startupSettings.imageMode;
     shuffleEnabled = startupSettings.shuffle;
@@ -245,15 +248,19 @@ async function loadConfiguration() {
 }
 
 function updateControlStates() {
+    const sortLabels = { newest: 'Newest', oldest: 'Oldest', filename: 'Filename' };
+    $('sort-label').textContent = sortLabels[sortMode];
+    $('btn-sort').title = `Sorting: ${sortLabels[sortMode]}. Click to cycle Newest, Oldest, Filename.`;
+    $('btn-sort').setAttribute('aria-label', `Sort: ${sortLabels[sortMode]}. Change sorting`);
     selectInterval.value = String(slideshowInterval);
     imageModeText.textContent = imageMode === 'fit' ? 'Fit' : 'Original';
-    btnShuffle.classList.toggle('is-active', shuffleEnabled);
+    btnShuffle.classList.remove('is-active');
     btnShuffle.setAttribute('aria-pressed', String(shuffleEnabled));
-    btnShuffle.querySelector('.button-label').textContent = shuffleEnabled ? 'Shuffle On' : 'Shuffle';
-    btnAutoRefresh.classList.toggle('is-active', autoRefreshEnabled);
+    btnShuffle.querySelector('.button-label').textContent = shuffleEnabled ? 'Shuffle' : 'Shuffle Off';
+    btnAutoRefresh.classList.remove('is-active');
     btnAutoRefresh.setAttribute('aria-pressed', String(autoRefreshEnabled));
     btnAutoRefresh.querySelector('.button-label').textContent = autoRefreshEnabled ? 'Auto Refresh On' : 'Auto Refresh Off';
-    btnViewMode.classList.toggle('is-active', galleryViewMode === 'all');
+    btnViewMode.classList.remove('is-active');
     btnViewMode.setAttribute('aria-pressed', String(galleryViewMode === 'all'));
     // Like the other toggle buttons, the label describes the CURRENT state.
     btnViewMode.querySelector('.button-label').textContent = galleryViewMode === 'all' ? 'All Pics' : 'By Folder';
@@ -407,12 +414,90 @@ async function scanDirectoryRecursive(folder = currentFolder, visited = new Set(
     );
 }
 
+function compareFilenames(a, b) {
+    const name = url => decodeURIComponent(url.split('/').pop());
+    return name(a).localeCompare(name(b), undefined, { numeric: true, sensitivity: 'base' }) ||
+        a.localeCompare(b);
+}
+
+async function sortMediaFiles(files, mode, refreshDates = false) {
+    if (mode === 'filename') return [...files].sort(compareFilenames);
+    const controller = new AbortController();
+    // Bound the entire metadata pass, rather than waiting per file indefinitely.
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    let cursor = 0;
+    const now = Date.now();
+    const dates = new Map();
+    try {
+        const worker = async () => {
+            while (cursor < files.length) {
+                const file = files[cursor++];
+                const cached = modifiedDateCache.get(file);
+                if (!refreshDates && cached && now - cached.checked < 60000) {
+                    dates.set(file, cached.date);
+                    continue;
+                }
+                if (controller.signal.aborted) { dates.set(file, null); continue; }
+                let date = null;
+                try {
+                    const response = await fetch(file, { method: 'HEAD', cache: 'no-store', signal: controller.signal });
+                    const header = response.ok ? response.headers?.get('Last-Modified') : null;
+                    const parsed = header ? Date.parse(header) : NaN;
+                    if (Number.isFinite(parsed)) date = parsed;
+                } catch (error) {
+                    // No metadata (including unsupported HEAD/CORS): keep the file, sorted last.
+                }
+                dates.set(file, date);
+                if (!controller.signal.aborted) modifiedDateCache.set(file, { date, checked: now });
+            }
+        };
+        await Promise.all(Array.from({ length: Math.min(4, files.length) }, worker));
+    } finally { clearTimeout(timeout); }
+    const missing = files.filter(file => dates.get(file) == null).length;
+    $('btn-sort').title = `Sorting: ${mode === 'newest' ? 'Newest' : 'Oldest'} by file modification date. ${missing} files without dates sort last by filename. Click to change sorting.`;
+    return [...files].sort((a, b) => {
+        const left = dates.get(a), right = dates.get(b);
+        if (left == null && right != null) return 1;
+        if (left != null && right == null) return -1;
+        const difference = left != null && right != null ? (left - right) * (mode === 'newest' ? -1 : 1) : 0;
+        return difference || compareFilenames(a, b);
+    });
+}
+
+async function cycleSort() {
+    if (isScanning) return;
+    isScanning = true;
+    $('btn-sort').disabled = true;
+    btnRefreshGrid.disabled = true;
+    thumbnailGrid.setAttribute('aria-busy', 'true');
+    $('scan-loading').hidden = false;
+    const previousFile = mediaFiles[currentIndex];
+    try {
+        const modes = ['newest', 'oldest', 'filename'];
+        sortMode = modes[(modes.indexOf(sortMode) + 1) % modes.length];
+        updateControlStates();
+        setScanStatus(sortMode === 'filename' ? 'Sorting by filename…' : 'Reading file dates…');
+        mediaFiles = await sortMediaFiles(mediaFiles, sortMode);
+        currentIndex = Math.max(0, mediaFiles.indexOf(previousFile));
+        renderGridView();
+        savePreferences();
+        setScanStatus(`Sorted: ${$('sort-label').textContent}`);
+    } finally {
+        isScanning = false;
+        $('btn-sort').disabled = false;
+        btnRefreshGrid.disabled = false;
+        thumbnailGrid.setAttribute('aria-busy', 'false');
+        $('scan-loading').hidden = true;
+    }
+}
+
 async function loadGallery({ preserveView = true, forceCacheClear = false, silent = false } = {}) {
     if (isScanning) return;
     isScanning = true;
     scannedFolders = 0; scannedFiles = 0;
     thumbnailGrid.setAttribute('aria-busy', 'true');
     btnRefreshGrid.disabled = true;
+    $('btn-sort').disabled = true;
     $('scan-loading').hidden = false;
     showWarning(false);
     const oldFile = mediaFiles[currentIndex];
@@ -422,9 +507,13 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
     try {
         const currentListing = await scanDirectory(currentFolder);
         const folderNames = currentListing.folderNames;
-        const filePaths = galleryViewMode === 'all'
+        let filePaths = galleryViewMode === 'all'
             ? await scanDirectoryRecursive(currentFolder, new Set(), currentListing)
             : currentListing.filePaths;
+        const validFiles = new Set(filePaths);
+        for (const file of modifiedDateCache.keys()) if (!validFiles.has(file)) modifiedDateCache.delete(file);
+        if (sortMode !== 'filename') setScanStatus('Reading file dates…');
+        filePaths = await sortMediaFiles(filePaths, sortMode, forceCacheClear);
 
         const changed = JSON.stringify(filePaths) !== JSON.stringify(mediaFiles) || JSON.stringify(folderNames) !== JSON.stringify(subfolders);
         mediaFiles = filePaths;
@@ -461,6 +550,7 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
         isScanning = false;
         thumbnailGrid.setAttribute('aria-busy', 'false');
         btnRefreshGrid.disabled = false;
+        $('btn-sort').disabled = false;
         $('scan-loading').hidden = true;
     }
 }
@@ -897,6 +987,7 @@ function handleWheel(e) {
 }
 
 function setupEventListeners() {
+    $('btn-sort').addEventListener('click', cycleSort);
     $('btn-gallery-home').addEventListener('click', () => navigateToFolder(''));
     $('select-source').addEventListener('change', event => {
         const url = new URL(location.href);

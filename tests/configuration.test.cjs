@@ -125,6 +125,81 @@ test('directory listings accept only direct child links within the requested dir
 });
 
 // Exercise recovery using the same minimal DOM/HTTP fixture as startup.
+test('sort defaults to newest with profile, saved preference, and URL overrides', () => {
+    const config = normalize({ index: { sort: 'oldest' }, embed: { sort: 'filename' } });
+    assert.equal(api.resolveSettings(normalize(shipped), '').settings.sort, 'newest');
+    assert.equal(api.resolveSettings(config, '').settings.sort, 'oldest');
+    assert.equal(api.resolveSettings(config, '?profile=embed').settings.sort, 'filename');
+    assert.equal(api.resolveSettings(config, '', () => JSON.stringify({ sort: 'filename' })).settings.sort, 'filename');
+    assert.equal(api.resolveSettings(config, '?sort=newest', () => JSON.stringify({ sort: 'filename' })).settings.sort, 'newest');
+    assert.throws(() => normalize({ defaults: { sort: 'random' } }), /sort must/);
+    assert.ok(api.resolveSettings(config, '?sort=invalid').warnings.length);
+});
+
+test('date sorts use Last-Modified, tie by filename, and keep missing dates last', async () => {
+    const app = await boot();
+    const calls = [];
+    const dates = { '10.jpg': 'Wed, 01 Jan 2025 00:00:00 GMT', '2.jpg': 'Wed, 01 Jan 2025 00:00:00 GMT',
+        'new.jpg': 'Thu, 01 Jan 2026 00:00:00 GMT', 'unknown.jpg': 'invalid' };
+    app.context.fetch = async (url, options) => {
+        calls.push(options.method);
+        return { ok: true, headers: { get: () => dates[url.split('/').pop()] } };
+    };
+    app.context.sortFiles = Object.keys(dates).map(name => 'https://example.test/' + name);
+    const names = files => Array.from(files, url => url.split('/').pop());
+    const newest = await vm.runInContext("sortMediaFiles(sortFiles, 'newest')", app.context);
+    assert.deepEqual(names(newest), ['new.jpg', '2.jpg', '10.jpg', 'unknown.jpg']);
+    const oldest = await vm.runInContext("sortMediaFiles(sortFiles, 'oldest')", app.context);
+    assert.deepEqual(names(oldest), ['2.jpg', '10.jpg', 'new.jpg', 'unknown.jpg']);
+    assert.equal(calls.length, 4, 'reuses date metadata when changing sort');
+    assert.ok(calls.every(method => method === 'HEAD'));
+    const filenames = await vm.runInContext("sortMediaFiles(sortFiles, 'filename')", app.context);
+    assert.deepEqual(names(filenames), ['2.jpg', '10.jpg', 'new.jpg', 'unknown.jpg']);
+    assert.equal(calls.length, 4, 'filename sort makes no metadata requests');
+});
+
+test('sort button cycles current label and saves choice without changing source or folder', async () => {
+    const app = await boot({ search: '?album=Family' });
+    assert.equal(app.get('sort-label').textContent, 'Newest');
+    for (const [label, value] of [['Oldest', 'oldest'], ['Filename', 'filename'], ['Newest', 'newest']]) {
+        await app.get('btn-sort').listeners.click();
+        assert.equal(app.get('sort-label').textContent, label);
+        assert.equal(vm.runInContext('sortMode', app.context), value);
+        assert.equal(app.state().currentFolder, 'Family');
+        assert.equal(app.get('btn-sort').disabled, false);
+        assert.equal(JSON.parse([...app.saved.values()].pop()).sort, value);
+    }
+});
+
+test('failed date requests fall back to filenames and explicit refresh retries metadata', async () => {
+    const app = await boot();
+    let calls = 0;
+    app.context.fetch = async () => { calls++; throw new Error('HEAD blocked'); };
+    app.context.sortFiles = ['https://example.test/10.jpg', 'https://example.test/2.jpg'];
+    const result = await vm.runInContext("sortMediaFiles(sortFiles, 'newest')", app.context);
+    assert.equal(result[0], 'https://example.test/2.jpg');
+    await vm.runInContext("sortMediaFiles(sortFiles, 'oldest', true)", app.context);
+    assert.equal(calls, 4);
+});
+
+test('date lookup limits parallel requests and abort stops remaining work', async () => {
+    const app = await boot();
+    app.context.sortFiles = Array.from({ length: 12 }, (_, i) => 'https://example.test/' + i + '.jpg');
+    let timeout;
+    app.context.setTimeout = callback => { timeout = callback; return 77; };
+    let calls = 0;
+    app.context.fetch = (_, options) => {
+        calls++;
+        return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted'))));
+    };
+    const pending = vm.runInContext("sortMediaFiles(sortFiles, 'newest')", app.context);
+    assert.equal(calls, 4);
+    timeout();
+    const result = await pending;
+    assert.equal(calls, 4);
+    assert.equal(result.length, 12);
+});
+
 test('album preview selects the first naturally sorted image, skipping videos', async () => {
     const app = await boot();
     app.context.DOMParser = class { parseFromString() {

@@ -6,6 +6,7 @@
     "source": "photos",
     "album": "",
     "view": "folders",
+    "sort": "newest",
     "interval": 5,
     "imageMode": "fit",
     "shuffle": false,

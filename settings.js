@@ -2,12 +2,12 @@
 (function (root) {
     'use strict';
     const DEFAULTS = Object.freeze({
-        album: '', view: 'folders', interval: 5, imageMode: 'fit',
+        album: '', view: 'folders', sort: 'newest', interval: 5, imageMode: 'fit',
         shuffle: false, autoRefresh: true, tvMode: false,
         autoplay: false, rememberPreferences: true, controls: true, showFilenames: true
     });
     const BOOLEAN_KEYS = ['shuffle', 'autoRefresh', 'tvMode', 'autoplay', 'rememberPreferences', 'controls', 'showFilenames'];
-    const SAVED_KEYS = ['album', 'view', 'interval', 'imageMode', 'shuffle', 'autoRefresh'];
+    const SAVED_KEYS = ['album', 'view', 'sort', 'interval', 'imageMode', 'shuffle', 'autoRefresh'];
     const INTERVALS = [3, 5, 10, 15, 30, 60];
 
     function object(value) {
@@ -34,6 +34,8 @@
                 continue;
             } else if (key === 'view') {
                 if (!['all', 'folders'].includes(item)) throw new Error('view must be all or folders');
+            } else if (key === 'sort') {
+                if (!['newest', 'oldest', 'filename'].includes(item)) throw new Error('sort must be newest, oldest, or filename');
             } else if (key === 'imageMode') {
                 if (!['fit', 'original'].includes(item)) throw new Error('imageMode must be fit or original');
             } else if (key === 'interval') {
@@ -85,7 +87,7 @@
     }
 
     function urlSettings(params, sources, warnings) {
-        const aliases = { source: 'source', album: 'album', view: 'view', interval: 'interval',
+        const aliases = { source: 'source', album: 'album', view: 'view', sort: 'sort', interval: 'interval',
             imageMode: 'imageMode', shuffle: 'shuffle', autorefresh: 'autoRefresh',
             tv: 'tvMode', autoplay: 'autoplay', remember: 'rememberPreferences', controls: 'controls', showFilenames: 'showFilenames' };
         const layer = {};

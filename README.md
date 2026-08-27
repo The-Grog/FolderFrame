@@ -23,11 +23,15 @@ Configure media paths and separate index/embed startup defaults in
 
 ### Full media viewer
 
-![FolderFrame full media viewer with compact slideshow, Fit, Full, and TV Mode controls](docs/images/folderframe-viewer.png)
+![FolderFrame full media viewer with controls hidden for an unobstructed photo](docs/images/folderframe-viewer.png)
+
+Enjoy an unobstructed slideshow; mouse, touch, or keyboard activity brings the controls back.
 
 ### Gallery and album view
 
-![FolderFrame grid with an album cover preview, folder badge, and compact directory header](docs/images/folderframe-gallery.png)
+![FolderFrame gallery with album cover previews, Newest sorting, and compact neutral controls](docs/images/folderframe-gallery.png)
+
+Browse albums with cover previews and cycle between Newest, Oldest, and Filename sorting.
 
 ## Overview
 
@@ -37,6 +41,7 @@ directory listing, so there is no database, import process, or manually
 maintained media list.
 
 - **Folder-based albums:** thumbnail grid, image cover previews with folder badges, nested albums, breadcrumbs, and recursive All Pics view.
+- **Flexible sorting:** Newest by default, plus Oldest and natural Filename order, with separate index/embed defaults. Date sorting uses server modification dates, not photo capture dates.
 - **Photos and videos:** JPEG, PNG, WebP, GIF, HEIC/HEIF conversion, and MP4/MOV playback (browser codec support applies).
 - **Slideshow and TV mode:** selectable intervals, Shuffle, fullscreen, automatic rescans, and automatic skipping of failed media.
 - **Responsive viewer:** compact mobile controls, pinch zoom, pan, and Fit/Original sizing.
@@ -60,6 +65,7 @@ and starts the embed as a controls-free slideshow including subfolders:
     "source": "photos",
     "album": "",
     "view": "folders",
+    "sort": "newest",
     "interval": 5,
     "imageMode": "fit",
     "shuffle": false,
@@ -93,6 +99,7 @@ Put settings in `defaults` for both profiles or in `index`/`embed` to override t
 | `source` | First configured source | A source ID from `sources` |
 | `album` | `""` | Path within the source, e.g. `"Friends/2026"` |
 | `view` | `"folders"` | `"folders"` or `"all"` (recursive) |
+| `sort` | `"newest"` | `"newest"`, `"oldest"`, or `"filename"` |
 | `interval` | `5` | Seconds: 3, 5, 10, 15, 30, 60 |
 | `imageMode` | `"fit"` | `"fit"` or `"original"` |
 | `shuffle` | `false` | Boolean |
@@ -108,7 +115,7 @@ preferences (when enabled) → explicit URL options. The supplied config explici
 disables remembered preferences for embed. TV mode provides a preset; explicit
 settings in the same or higher-priority layer override that preset.
 
-Saved preferences cover album, interval, sizing, view, Shuffle, and Auto Refresh;
+Saved preferences cover album, sort, interval, sizing, view, Shuffle, and Auto Refresh;
 not TV mode, autoplay, controls visibility, or filename visibility.
 Use `rememberPreferences: false` or `?remember=0` to ignore old preferences
 without deleting them.
@@ -308,12 +315,33 @@ GALLERY CONTROLS
 
 GRID / ALBUM VIEW
 
+View, sorting, and Auto Refresh buttons show their current mode using neutral
+styling; Refresh Folder uses the same styling. In the viewer, Shuffle means
+shuffle is enabled and Shuffle Off means it is disabled.
+
+SORTING
+
+The button between By Folder and Auto Refresh shows the current sorting.
+Click it to cycle Newest, Oldest, Filename. Newest is the default.
+Newest/Oldest use the server's file modification date (HTTP Last-Modified),
+not when the photo was taken. Files with missing dates sort last by filename;
+equal dates use natural filename order. Folders remain first and alphabetical.
+Non-shuffled slideshows follow the selected order.
+
+Set "sort": "newest", "oldest", or "filename" in folderframe.config.json under
+defaults, index, or embed. Shared defaults apply to both; profile settings
+override them. Saved preferences win when enabled; ?sort=filename explicitly
+overrides them, and ?remember=0 lets you test config defaults.
+Date lookups use bounded HEAD requests and cache results for one minute.
+Refresh Folder reloads dates; Filename skips date lookups entirely.
+See CONFIGURATION.md for examples and server requirements.
+
 The compact header places the album/file count beside the directory breadcrumb.
 Click or tap the FolderFrame logo to return to the current source's top-level
 gallery. This works in both the standalone gallery and the embedded grid.
 
 Album tiles preview the first image directly inside that folder, using the
-same natural filename order as the gallery (for example, 2.jpg before 10.jpg).
+natural filename order regardless of the selected sort (2.jpg before 10.jpg).
 A blue folder badge and the album name distinguish covers from individual
 photos. Empty, video-only, nested-folder-only, or failed previews keep the
 folder icon. Covers do not recursively scan descendant albums.
@@ -477,6 +505,9 @@ Supported options:
 
     view=folders
         Show the normal folder/album view.
+
+    sort=newest or sort=oldest or sort=filename
+        Choose media order (Newest by default).
 
     autoplay=1 or autoplay=0
         Enter the viewer and start slideshow playback, or start paused in the grid.

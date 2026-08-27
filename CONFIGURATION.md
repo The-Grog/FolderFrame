@@ -127,6 +127,7 @@ Omitted settings retain the lower-priority value.
 | `source` | First configured source | A configured source ID |
 | `album` | `""` (source root) | Folder path within that source, e.g. `"Family/2026"` |
 | `view` | `"folders"` | `"folders"` or `"all"` |
+| `sort` | `"newest"` | `"newest"`, `"oldest"`, or `"filename"` |
 | `autoplay` | `false` | Boolean: start slideshow and enter viewer |
 | `controls` | `true` | Boolean: false opens a controls-free viewer; pair with autoplay for a slideshow |
 | `showFilenames` | `true` | Boolean: show viewer filename and grid media captions |
@@ -145,7 +146,7 @@ Precedence, from lowest to highest:
 4. Saved browser preferences, when enabled.
 5. Explicit URL options.
 
-Saved preferences include album, interval, image sizing, view mode, shuffle,
+Saved preferences include album, sort, interval, image sizing, view mode, shuffle,
 and auto-refresh. They are isolated by app location, profile, source
 ID, and source URL. Slideshow play/pause itself is not saved: `autoplay`
 controls startup. Source selection is represented by the URL, not saved as a
@@ -181,6 +182,7 @@ or tv=1 URLs still apply on reload; use tv=0 to override them.
 | `source=ID` | Select a configured source |
 | `album=Family/2026` | Select an album within the source |
 | `view=folders` or `view=all` | Album browsing or recursive media view |
+| `sort=newest`, `sort=oldest`, or `sort=filename` | Media order; default newest |
 | `autoplay=1` or `autoplay=0` | Start playing or paused |
 | `controls=1` or `controls=0` | Show controls or use the controls-free viewer |
 | `showFilenames=1` or `showFilenames=0` | Show or hide viewer filenames and media captions |
@@ -195,6 +197,38 @@ Examples: `?profile=embed&autoplay=1&view=all` or
 `?source=photos&album=test1&remember=0`. URL options select only configured
 sources; they cannot inject a new source URL. Encode spaces as `%20` and
 literal `&` or `#` characters as `%26` or `%23` in album names.
+
+## Sorting defaults
+
+The gallery button between By Folder and Auto Refresh displays the active sort
+and cycles Newest → Oldest → Filename. Set `sort` under `defaults` for both
+profiles, or override it independently in `index` and `embed`. For example,
+this complete minimal config uses oldest first in index and filenames in embed:
+
+```json
+{
+  "defaults": { "sort": "newest" },
+  "index": { "sort": "oldest" },
+  "embed": { "sort": "filename", "rememberPreferences": false }
+}
+```
+
+Merge these settings into your existing file to retain any custom sources.
+Saved preferences override config when enabled; use `?remember=0` to test
+defaults, or `?sort=newest` for an explicit override.
+
+Newest/Oldest use the server's HTTP Last-Modified timestamp, not EXIF capture
+time or creation time. Files without valid dates sort last by filename in
+both date modes; ties also use natural filename order (2 before 10).
+Album folders stay first, sorted by name; album cover selection stays
+filename-based. Non-shuffled slideshows follow the selected media order.
+
+Date lookup uses HEAD requests (no media bodies), up to four concurrently,
+with an eight-second budget for each metadata pass. Missing, failed, blocked,
+or timed-out dates fall back to filename order. Metadata is cached for one
+minute; Refresh Folder bypasses that cache. Filename mode skips date lookups.
+Cross-origin servers must permit HEAD requests and expose Last-Modified to
+the browser. Copying/editing files can change their modified dates.
 
 ## Configuration errors
 

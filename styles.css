@@ -297,7 +297,7 @@ button, select { font: inherit; }
 @media (max-width:1100px) {
     #grid-header { display:grid; grid-template-columns:minmax(0,1fr); gap:12px; }
     .grid-header-main { width:100%; }
-    .grid-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; width:100%; }
+    .grid-actions { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; width:100%; }
     .grid-actions .scan-status { grid-column:1 / -1; order:2; }
     .grid-actions .btn { width:100%; min-width:0; white-space:normal; height:auto; min-height:44px; }
     #btn-refresh-grid { grid-column:auto; }
@@ -307,6 +307,7 @@ button, select { font: inherit; }
     #overlay-header .timer-control { flex-wrap:nowrap; }
     #overlay-header .timer-control label { display:none; }
     .grid-actions .btn { font-size:12px; flex-direction:column; gap:4px; padding:8px 4px; }
+    .grid-actions { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
 @media (max-height:500px) and (orientation:landscape) {
     #overlay-header { max-height:45dvh; overflow-y:auto; }
