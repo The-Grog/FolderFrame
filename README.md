@@ -23,11 +23,11 @@ Configure media paths and separate index/embed startup defaults in
 
 ### Full media viewer
 
-![FolderFrame full media viewer](docs/images/folderframe-viewer.png)
+![FolderFrame full media viewer with compact slideshow, Fit, Full, and TV Mode controls](docs/images/folderframe-viewer.png)
 
 ### Gallery and album view
 
-![FolderFrame gallery and album view](docs/images/folderframe-gallery.png)
+![FolderFrame grid with an album cover preview, folder badge, and compact directory header](docs/images/folderframe-gallery.png)
 
 ## Overview
 
@@ -36,7 +36,7 @@ contents of configured media directories dynamically from the web server’s
 directory listing, so there is no database, import process, or manually
 maintained media list.
 
-- **Folder-based albums:** thumbnail grid, nested albums, breadcrumbs, and recursive All Pics view.
+- **Folder-based albums:** thumbnail grid, image cover previews with folder badges, nested albums, breadcrumbs, and recursive All Pics view.
 - **Photos and videos:** JPEG, PNG, WebP, GIF, HEIC/HEIF conversion, and MP4/MOV playback (browser codec support applies).
 - **Slideshow and TV mode:** selectable intervals, Shuffle, fullscreen, automatic rescans, and automatic skipping of failed media.
 - **Responsive viewer:** compact mobile controls, pinch zoom, pan, and Fit/Original sizing.
@@ -307,6 +307,22 @@ therefore take longer to populate than JPEG-based galleries.
 GALLERY CONTROLS
 
 GRID / ALBUM VIEW
+
+The compact header places the album/file count beside the directory breadcrumb.
+Click or tap the FolderFrame logo to return to the current source's top-level
+gallery. This works in both the standalone gallery and the embedded grid.
+
+Album tiles preview the first image directly inside that folder, using the
+same natural filename order as the gallery (for example, 2.jpg before 10.jpg).
+A blue folder badge and the album name distinguish covers from individual
+photos. Empty, video-only, nested-folder-only, or failed previews keep the
+folder icon. Covers do not recursively scan descendant albums.
+
+Previews load near the visible grid, with up to three directory lookups/HEIC
+conversions at once. They use original images, not generated thumbnails.
+Use Refresh Folder to reselect covers after changing files inside albums;
+unchanged background refreshes keep existing tiles. There is no cover.jpg
+override yet.
 
 -   The site opens in the thumbnail grid by default; configured autoplay opens the viewer.
 -   Click a photo or video to open the full viewer.

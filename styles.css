@@ -5,6 +5,8 @@
 #config-notice { position: fixed; bottom: 12px; left: 12px; right: 12px; z-index: 110; padding: 10px 14px; border: 1px solid #b7791f; border-radius: 8px; background: #30230b; color: #fff3cd; font-size: 13px; max-height: 25vh; overflow: auto; }
 :root { color-scheme: dark; }
 .brand-logo { display:block; width:120px; height:40px; object-fit:contain; flex:0 0 auto; }
+.brand-home { display:flex; align-items:center; justify-content:center; flex:0 0 auto; min-height:44px; padding:0; border:0; border-radius:8px; background:transparent; cursor:pointer; }
+.brand-home:hover { background:rgba(255,255,255,.06); }
 .hide-filenames #media-title, .hide-filenames .grid-item-caption { display:none; }
 .returned-tile { outline:3px solid #93c5fd; outline-offset:-3px; }
 .loading-note { position:absolute; bottom:15%; left:50%; transform:translateX(-50%); z-index:6; display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:20px; background:rgba(15,23,42,.9); color:#cbd5e1; font-size:13px; max-width:90%; pointer-events:none; }
@@ -57,10 +59,10 @@ button, select { font: inherit; }
 
 #grid-view-container { position:absolute; inset:0; background:#050505; z-index:5; overflow-y:auto; display:flex; flex-direction:column; }
 #grid-header { position:fixed; top:18px; left:18px; right:18px; z-index:10; display:flex; justify-content:space-between; align-items:center; gap:18px; min-height:62px; padding:10px 16px; }
-.grid-header-main { min-width:0; display:flex; flex-direction:column; gap:8px; }
+.grid-header-main { min-width:0; display:flex; flex-direction:row; flex-wrap:wrap; align-items:center; gap:8px; flex:1; }
 .grid-title-row { overflow:visible; flex-wrap:wrap; }
 
-.gallery-path-bar {
+.gallery-path-bar, #grid-count {
     display:flex;
     align-items:center;
     gap:8px;
@@ -133,6 +135,11 @@ button, select { font: inherit; }
 .album-icon { color:#60a5fa; opacity:.9; margin-bottom:8px; }
 .album-name { max-width:85%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:15px; font-weight:700; }
 .album-subtitle { color:#6b7280; font-size:11px; margin-top:4px; }
+.album-card .album-cover { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:0; }
+.has-album-cover .album-icon { position:absolute; top:10px; left:10px; margin:0; padding:6px; display:flex; background:rgba(5,10,20,.8); border:1px solid rgba(96,165,250,.5); border-radius:8px; z-index:2; opacity:1; }
+.has-album-cover .album-icon svg { width:22px; height:22px; }
+.has-album-cover .album-name { position:absolute; bottom:0; left:0; right:0; max-width:100%; padding:32px 10px 12px; background:linear-gradient(transparent,rgba(0,0,0,.92)); text-align:left; z-index:1; }
+.has-album-cover .album-subtitle { display:none; }
 .heic-thumb { opacity:.15; transition:opacity .25s; }
 .heic-thumb.thumb-loaded { opacity:1; }
 .heic-fallback { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#555; font-size:12px; font-weight:800; letter-spacing:.08em; z-index:-1; }
@@ -232,7 +239,9 @@ button, select { font: inherit; }
     padding-bottom:max(30px, env(safe-area-inset-bottom));
 }
 .grid-header-main { max-width:100%; }
-.gallery-path-bar { min-width:0; }
+.grid-header-main .gallery-path-bar { width:auto; min-width:min(200px, 100%); max-width:100%; flex:0 1 auto; }
+#grid-count { flex:0 0 auto; min-height:38px; }
+.gallery-path-bar { min-width:0; min-height:38px; }
 .breadcrumb { flex-wrap:nowrap; overflow-x:auto; max-width:100%; }
 .crumb { flex-shrink:0; max-width:60vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .btn svg { flex-shrink:0; }

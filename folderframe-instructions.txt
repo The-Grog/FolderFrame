@@ -204,6 +204,22 @@ GALLERY CONTROLS
 
 GRID / ALBUM VIEW
 
+The compact header places the album/file count beside the directory breadcrumb.
+Click or tap the FolderFrame logo to return to the current source's top-level
+gallery. This works in both the standalone gallery and the embedded grid.
+
+Album tiles preview the first image directly inside that folder, using the
+same natural filename order as the gallery (for example, 2.jpg before 10.jpg).
+A blue folder badge and the album name distinguish covers from individual
+photos. Empty, video-only, nested-folder-only, or failed previews keep the
+folder icon. Covers do not recursively scan descendant albums.
+
+Previews load near the visible grid, with up to three directory lookups/HEIC
+conversions at once. They use original images, not generated thumbnails.
+Use Refresh Folder to reselect covers after changing files inside albums;
+unchanged background refreshes keep existing tiles. There is no cover.jpg
+override yet.
+
 -   The site opens in the thumbnail grid by default; configured autoplay opens the viewer.
 -   Click a photo or video to open the full viewer.
 -   Click an album card to enter that folder.

@@ -125,6 +125,99 @@ test('directory listings accept only direct child links within the requested dir
 });
 
 // Exercise recovery using the same minimal DOM/HTTP fixture as startup.
+test('album preview selects the first naturally sorted image, skipping videos', async () => {
+    const app = await boot();
+    app.context.DOMParser = class { parseFromString() {
+        return { querySelectorAll: () => ['10.jpg', '2.jpg', '1.mp4', 'Nested/'].map(href => ({ getAttribute: () => href })) };
+    } };
+    const item = app.get('test-album');
+    const classes = new Set();
+    item.classList = { add: name => classes.add(name), remove: name => classes.delete(name) };
+    app.context.albumItem = item;
+    await vm.runInContext("loadAlbumPreview(albumItem, 'Family', new AbortController().signal)", app.context);
+    assert.equal(item.children.length, 1);
+    const cover = item.children[0];
+    assert.equal(cover.src, 'https://example.test/frame/photos/Family/2.jpg');
+    assert.equal(cover.hidden, true);
+    cover.onload();
+    assert.equal(cover.hidden, false);
+    assert.ok(classes.has('has-album-cover'));
+    cover.onerror();
+    assert.equal(cover.hidden, true);
+    assert.equal(classes.has('has-album-cover'), false);
+    assert.equal(app.requests.some(url => url.endsWith('/Nested/')), false);
+});
+
+test('empty, video-only, and failed album listings retain the folder fallback', async () => {
+    const app = await boot();
+    app.context.albumItem = app.get('test-album');
+    for (const entries of [[], ['clip.mp4', 'Nested/']]) {
+        app.context.DOMParser = class { parseFromString() {
+            return { querySelectorAll: () => entries.map(href => ({ getAttribute: () => href })) };
+        } };
+        await vm.runInContext("loadAlbumPreview(albumItem, 'Empty', new AbortController().signal)", app.context);
+        assert.equal(app.context.albumItem.children.length, 0);
+    }
+    app.context.fetch = async () => { throw new Error('offline'); };
+    await vm.runInContext("loadAlbumPreview(albumItem, 'Offline', new AbortController().signal)", app.context);
+    assert.equal(app.context.albumItem.children.length, 0);
+});
+
+test('HEIC album covers reuse conversion and aborted loads cannot update old tiles', async () => {
+    const app = await boot();
+    app.context.albumItem = app.get('test-album');
+    app.context.DOMParser = class { parseFromString() {
+        return { querySelectorAll: () => [{ getAttribute: () => 'cover.heic' }] };
+    } };
+    vm.runInContext("getSpecialImageURL = async () => 'blob:cover'", app.context);
+    await vm.runInContext("loadAlbumPreview(albumItem, 'Family', new AbortController().signal)", app.context);
+    assert.equal(app.context.albumItem.children[0].src, 'blob:cover');
+    let finish;
+    app.context.fetch = () => new Promise(resolve => { finish = resolve; });
+    const controller = new AbortController();
+    app.context.coverSignal = controller.signal;
+    const pending = vm.runInContext("loadAlbumPreview(albumItem, 'Other', coverSignal)", app.context);
+    controller.abort();
+    finish({ ok: true, text: async () => '' });
+    await pending;
+    assert.equal(app.context.albumItem.children.length, 1);
+});
+
+test('album cover queue limits concurrent lookups and cancels queued work', async () => {
+    const app = await boot();
+    const pending = [];
+    let calls = 0;
+    app.context.loadAlbumPreview = async () => {
+        calls++;
+        await new Promise(resolve => pending.push(resolve));
+    };
+    const observe = vm.runInContext('startAlbumPreviews()', app.context);
+    for (let i = 0; i < 8; i++) observe({ dataset: { albumFolder: 'Album' + i } });
+    assert.equal(calls, 3);
+    pending.shift()();
+    await Promise.resolve(); await Promise.resolve();
+    assert.equal(calls, 4);
+    vm.runInContext('stopAlbumPreviews()', app.context);
+    pending.forEach(resolve => resolve());
+    await Promise.resolve(); await Promise.resolve();
+    assert.equal(calls, 4);
+});
+
+test('logo returns index and embed to the current source root without restarting playback', async () => {
+    for (const profile of ['index', 'embed']) {
+        const app = await boot({ search: '?profile=' + profile + '&album=Family/2026',
+            config: { sources: [{ id: 'family', label: 'Family', path: '/family/' }] } });
+        app.get('grid-view-container').scrollTop = 300;
+        await app.get('btn-gallery-home').listeners.click();
+        assert.equal(app.state().currentFolder, '');
+        assert.equal(app.state().activeSource.id, 'family');
+        assert.equal(app.state().isGridViewActive, true);
+        assert.equal(app.state().slideshowPlaying, false);
+        assert.equal(app.get('grid-view-container').scrollTop, 0);
+        assert.ok(app.requests.includes('https://example.test/family/'));
+    }
+});
+
 test('fitted-photo swipes navigate, while vertical, short and cancelled gestures do not', async () => {
     const app = await boot({ search: '?autoplay=1' });
     vm.runInContext("mediaFiles.push('https://example.test/second.jpg')", app.context);

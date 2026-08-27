@@ -22,9 +22,10 @@ manual checks; automated tests do not verify browser layout or codecs.
 - [ ] **Docker packaging and Unraid templates** — Build a Docker image and an Unraid container template for easy deployment. Include configurable media/config mounts, port mapping, a web server with directory listings, and setup/update instructions. Keep ordinary static-server hosting supported.
 
 - [x] **Swipe between photos** — Implemented horizontal swipes for fitted, unzoomed/unpanned photos. Zoomed photos still pan; short/vertical/cancelled gestures do not navigate. Local only; phone verification pending.
-- [ ] **Album cover previews** — Show an image from inside each album instead of only the blue folder icon. Retain a small folder badge so albums remain recognizable, with a folder-icon fallback when no preview is available.
+- [x] **Album cover previews** — Added lazy single-image covers using the first direct image in natural filename order, a blue folder badge, and album-name overlay. Empty/video-only/nested-only albums and preview failures retain the folder icon. Bounded lookups, cancellation, HEIC support, and regression tests included. User supplied updated screenshots for publication.
+- [x] **Compact grid header and logo navigation** — Directory breadcrumb sits beside the matching album/file count box. Clicking the logo returns to the current source root in index and embed. Updated README previews and usage instructions.
 - [x] **Optional filename display in configuration** — Added showFilenames (default true), shared/index/embed support, and showFilenames=0/1 URL overrides. Hides viewer filenames and media captions, retaining album names, accessible labels, and error details. Documented; local only.
 - [x] **Remember grid scroll position** — Restores the originally opened tile and saved scroll position, with a brief static highlight. Adjusts for moved tiles; falls back to scroll position if removed, and resets on folder navigation. Local only; device verification pending.
 
 User tested and approved the swipe, filename visibility, and grid-return update.
-Validation for this update: 36 automated settings/startup/media/gesture tests.
+Validation for this update: 41 automated settings/startup/media/gesture tests.

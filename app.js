@@ -10,6 +10,80 @@ let rememberPreferences = true;
 let controlsEnabled = true;
 let swipeStart = null;
 let gridReturn = null;
+let albumPreviewSession = null;
+
+function stopAlbumPreviews() {
+    if (!albumPreviewSession) return;
+    albumPreviewSession.controller.abort();
+    albumPreviewSession.observer?.disconnect();
+    albumPreviewSession.queue.length = 0;
+    albumPreviewSession = null;
+}
+
+function startAlbumPreviews() {
+    stopAlbumPreviews();
+    const session = { controller: new AbortController(), observer: null, queue: [], active: 0 };
+    albumPreviewSession = session;
+    const pump = () => {
+        if (session.controller.signal.aborted) return;
+        while (session.active < 3 && session.queue.length) {
+            const { item, folder } = session.queue.shift();
+            session.active++;
+            loadAlbumPreview(item, folder, session.controller.signal)
+                .finally(() => { session.active--; pump(); });
+        }
+    };
+    const enqueue = item => { session.queue.push({ item, folder: item.dataset.albumFolder }); pump(); };
+    if ('IntersectionObserver' in window) {
+        session.observer = new IntersectionObserver(entries => {
+            for (const entry of entries) if (entry.isIntersecting) {
+                session.observer.unobserve(entry.target);
+                enqueue(entry.target);
+            }
+        }, { root: gridViewContainer, rootMargin: '300px' });
+    }
+    return item => session.observer ? session.observer.observe(item) : enqueue(item);
+}
+
+async function loadAlbumPreview(item, folder, signal) {
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    signal.addEventListener('abort', cancel, { once: true });
+    const timeout = setTimeout(cancel, 12000);
+    let preview;
+    const fallback = () => {
+        if (preview) preview.hidden = true;
+        item.classList.remove('has-album-cover');
+    };
+    try {
+        if (signal.aborted) return;
+        const listing = await scanDirectory(folder, { signal: controller.signal });
+        // scanDirectory already sorts naturally by filename. Do not crawl descendants.
+        const file = listing.filePaths.find(isImageFile);
+        if (!file || signal.aborted || controller.signal.aborted) return;
+        const url = isHeicFile(file) ? await getSpecialImageURL(file) : file;
+        if (signal.aborted || controller.signal.aborted) return;
+        preview = document.createElement('img');
+        preview.className = 'album-cover';
+        preview.alt = '';
+        preview.hidden = true;
+        preview.decoding = 'async';
+        preview.onload = () => {
+            if (signal.aborted) return;
+            preview.hidden = false;
+            item.classList.add('has-album-cover');
+        };
+        preview.onerror = fallback;
+        item.appendChild(preview);
+        preview.src = url;
+    } catch (error) {
+        // An unavailable preview never prevents opening the album.
+        fallback();
+    } finally {
+        clearTimeout(timeout);
+        signal.removeEventListener('abort', cancel);
+    }
+}
 const AUTO_REFRESH_MS = 30000;
 
 let mediaFiles = [];
@@ -280,9 +354,9 @@ async function getSpecialImageURL(filepath) {
     throw new Error('Unknown or corrupt image format');
 }
 
-async function scanDirectory(folder = currentFolder) {
+async function scanDirectory(folder = currentFolder, options = {}) {
     const url = currentDirectoryUrl(folder);
-    const response = await fetch(url, { cache: 'no-store' });
+    const response = await fetch(url, { cache: 'no-store', ...options });
     if (!response.ok) throw new Error(`Could not fetch directory (${response.status})`);
     const html = await response.text();
     const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -465,6 +539,7 @@ async function navigateToFolder(folder) {
 }
 
 function renderGridView() {
+    stopAlbumPreviews();
     const returnPosition = !isGridViewActive && gridReturn &&
         gridReturn.folder === currentFolder && gridReturn.view === galleryViewMode ? gridReturn : null;
     let returnTile = null;
@@ -492,18 +567,23 @@ function renderGridView() {
         : `${albums ? `${albums} album${albums === 1 ? '' : 's'} • ` : ''}${total} file${total === 1 ? '' : 's'}`;
 
     // Album cards first when browsing by folder.
+    const observeAlbum = galleryViewMode === 'folders' ? startAlbumPreviews() : null;
     if (galleryViewMode === 'folders') subfolders.forEach(folder => {
         const item = document.createElement('button');
         item.className = 'grid-item album-card';
         item.type = 'button';
+        const albumFolder = currentFolder ? `${currentFolder}/${folder}` : folder;
+        item.dataset.albumFolder = albumFolder;
+        item.setAttribute('aria-label', `Open album ${folder}`);
         item.innerHTML = `
             <div class="album-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" width="54" height="54"><path fill="currentColor" d="M10 4H2c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h20c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-10l-2-2z"/></svg>
             </div>
             <div class="album-name">${escapeHtml(folder)}</div>
             <div class="album-subtitle">Open album</div>`;
-        item.addEventListener('click', () => navigateToFolder(currentFolder ? `${currentFolder}/${folder}` : folder));
+        item.addEventListener('click', () => navigateToFolder(albumFolder));
         thumbnailGrid.appendChild(item);
+        observeAlbum(item);
     });
 
     const observer = 'IntersectionObserver' in window ? new IntersectionObserver(entries => {
@@ -613,6 +693,7 @@ function renderGridView() {
 function enterFullScreenViewer(index) {
     if (!mediaFiles.length) return;
     const openingViewer = isGridViewActive;
+    if (openingViewer) stopAlbumPreviews();
     if (openingViewer && mediaFiles[index]) gridReturn = {
         folder: currentFolder, view: galleryViewMode,
         file: mediaFiles[index], scrollTop: gridViewContainer.scrollTop || 0
@@ -816,6 +897,7 @@ function handleWheel(e) {
 }
 
 function setupEventListeners() {
+    $('btn-gallery-home').addEventListener('click', () => navigateToFolder(''));
     $('select-source').addEventListener('change', event => {
         const url = new URL(location.href);
         url.searchParams.set('source', event.target.value);
