@@ -334,6 +334,46 @@ Open an album directly in TV mode:
 Replace SERVER-IP:PORT with the actual address of the machine hosting
 the gallery.
 
+EMBEDDING FOLDERFRAME
+
+FolderFrame can be embedded in another site with a standard iframe. This
+keeps its controls, styles, slideshow, and media handling isolated from the
+host page. The included embed.html file is a complete responsive example.
+
+Basic embed:
+
+    <div class="folderframe-embed">
+      <iframe
+        src="https://YOUR-FOLDERFRAME-SERVER/?view=folders"
+        title="Photo and video gallery"
+        loading="lazy"
+        allowfullscreen>
+      </iframe>
+    </div>
+
+    <style>
+    .folderframe-embed {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      min-height: 420px;
+    }
+    .folderframe-embed iframe {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      border-radius: 12px;
+    }
+    </style>
+
+The iframe URL accepts the same album, view, interval, shuffle, autoplay,
+autorefresh, and tv options documented above. Keyboard shortcuts work after
+the visitor clicks or focuses the embedded gallery.
+
+The web server hosting FolderFrame must permit framing. Remove or adjust an
+X-Frame-Options header that blocks the host page, and ensure any Content-
+Security-Policy frame-ancestors directive allows the site doing the embedding.
+Fullscreen and autoplay remain subject to browser policies.
+
 TROUBLESHOOTING
 
 NO MEDIA FILES DETECTED
