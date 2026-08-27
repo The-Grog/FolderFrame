@@ -2,6 +2,16 @@ FOLDERFRAME — SETUP & USER GUIDE
 
 [![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-0070ba?logo=paypal&logoColor=white)](https://paypal.me/machogrog)
 
+## Preview
+
+### Gallery and album view
+
+![FolderFrame gallery and album view](docs/images/folderframe-gallery.png)
+
+### Full media viewer
+
+![FolderFrame full media viewer](docs/images/folderframe-viewer.png)
+
 OVERVIEW
 
 This is a lightweight, self-hosted photo and video gallery. It reads the
