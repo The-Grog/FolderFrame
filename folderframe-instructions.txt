@@ -396,3 +396,7 @@ SUPPORT FOLDERFRAME
 If FolderFrame is useful to you, you can support its continued development:
 
     https://paypal.me/machogrog
+
+LICENSE
+
+FolderFrame is available under the MIT License. See LICENSE for details.
