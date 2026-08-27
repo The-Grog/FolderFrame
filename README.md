@@ -1,4 +1,4 @@
-# FolderFrame
+<h1><img src="docs/images/folderframe-logo.png" alt="FolderFrame" width="220"></h1>
 
 FolderFrame works as a standalone, self-hosted photo and video gallery or as
 an embedded gallery or slideshow within your websites. Use it on its own,
