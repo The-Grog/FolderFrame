@@ -23,9 +23,9 @@ Configure media paths and separate index/embed startup defaults in
 
 ### Full media viewer
 
-![FolderFrame full media viewer with controls hidden for an unobstructed photo](docs/images/folderframe-viewer.png)
+![FolderFrame full media viewer with slideshow, Shuffle, Fit, Full, and TV Mode controls](docs/images/folderframe-viewer.png)
 
-Enjoy an unobstructed slideshow; mouse, touch, or keyboard activity brings the controls back.
+Compact controls put slideshow playback, Shuffle, Fit, fullscreen, and TV Mode within reach. Controls fade during inactivity; mouse, touch, or keyboard activity brings them back.
 
 ### Gallery and album view
 
