@@ -4,13 +4,13 @@ FOLDERFRAME — SETUP & USER GUIDE
 
 ## Preview
 
-### Gallery and album view
-
-![FolderFrame gallery and album view](docs/images/folderframe-gallery.png)
-
 ### Full media viewer
 
 ![FolderFrame full media viewer](docs/images/folderframe-viewer.png)
+
+### Gallery and album view
+
+![FolderFrame gallery and album view](docs/images/folderframe-gallery.png)
 
 OVERVIEW
 
