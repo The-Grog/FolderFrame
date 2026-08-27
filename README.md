@@ -9,7 +9,7 @@
 FolderFrame works as a standalone, self-hosted photo and video gallery or as
 an embedded gallery or slideshow within your websites. Use it on its own,
 or add it to an existing page with a standard iframe—including an optional
-controls-free slideshow mode.
+controls-free slideshow mode.  No database or PHP required.
 
 [![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-0070ba?logo=paypal&logoColor=white)](https://paypal.me/machogrog)
 
