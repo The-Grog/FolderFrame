@@ -230,6 +230,18 @@ minute; Refresh Folder bypasses that cache. Filename mode skips date lookups.
 Cross-origin servers must permit HEAD requests and expose Last-Modified to
 the browser. Copying/editing files can change their modified dates.
 
+## Mobile and embedded layouts
+
+No separate mobile configuration is needed. The same index/embed settings apply
+on phones and desktops; layout follows the gallery viewport width (the iframe's
+width when embedded). At 560 CSS pixels or less, structured phone headers apply,
+Reset Zoom is hidden, and the routine grid timestamp is hidden. Scan errors remain
+visible. Switching Fit/Original resets zoom and pan.
+
+Fullscreen and video autoplay depend on browser support, user interaction, and
+iframe permissions; config cannot bypass those restrictions. `controls: false`
+hides the entire interface and mutes video, regardless of viewport size.
+
 ## Configuration errors
 
 A missing, unreadable, malformed, invalid, or timed-out config (8 seconds) causes a visible notice

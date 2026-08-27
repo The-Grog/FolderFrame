@@ -8,6 +8,18 @@ const base = 'https://example.test/frame/index.html';
 const shipped = JSON.parse(fs.readFileSync(path.join(__dirname, '../folderframe.config.json'), 'utf8'));
 const normalize = raw => api.normalizeConfig(raw, base);
 
+test('scan errors remain distinguishable from routine mobile timestamps', async () => {
+    const app = await boot();
+    const classes = new Set();
+    app.get('scan-status').classList.toggle = (name, enabled) => enabled ? classes.add(name) : classes.delete(name);
+    app.context.fetch = async () => { throw new Error('Network unavailable'); };
+    await vm.runInContext('loadGallery()', app.context);
+    assert.equal(classes.has('is-error'), true);
+    assert.match(app.get('scan-status').textContent, /Scan failed/);
+    vm.runInContext("setScanStatus('Updated 6:00 PM')", app.context);
+    assert.equal(classes.has('is-error'), false);
+});
+
 test('shipped defaults preserve the index grid and isolate embed preferences', () => {
     const config = normalize(shipped);
     const index = api.resolveSettings(config, '');

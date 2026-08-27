@@ -50,6 +50,28 @@ maintained media list.
 - **Clear feedback:** folder scan progress, thumbnail placeholders, media loading indicators, and recovery guidance.
 - **Static-server hosting:** no database or build step; works with a web server that supplies HTML directory listings.
 
+## Browser and mobile support
+
+FolderFrame is designed for modern desktop and mobile browsers, including
+Chrome/Edge/Firefox and Safari. Desktop and phone layouts have been manually
+tested and approved by the project owner; this is not a certified browser/version
+matrix. iOS Safari and other device/browser combinations still need separate
+verification, especially video playback, fullscreen, and embedded operation.
+
+- Touch: swipe fitted photos, pinch to zoom, and drag magnified photos to pan.
+- Full/TV Mode can request fullscreen, but availability depends on the browser,
+  device, user interaction, and iframe permissions. If fullscreen is unavailable,
+  the gallery can still run inside the page.
+- Video playback depends on codecs and autoplay policy. Sound may require a tap;
+  controls-free embeds mute videos. HEIC conversion can be slow on phones.
+- This is an online gallery, not an offline app. Keep the page visible for
+  unattended slideshows; background or locked-device playback is not guaranteed.
+- Private browsing or embedded storage restrictions may prevent preferences
+  from being remembered. Explicit config and URL options remain available.
+
+Browser-policy references: [Fullscreen API](https://developer.mozilla.org/en-US/docs/Web/API/Fullscreen_API)
+and [media autoplay](https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Autoplay).
+
 ## Configuration quick reference
 
 Edit `folderframe.config.json` beside `index.html`, then reload—no server
@@ -404,7 +426,12 @@ Returning to Gallery restores the scroll position of the originally opened
 tile and briefly highlights it. If refreshed content moved the tile, it is
 scrolled into view; if removed, the saved scroll position is used instead.
 
-On phones and tablets, compact viewer controls align right and wrap as needed.
+At widths up to 560 CSS pixels (including narrow embeds), the gallery uses
+a logo/count row, a separate breadcrumb, and a 2-by-2 button grid. Routine
+timestamps are hidden; scan errors remain visible. The viewer uses three rows:
+Gallery/name/count; Play/Shuffle/interval; Fit/Full/TV Mode. Reset Zoom is hidden
+at this width. To reset a magnified photo, switch Fit/Original; switch back to
+Fit if needed. Wider headers keep compact controls and wrap to use available space.
 The sizing button shows an icon with Fit or Original; Full toggles fullscreen.
 Long album breadcrumbs scroll sideways. Use the
 arrow buttons to change media; drag on a zoomed photo to pan it.
@@ -412,7 +439,7 @@ The grid scrolls vertically, with a content-sized header and visible filenames.
 Photo pinch gestures zoom the image; page zoom remains available outside the photo.
 
 Photos support: - Mouse wheel zoom - Touch pinch-to-zoom - Mouse/finger
-drag to pan - Reset Zoom button - Escape to reset zoom/pan when the
+drag to pan - Reset Zoom button on wider layouts - Escape to reset zoom/pan when the
 image is magnified or displaced
 
 IMAGE SIZING
@@ -458,7 +485,7 @@ SAVED SETTINGS
 The gallery stores preferences in the browser’s localStorage.
 
 Settings such as the following can persist between visits: - current
-album - slideshow interval - image sizing mode - folder/all-pics view -
+album - sorting - slideshow interval - image sizing mode - folder/all-pics view -
 Shuffle - Auto Refresh
 
 These preferences are local to that browser/device.
@@ -597,8 +624,8 @@ Basic iframe:
     }
     </style>
 
-The iframe URL accepts the same source, album, view, interval, shuffle, autoplay,
-autorefresh, tv, imageMode, and remember options documented above. Use
+The iframe URL accepts the same source, album, view, sort, interval, shuffle,
+autoplay, autorefresh, tv, imageMode, controls, showFilenames, and remember options. Use
 profile=embed to apply embed defaults from folderframe.config.json; otherwise
 the index defaults apply, even inside an iframe. Keyboard shortcuts work after
 the visitor clicks or focuses the embedded gallery.

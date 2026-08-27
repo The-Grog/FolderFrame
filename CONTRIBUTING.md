@@ -45,6 +45,12 @@ For UI or behavior changes, test the affected paths in a browser:
 - Open an image and a video; test navigation and returning to Gallery.
 - Verify Space plays/pauses the slideshow and Enter toggles Fit/Original.
 - Check resizing, zoom/pan, and small-screen layout when relevant.
+- Check phone widths (320, 390, and 560 CSS pixels), wider windows, and rotation.
+  Confirm the gallery 2-by-2 controls and viewer 3-column controls do not overflow,
+  including long names, All Pics counts, multiple sources, and hidden filenames.
+  Reset Zoom should be absent only on phone-width layouts; scan errors must stay visible.
+- Test actual Android and iOS browsers where available; record exact browser/OS
+  versions. Desktop resizing and mocked Node tests are not device compatibility tests.
 - Check the embedding example and URL options if navigation or startup changes.
 - Check loading, empty, and error states when changing scans or media handling.
 

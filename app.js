@@ -542,7 +542,7 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
         savePreferences();
     } catch (err) {
         console.error('Directory scanning error:', err);
-        setScanStatus('Scan failed — check connection and retry');
+        setScanStatus('Scan failed — check connection and retry', true);
         $('warning-title').textContent = 'Could not scan this folder';
         $('warning-message').textContent = 'Check your connection, source path, and server directory listing, then choose Scan Again.';
         if (mediaFiles.length === 0 && subfolders.length === 0) showWarning(true);
@@ -555,8 +555,11 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
     }
 }
 
-function setScanStatus(text) {
-    if (scanStatus) scanStatus.textContent = text;
+function setScanStatus(text, isError = false) {
+    if (scanStatus) {
+        scanStatus.textContent = text;
+        scanStatus.classList.toggle('is-error', isError);
+    }
     $('scan-loading-text').textContent = text;
 }
 

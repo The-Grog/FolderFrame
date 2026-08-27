@@ -12,7 +12,7 @@ manual checks; automated tests do not verify browser layout or codecs.
 - [x] **Configuration: media paths and startup defaults** — Named sources, index/embed profiles, preferences, and URL overrides. Settings and startup regression coverage included.
 - [x] **Clearer error states** — Shared recovery UI for images, HEIC/HEIF, and video. Running slideshows skip errors after 3 seconds; manual browsing stays put.
 - [x] **Loading states** — Scan counts, thumbnail placeholders, image/HEIC/video indicators, and distinct empty/failure feedback. Unchanged refreshes retain tiles; controls-free mode hides indicators.
-- [x] **Mobile polish** — Compact right-aligned controls, responsive grid, safe areas, and pinch/pan handling. User completed mobile testing and approved the layout.
+- [x] **Mobile polish** — Structured phone gallery/viewer rows, wider-window wrapping, safe areas, and pinch/pan handling. Phone-width Reset Zoom and routine timestamps are hidden; scan errors remain visible. User approved desktop and phone layouts.
 - [x] **Slideshow UI visibility** — Automatic transitions no longer reveal controls or restart their idle timer. Verify latest fix on device.
 - [x] **TV mode state** — Exiting fullscreen clears TV mode and pauses its slideshow. Saved preferences no longer restore TV mode; explicit config/URL defaults still apply. Verify latest fix on device.
 - [x] **Controls-free slideshow configuration** — controls=false plus autoplay=true enables an unattended viewer with muted video. Documented config and URL overrides.
@@ -21,13 +21,16 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 - [ ] **Docker packaging and Unraid templates** — Build a Docker image and an Unraid container template for easy deployment. Include configurable media/config mounts, port mapping, a web server with directory listings, and setup/update instructions. Keep ordinary static-server hosting supported.
 
-- [x] **Swipe between photos** — Implemented horizontal swipes for fitted, unzoomed/unpanned photos. Zoomed photos still pan; short/vertical/cancelled gestures do not navigate. Local only; phone verification pending.
+- [x] **Swipe between photos** — Implemented horizontal swipes for fitted, unzoomed/unpanned photos. Zoomed photos still pan; short/vertical/cancelled gestures do not navigate. User tested and approved.
 - [x] **Album cover previews** — Added lazy single-image covers using the first direct image in natural filename order, a blue folder badge, and album-name overlay. Empty/video-only/nested-only albums and preview failures retain the folder icon. Bounded lookups, cancellation, HEIC support, and regression tests included. User supplied updated screenshots for publication.
 - [x] **Compact grid header and logo navigation** — Directory breadcrumb sits beside the matching album/file count box. Clicking the logo returns to the current source root in index and embed. Updated README previews and usage instructions.
-- [x] **Optional filename display in configuration** — Added showFilenames (default true), shared/index/embed support, and showFilenames=0/1 URL overrides. Hides viewer filenames and media captions, retaining album names, accessible labels, and error details. Documented; local only.
-- [x] **Remember grid scroll position** — Restores the originally opened tile and saved scroll position, with a brief static highlight. Adjusts for moved tiles; falls back to scroll position if removed, and resets on folder navigation. Local only; device verification pending.
+- [x] **Optional filename display in configuration** — Added showFilenames (default true), shared/index/embed support, and showFilenames=0/1 URL overrides. Hides viewer filenames and media captions, retaining album names, accessible labels, and error details. Published and user-approved.
+- [x] **Remember grid scroll position** — Restores the originally opened tile and saved scroll position, with a brief static highlight. Adjusts for moved tiles; falls back to scroll position if removed, and resets on folder navigation. Published and user-approved.
 
 - [x] **Sorting: Newest, Oldest, Filename** — Added the cycling gallery button between By Folder and Auto Refresh; Newest is the default. Config defaults/index/embed, saved preferences, and sort URL overrides supported. Uses bounded/cached Last-Modified HEAD lookups with filename ties and missing dates last. Documented and regression-tested; user supplied updated screenshots for publication.
 
 User tested and approved the swipe, filename visibility, and grid-return update.
-Validation for this update: 46 automated settings/startup/media/gesture/sorting tests.
+Validation for this update: 47 automated settings/startup/media/gesture/sorting/status tests.
+
+- [ ] **Browser compatibility matrix** — Record browser/OS versions and verify Android/iOS video, fullscreen, storage restrictions, and controls-free embeds. Owner-approved layouts are not a full compatibility matrix.
+- [ ] **Large-library resilience** — Add timeouts to main directory/media fetches and review HEIC thumbnail observer/cache cleanup across repeated navigation. Existing bounded metadata/album lookups do not cover all network/decoder work.
