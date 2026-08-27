@@ -2,6 +2,9 @@ FOLDERFRAME — SETUP & USER GUIDE
 
 OVERVIEW
 
+Configure media paths and separate index/embed startup defaults in
+folderframe.config.json. See CONFIGURATION.md for examples, including autoplay.
+
 This is a lightweight, self-hosted photo and video gallery. It reads the
 contents of the photos/ directory dynamically from the web server’s
 directory listing, so there is no database, import process, or manually
@@ -31,6 +34,8 @@ Keep the files arranged like this:
     ├── index.html
     ├── styles.css
     ├── app.js
+    ├── settings.js
+    ├── folderframe.config.json
     ├── heic2any.min.js
     └── photos/
         ├── photo1.jpg
@@ -94,6 +99,8 @@ The web root should contain:
     index.html
     styles.css
     app.js
+    settings.js
+    folderframe.config.json
     heic2any.min.js
     photos/
 
@@ -192,7 +199,7 @@ GALLERY CONTROLS
 
 GRID / ALBUM VIEW
 
--   The site opens in the thumbnail grid.
+-   The site opens in the thumbnail grid by default; configured autoplay opens the viewer.
 -   Click a photo or video to open the full viewer.
 -   Click an album card to enter that folder.
 -   Use the breadcrumb to navigate back through albums.
@@ -224,7 +231,25 @@ SHUFFLE
 -   Press S while in the full viewer to toggle Shuffle.
 -   Manual Previous/Next navigation remains available.
 
+LOADING FEEDBACK
+
+Folder scans show a scanning/refreshing message; recursive scans report folders
+checked and files found (not a percentage). Existing tiles stay visible while
+refreshing, and unchanged refreshes do not recreate them. Thumbnail placeholders
+clear when previews load, or show Preview unavailable on failure.
+The viewer indicates Loading image, Preparing HEIC image, or Loading/Buffering
+video until ready. Empty folders and scan failures have separate messages.
+Controls-free slideshows hide loading indicators. Reduced-motion preferences
+are respected. These indicators do not reduce the original download/decode cost.
+
 ZOOM AND PAN
+
+On phones and tablets, compact viewer controls align right and wrap as needed.
+The sizing button shows an icon with Fit or Original; Full toggles fullscreen.
+Long album breadcrumbs scroll sideways. Use the
+arrow buttons to change media; drag on a zoomed photo to pan it.
+The grid scrolls vertically, with a content-sized header and visible filenames.
+Photo pinch gestures zoom the image; page zoom remains available outside the photo.
 
 Photos support: - Mouse wheel zoom - Touch pinch-to-zoom - Mouse/finger
 drag to pan - Reset Zoom button - Escape to reset zoom/pan when the
@@ -242,7 +267,7 @@ viewer to switch between Fit Screen and Original Size.
 
 FULLSCREEN / THEATER MODE
 
-Use the labeled Fullscreen button (immediately left of TV Mode), or press F
+Use the Full button (beside TV Mode), or press F
 in the full viewer, to enter or leave browser fullscreen.
 
 While viewing media, controls and the mouse cursor fade after
@@ -260,6 +285,10 @@ fullscreen
 
 Press T in the full viewer to toggle TV Mode.
 
+Exiting fullscreen turns TV Mode off and pauses its slideshow. TV Mode is
+not saved in browser preferences; explicit tvMode config or tv=1 URL defaults
+still apply on reload. Use tv=0 to override those defaults.
+
 Browsers generally require a user gesture before true fullscreen is
 allowed, so automatic URL startup can configure TV behavior but may not
 be able to force fullscreen by itself.
@@ -270,9 +299,14 @@ The gallery stores preferences in the browser’s localStorage.
 
 Settings such as the following can persist between visits: - current
 album - slideshow interval - image sizing mode - folder/all-pics view -
-Shuffle - Auto Refresh - TV Mode
+Shuffle - Auto Refresh
 
 These preferences are local to that browser/device.
+
+Preferences are now separated by app location, source, and index/embed profile.
+The supplied embed profile ignores saved preferences. Use rememberPreferences
+in folderframe.config.json or the remember URL option to control persistence.
+See CONFIGURATION.md for settings and precedence.
 
 URL OPTIONS
 
@@ -281,6 +315,18 @@ bookmarks and dedicated displays.
 
 Supported options:
 
+    profile=index or profile=embed
+        Select the configuration profile (index by default).
+
+    source=ID
+        Select a source defined in folderframe.config.json.
+
+    remember=0 or remember=1
+        Ignore or use saved browser preferences.
+
+    imageMode=fit or imageMode=original
+        Override the initial image sizing mode.
+
     album=FOLDER
         Open a specific album path.
 
@@ -288,11 +334,11 @@ Supported options:
         Set slideshow interval.
         Valid values: 3, 5, 10, 15, 30, 60
 
-    shuffle=1
-        Enable Shuffle.
+    shuffle=1 or shuffle=0
+        Enable or disable Shuffle.
 
-    autorefresh=0
-        Disable Auto Refresh.
+    autorefresh=0 or autorefresh=1
+        Disable or enable Auto Refresh.
 
     view=all
         Show media in the selected folder and all its subfolders.
@@ -300,12 +346,13 @@ Supported options:
     view=folders
         Show the normal folder/album view.
 
-    autoplay=1
-        Start slideshow playback automatically.
+    autoplay=1 or autoplay=0
+        Enter the viewer and start slideshow playback, or start paused in the grid.
 
-    tv=1
+    tv=1 or tv=0
         Enable TV/photo-frame behavior:
         Fit Screen + Shuffle + Auto Refresh + slideshow playback.
+        Use tv=0 to disable TV mode; explicit URL options override the preset.
 
 Examples:
 
@@ -340,9 +387,32 @@ host page. The included embed.html file is a complete responsive example.
 
 Basic embed:
 
+For a controls-free slideshow, set controls to false and autoplay to true in
+the config file's embed section. Example section (keep the other sections):
+
+    "embed": {
+      "controls": false,
+      "autoplay": true,
+      "view": "all",
+      "interval": 10,
+      "rememberPreferences": false
+    }
+
+controls defaults to true and works under defaults, index, or embed.
+False hides the grid, title bar, navigation, progress, hints, video controls,
+and media-error cards. Keyboard shortcuts and photo gestures are disabled.
+Videos are muted; browser autoplay restrictions still apply. The viewer opens
+directly; autoplay starts the slideshow. Use view: "all" for subfolders.
+Failed files skip after 3 seconds during play; empty-library messages and
+config warnings remain visible. Controls visibility is not saved in preferences.
+Use ?profile=embed&controls=0&autoplay=1 to override via URL, or controls=1
+and reload to restore controls. See CONFIGURATION.md for the full reference.
+
+Basic iframe:
+
     <div class="folderframe-embed">
       <iframe
-        src="https://YOUR-FOLDERFRAME-SERVER/?view=folders"
+        src="https://YOUR-FOLDERFRAME-SERVER/?profile=embed"
         title="Photo and video gallery"
         loading="lazy"
         allowfullscreen>
@@ -363,8 +433,10 @@ Basic embed:
     }
     </style>
 
-The iframe URL accepts the same album, view, interval, shuffle, autoplay,
-autorefresh, and tv options documented above. Keyboard shortcuts work after
+The iframe URL accepts the same source, album, view, interval, shuffle, autoplay,
+autorefresh, tv, imageMode, and remember options documented above. Use
+profile=embed to apply embed defaults from folderframe.config.json; otherwise
+the index defaults apply, even inside an iframe. Keyboard shortcuts work after
 the visitor clicks or focuses the embedded gallery.
 
 The web server hosting FolderFrame must permit framing. Remove or adjust an
@@ -395,6 +467,13 @@ CHANGES DO NOT APPEAR
     is serving.
 
 HEIC IMAGE FAILS
+
+The viewer shows recovery guidance for image and video failures. Retry reloads
+the file, Next file moves on, Gallery returns to the grid, and Open original
+opens the source in a separate tab. A running slideshow skips failed media after
+3 seconds (or retries if there is only one file); Pause stops automatic skipping.
+Manual browsing does not advance automatically. Browser-blocked autoplay is reported separately
+from network and decoding errors. Originals are never modified.
 
 -   Open browser Developer Tools and check the Console.
 

@@ -1,0 +1,22 @@
+{
+  "sources": [
+    { "id": "photos", "label": "Photos", "path": "photos/" }
+  ],
+  "defaults": {
+    "source": "photos",
+    "album": "",
+    "view": "folders",
+    "interval": 5,
+    "imageMode": "fit",
+    "shuffle": false,
+    "autoRefresh": true,
+    "tvMode": false,
+    "autoplay": false,
+    "controls": true,
+    "rememberPreferences": true
+  },
+  "index": {},
+  "embed": {
+    "rememberPreferences": false
+  }
+}

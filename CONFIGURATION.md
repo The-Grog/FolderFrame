@@ -1,0 +1,200 @@
+# Configuring FolderFrame
+
+Edit `folderframe.config.json` beside `index.html`; no JavaScript edits or
+build step are needed. Reload the page after saving. The app fetches this
+file without using its HTTP cache on each startup.
+
+The supplied file keeps the main gallery and embed paused in the folder grid.
+The main gallery remembers preferences; the supplied embed profile does not.
+
+## Start the embed playing automatically
+
+Replace the `embed` section in the supplied file with:
+
+```json
+"embed": {
+  "autoplay": true,
+  "interval": 10,
+  "shuffle": true,
+  "rememberPreferences": false
+}
+```
+
+This is a section of the file, not a standalone JSON document. Keep the other
+sections and use valid JSON: double quotes, no comments, and no trailing commas.
+Open `embed.html` to try it. It loads the same gallery inside an iframe using
+`?profile=embed`; it does not maintain a second copy of the viewer code.
+
+For your own iframe, point at the gallery's index URL with `?profile=embed`.
+Loading the index directly without that parameter uses the `index` profile,
+even if another page puts it inside an iframe. Both profiles use the same UI.
+
+Set the same fields under `index` to change normal gallery startup instead.
+Set `autoplay` to `false` to start paused in the grid when controls are enabled. Autoplay opens the full
+viewer and starts the slideshow when the selected folder/view contains media;
+it does not automatically descend into albums in folder mode. Use `album` or
+`view: "all"` if the desired images are in subfolders.
+
+Browser restrictions still apply to video autoplay, particularly with sound,
+and fullscreen. Configuration does not bypass them or request fullscreen on
+page load; use the Fullscreen or TV Mode button for a user-initiated request.
+
+## Controls-free slideshow
+
+Set `controls: false` in `defaults`, `index`, or `embed` (default: `true`).
+For an unattended embed, replace its section with:
+
+```json
+"embed": {
+  "controls": false,
+  "autoplay": true,
+  "view": "all",
+  "interval": 10,
+  "rememberPreferences": false
+}
+```
+
+This is a section, not a complete configuration file. It hides the gallery
+grid, title bar, navigation, progress bar, hints, native video controls, and
+media-error cards. Keyboard shortcuts and photo zoom/pan are disabled.
+Videos are muted in this mode; browser autoplay restrictions can still apply.
+Errors in a running slideshow skip after 3 seconds. Empty libraries still show
+a noninteractive message, and configuration warnings remain visible.
+
+Controls-free mode opens the viewer even with autoplay off; use autoplay on
+for an unattended slideshow. It does not change the selected album/view:
+use `view: "all"` to include subfolders. Controls visibility is not saved in
+browser preferences. Override with `?profile=embed&controls=0&autoplay=1`,
+or use `controls=1` and reload to restore the controls.
+
+## Add media sources
+
+`sources` is an array of named web directories. For example:
+
+```json
+{
+  "sources": [
+    { "id": "photos", "label": "Photos", "path": "photos/" },
+    { "id": "family", "label": "Family library", "path": "/family-media/" }
+  ],
+  "defaults": { "source": "photos", "interval": 5 },
+  "index": { "rememberPreferences": true },
+  "embed": {
+    "source": "family",
+    "view": "all",
+    "autoplay": true,
+    "rememberPreferences": false
+  }
+}
+```
+
+Replace example paths with directories actually served by your web server.
+A Source selector appears in the gallery header when multiple sources exist.
+Each source is browsed separately; All Pics searches the current source, not
+all configured sources. Changing the selector reloads the gallery at the new
+source root and retains the profile and other explicit URL options.
+
+- `id`: unique letters, numbers, hyphens, or underscores; used in `?source=ID`.
+- `label`: display name for the selector and root breadcrumb.
+- `path`: an HTTP(S) web directory. Relative paths such as `photos/` resolve
+  beside index.html; `/family-media/` resolves from the server root. Paths with
+  spaces are supported. A trailing slash is added when omitted.
+
+A disk or network path such as `C:\Photos` or a UNC share cannot be scanned
+directly by the browser. Map it to a web-server directory first. Each source
+and its album folders must provide HTML directory listings with child links.
+FolderFrame ignores parent links and links outside the directory being scanned.
+
+Absolute HTTP(S) URLs are supported, but a different origin must permit CORS
+for directory requests and fetched media such as HEIC files. Cross-origin
+credentials are not sent by the app's fetch calls. HTTPS pages should use
+HTTPS sources to avoid mixed-content blocking. A working local path does not
+guarantee that a remote source's headers or authentication are compatible.
+
+This configuration is publicly readable when the app is hosted publicly.
+Do not put secrets in it. Source URLs with embedded credentials, query strings,
+or fragments are rejected. Configuring a source does not grant access or
+replace server authentication and filesystem permissions.
+
+## Settings and precedence
+
+The top-level sections are `sources`, `defaults`, `index`, and `embed`.
+`defaults` supplies shared settings; `index` and `embed` override them.
+Omitted settings retain the lower-priority value.
+
+| Setting | Built-in default | Values |
+| --- | --- | --- |
+| `source` | First configured source | A configured source ID |
+| `album` | `""` (source root) | Folder path within that source, e.g. `"Family/2026"` |
+| `view` | `"folders"` | `"folders"` or `"all"` |
+| `autoplay` | `false` | Boolean: start slideshow and enter viewer |
+| `controls` | `true` | Boolean: false opens a controls-free viewer; pair with autoplay for a slideshow |
+| `interval` | `5` | Seconds: 3, 5, 10, 15, 30, or 60 |
+| `imageMode` | `"fit"` | `"fit"` or `"original"` |
+| `shuffle` | `false` | Boolean |
+| `autoRefresh` | `true` | Boolean: rescan every 30 seconds |
+| `tvMode` | `false` | Boolean: TV controls and photo-frame preset |
+| `rememberPreferences` | `true` for index; `false` for embed | Boolean: read/write saved settings |
+
+Precedence, from lowest to highest:
+
+1. Built-in defaults.
+2. `defaults` in the configuration file.
+3. The selected `index` or `embed` section.
+4. Saved browser preferences, when enabled.
+5. Explicit URL options.
+
+Saved preferences include album, interval, image sizing, view mode, shuffle,
+and auto-refresh. They are isolated by app location, profile, source
+ID, and source URL. Slideshow play/pause itself is not saved: `autoplay`
+controls startup. Source selection is represented by the URL, not saved as a
+global preference. Legacy preferences are imported only for the original
+Photos source in the index profile.
+
+To ensure config changes always win over old browser preferences, set
+`rememberPreferences: false` in that profile, or use `?remember=0`. This ignores
+stored preferences without deleting them. Storage being unavailable in an
+iframe or privacy mode does not prevent the gallery from running.
+
+`tvMode: true` supplies fit sizing, shuffle, auto-refresh, and autoplay as a
+preset. Explicit fields in the same or a higher-priority layer override those
+values. For example, `?tv=1&autoplay=0` keeps TV mode but starts paused.
+Setting `tv=0` disables TV mode; use the other URL options if you also want to
+override shuffle or autoplay that was configured separately.
+
+## URL overrides
+
+TV mode is not restored from saved browser preferences. Exiting fullscreen
+turns TV mode off and pauses its slideshow. Explicit config tvMode defaults
+or tv=1 URLs still apply on reload; use tv=0 to override them.
+
+| URL option | Meaning |
+| --- | --- |
+| `profile=index` or `profile=embed` | Select startup profile; default is index |
+| `source=ID` | Select a configured source |
+| `album=Family/2026` | Select an album within the source |
+| `view=folders` or `view=all` | Album browsing or recursive media view |
+| `autoplay=1` or `autoplay=0` | Start playing or paused |
+| `controls=1` or `controls=0` | Show controls or use the controls-free viewer |
+| `interval=10` | Slideshow interval in seconds |
+| `imageMode=fit` or `imageMode=original` | Initial image sizing |
+| `shuffle=1` or `shuffle=0` | Enable or disable Shuffle |
+| `autorefresh=1` or `autorefresh=0` | Enable or disable rescanning |
+| `tv=1` or `tv=0` | Enable or disable TV mode |
+| `remember=1` or `remember=0` | Enable or disable saved preferences |
+
+Examples: `?profile=embed&autoplay=1&view=all` or
+`?source=photos&album=test1&remember=0`. URL options select only configured
+sources; they cannot inject a new source URL. Encode spaces as `%20` and
+literal `&` or `#` characters as `%26` or `%23` in album names.
+
+## Configuration errors
+
+A missing, unreadable, malformed, invalid, or timed-out config (8 seconds) causes a visible notice
+and a fallback to built-in defaults (`photos/`). Correct the file and reload.
+Unknown settings, invalid types, unsupported intervals, and duplicate source
+IDs are rejected so misspellings are not silently accepted. Invalid URL
+options are ignored with a notice; valid options still apply.
+
+There is no in-browser config editor. Editing the JSON file changes startup
+defaults; the existing controls still change the current session normally.

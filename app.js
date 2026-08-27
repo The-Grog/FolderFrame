@@ -2,7 +2,12 @@
 // Features: directory-backed albums, HEIC/HEIF handling, shuffle slideshow,
 // auto-rescan, TV/photo-frame mode, local preferences, and recursive folder browsing.
 
-const ROOT_PATH = 'photos';
+const settingsApi = window.FolderFrameSettings;
+let galleryConfig;
+let activeSource;
+let preferenceKey;
+let rememberPreferences = true;
+let controlsEnabled = true;
 const AUTO_REFRESH_MS = 30000;
 
 let mediaFiles = [];
@@ -19,6 +24,10 @@ let shuffleEnabled = false, autoRefreshEnabled = true, tvModeEnabled = false;
 let galleryViewMode = 'folders'; // 'folders' or 'all'
 let autoRefreshTimer = null;
 let isScanning = false;
+let scannedFolders = 0, scannedFiles = 0;
+let mediaLoadId = 0;
+let mediaFailed = false;
+let imageReady = false;
 
 // Cache only object URLs we create ourselves. Normal HTTP URLs are never revoked.
 const imageBlobCache = new Map(); // filepath -> blob URL
@@ -66,17 +75,17 @@ const videoErrorFfmpeg = $('video-error-ffmpeg');
 const btnCloseVideoError = $('btn-close-video-error');
 
 window.addEventListener('DOMContentLoaded', async () => {
-    loadPreferences();
-    applyUrlOptions();
+    await loadConfiguration();
     setupEventListeners();
     updateControlStates();
     updateFullscreenButton();
     await loadGallery({ preserveView: false });
     startAutoRefreshTimer();
 
-    if (tvModeEnabled && mediaFiles.length > 0) {
+    if (slideshowPlaying && mediaFiles.length > 0 && isGridViewActive) {
         enterFullScreenViewer(currentIndex);
-        if (!slideshowPlaying) setSlideshowPlaying(true);
+    } else if (!mediaFiles.length) {
+        stopSlideshow();
     }
 });
 
@@ -87,74 +96,80 @@ function isImageFile(path) { return /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(pa
 function isVideoFile(path) { return /\.(mp4|mov)$/i.test(path); }
 function isMediaFile(path) { return isImageFile(path) || isVideoFile(path); }
 
-function encodePath(path) {
-    return path.split('/').filter(Boolean).map(encodeURIComponent).join('/');
-}
-
-function currentDirectoryUrl() {
-    const suffix = currentFolder ? `${encodePath(currentFolder)}/` : '';
-    return `./${ROOT_PATH}/${suffix}`;
+function currentDirectoryUrl(folder = currentFolder) {
+    return settingsApi.directoryUrl(activeSource, folder);
 }
 
 function mediaUrlFor(filename, folder = currentFolder) {
-    const folderPrefix = folder ? `${encodePath(folder)}/` : '';
-    return `${ROOT_PATH}/${folderPrefix}${encodeURIComponent(filename)}`;
+    return settingsApi.mediaUrl(activeSource, folder, filename);
 }
 
 function savePreferences() {
-    localStorage.setItem('gallery.preferences', JSON.stringify({
-        folder: currentFolder,
-        currentFile: mediaFiles[currentIndex] || '',
-        interval: slideshowInterval,
-        imageMode,
-        shuffle: shuffleEnabled,
-        autoRefresh: autoRefreshEnabled,
-        tvMode: tvModeEnabled,
-        galleryViewMode
-    }));
-}
-
-function loadPreferences() {
+    if (!rememberPreferences || !preferenceKey) return;
     try {
-        const raw = localStorage.getItem('gallery.preferences');
-        if (!raw) return;
-        const p = JSON.parse(raw);
-        currentFolder = typeof p.folder === 'string' ? p.folder : '';
-        slideshowInterval = [3,5,10,15,30,60].includes(Number(p.interval)) ? Number(p.interval) : 5;
-        imageMode = p.imageMode === 'original' ? 'original' : 'fit';
-        shuffleEnabled = Boolean(p.shuffle);
-        autoRefreshEnabled = p.autoRefresh !== false;
-        tvModeEnabled = Boolean(p.tvMode);
-        galleryViewMode = p.galleryViewMode === 'all' ? 'all' : 'folders';
-    } catch (err) {
-        console.warn('Could not load gallery preferences:', err);
+        localStorage.setItem(preferenceKey, JSON.stringify({
+            album: currentFolder, interval: slideshowInterval, imageMode,
+            shuffle: shuffleEnabled, autoRefresh: autoRefreshEnabled,
+            view: galleryViewMode
+        }));
+    } catch (error) {
+        // Storage can be unavailable in privacy modes and embedded contexts.
+        console.warn('Could not save FolderFrame preferences:', error);
     }
 }
 
-function applyUrlOptions() {
-    const params = new URLSearchParams(location.search);
-    if (params.has('album')) currentFolder = params.get('album').replace(/^\/+|\/+$/g, '');
-    if (params.has('interval')) {
-        const n = Number(params.get('interval'));
-        if ([3,5,10,15,30,60].includes(n)) slideshowInterval = n;
+async function loadConfiguration() {
+    const warnings = [];
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    try {
+        const response = await fetch('./folderframe.config.json', { cache: 'no-store', signal: controller.signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        galleryConfig = settingsApi.normalizeConfig(await response.json(), location.href);
+    } catch (error) {
+        galleryConfig = settingsApi.normalizeConfig({}, location.href);
+        warnings.push(`Could not use folderframe.config.json (${error.message}). Using built-in defaults.`);
+    } finally {
+        clearTimeout(timeout);
     }
-    if (params.get('shuffle') === '1') shuffleEnabled = true;
-    if (params.get('autorefresh') === '0') autoRefreshEnabled = false;
-    if (params.get('tv') === '1') {
-        tvModeEnabled = true;
-        imageMode = 'fit';
-        shuffleEnabled = true;
-        slideshowPlaying = true;
-        autoRefreshEnabled = true;
+    const resolved = settingsApi.resolveSettings(galleryConfig, location.search, key => localStorage.getItem(key));
+    const startupSettings = resolved.settings;
+    activeSource = resolved.source;
+    preferenceKey = resolved.preferenceKey;
+    rememberPreferences = startupSettings.rememberPreferences;
+    controlsEnabled = startupSettings.controls;
+    document.body.classList.toggle('controls-free', !controlsEnabled);
+    currentFolder = startupSettings.album;
+    galleryViewMode = startupSettings.view;
+    slideshowInterval = startupSettings.interval;
+    imageMode = startupSettings.imageMode;
+    shuffleEnabled = startupSettings.shuffle;
+    autoRefreshEnabled = startupSettings.autoRefresh;
+    tvModeEnabled = startupSettings.tvMode;
+    slideshowPlaying = startupSettings.autoplay;
+
+    const selector = $('select-source');
+    selector.replaceChildren();
+    galleryConfig.sources.forEach(source => {
+        const option = document.createElement('option');
+        option.value = source.id;
+        option.textContent = source.label;
+        selector.appendChild(option);
+    });
+    selector.value = activeSource.id;
+    $('source-control').hidden = galleryConfig.sources.length < 2;
+    document.querySelectorAll('.configured-source-path').forEach(element => { element.textContent = activeSource.path; });
+    warnings.push(...resolved.warnings);
+    if (warnings.length) {
+        console.warn('FolderFrame settings:', warnings);
+        $('config-notice').textContent = warnings.join(' ');
+        $('config-notice').hidden = false;
     }
-    if (params.get('autoplay') === '1') slideshowPlaying = true;
-    if (params.get('view') === 'all') galleryViewMode = 'all';
-    if (params.get('view') === 'folders') galleryViewMode = 'folders';
 }
 
 function updateControlStates() {
     selectInterval.value = String(slideshowInterval);
-    imageModeText.textContent = imageMode === 'fit' ? 'Fit Screen' : 'Original Size';
+    imageModeText.textContent = imageMode === 'fit' ? 'Fit' : 'Original';
     btnShuffle.classList.toggle('is-active', shuffleEnabled);
     btnShuffle.setAttribute('aria-pressed', String(shuffleEnabled));
     btnShuffle.querySelector('.button-label').textContent = shuffleEnabled ? 'Shuffle On' : 'Shuffle';
@@ -263,8 +278,7 @@ async function getSpecialImageURL(filepath) {
 }
 
 async function scanDirectory(folder = currentFolder) {
-    const suffix = folder ? `${encodePath(folder)}/` : '';
-    const url = `./${ROOT_PATH}/${suffix}`;
+    const url = currentDirectoryUrl(folder);
     const response = await fetch(url, { cache: 'no-store' });
     if (!response.ok) throw new Error(`Could not fetch directory (${response.status})`);
     const html = await response.text();
@@ -273,23 +287,12 @@ async function scanDirectory(folder = currentFolder) {
     const folders = new Set();
 
     for (const link of doc.querySelectorAll('a')) {
-        const rawHref = link.getAttribute('href');
-        if (!rawHref || rawHref.startsWith('?') || rawHref.startsWith('#') || rawHref === '../' || rawHref.startsWith('../')) continue;
-        let pathname;
-        try {
-            pathname = new URL(rawHref, response.url).pathname;
-        } catch {
-            continue;
-        }
-        let name = decodeURIComponent(pathname.split('/').filter(Boolean).pop() || '');
-        if (!name || name === '..') continue;
-
-        const isDirectory = pathname.endsWith('/') || rawHref.endsWith('/');
-        if (isDirectory) {
-            // Ignore the current folder itself and obvious parent links.
-            if (name && name !== ROOT_PATH) folders.add(name);
-        } else if (isMediaFile(name)) {
-            files.add(name);
+        const entry = settingsApi.listingEntry(link.getAttribute('href'), url);
+        if (!entry) continue;
+        if (entry.directory) {
+            folders.add(entry.name);
+        } else if (isMediaFile(entry.name)) {
+            files.add(entry.name);
         }
     }
 
@@ -302,12 +305,15 @@ async function scanDirectory(folder = currentFolder) {
     return { filePaths, folderNames };
 }
 
-async function scanDirectoryRecursive(folder = currentFolder, visited = new Set()) {
+async function scanDirectoryRecursive(folder = currentFolder, visited = new Set(), listing = null) {
     const normalized = folder.replace(/^\/+|\/+$/g, '');
     if (visited.has(normalized)) return [];
     visited.add(normalized);
 
-    const { filePaths, folderNames } = await scanDirectory(normalized);
+    const { filePaths, folderNames } = listing || await scanDirectory(normalized);
+    scannedFolders++;
+    scannedFiles += filePaths.length;
+    setScanStatus(`Scanning… ${scannedFolders} folders checked · ${scannedFiles} files found`);
     let allFiles = [...filePaths];
 
     for (const child of folderNames) {
@@ -327,22 +333,26 @@ async function scanDirectoryRecursive(folder = currentFolder, visited = new Set(
 async function loadGallery({ preserveView = true, forceCacheClear = false, silent = false } = {}) {
     if (isScanning) return;
     isScanning = true;
+    scannedFolders = 0; scannedFiles = 0;
+    thumbnailGrid.setAttribute('aria-busy', 'true');
+    btnRefreshGrid.disabled = true;
+    $('scan-loading').hidden = false;
+    showWarning(false);
     const oldFile = mediaFiles[currentIndex];
     const oldViewWasGrid = isGridViewActive;
-    if (!silent) setScanStatus('Scanning…');
+    setScanStatus(mediaFiles.length || subfolders.length ? 'Refreshing folders…' : 'Scanning folders…');
 
     try {
-        if (forceCacheClear) clearImageBlobCache();
-
         const currentListing = await scanDirectory(currentFolder);
         const folderNames = currentListing.folderNames;
         const filePaths = galleryViewMode === 'all'
-            ? await scanDirectoryRecursive(currentFolder)
+            ? await scanDirectoryRecursive(currentFolder, new Set(), currentListing)
             : currentListing.filePaths;
 
         const changed = JSON.stringify(filePaths) !== JSON.stringify(mediaFiles) || JSON.stringify(folderNames) !== JSON.stringify(subfolders);
         mediaFiles = filePaths;
         subfolders = folderNames;
+        if (forceCacheClear) clearImageBlobCache();
         pruneCache(mediaFiles);
 
         if (oldFile) {
@@ -352,27 +362,56 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
             currentIndex = Math.min(currentIndex, Math.max(0, mediaFiles.length - 1));
         }
 
-        showWarning(mediaFiles.length === 0 && subfolders.length === 0);
+        $('warning-title').textContent = 'No Media Detected';
+        $('warning-message').textContent = 'No supported media found in the selected folder/view. Check the source below or choose an album or All Pics.';
+        showWarning(mediaFiles.length === 0 && (subfolders.length === 0 || !controlsEnabled));
         renderBreadcrumb();
         setScanStatus(`Updated ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
 
-        if (!preserveView || oldViewWasGrid || mediaFiles.length === 0) {
+        if (!preserveView || (oldViewWasGrid && (changed || forceCacheClear)) || mediaFiles.length === 0) {
             renderGridView();
-        } else if (mediaFiles.length > 0 && (changed || !isGridViewActive)) {
+        } else if (mediaFiles.length > 0 && (changed || forceCacheClear)) {
             enterFullScreenViewer(currentIndex);
         }
         savePreferences();
     } catch (err) {
         console.error('Directory scanning error:', err);
-        setScanStatus('Scan failed');
+        setScanStatus('Scan failed — check connection and retry');
+        $('warning-title').textContent = 'Could not scan this folder';
+        $('warning-message').textContent = 'Check your connection, source path, and server directory listing, then choose Scan Again.';
         if (mediaFiles.length === 0 && subfolders.length === 0) showWarning(true);
     } finally {
         isScanning = false;
+        thumbnailGrid.setAttribute('aria-busy', 'false');
+        btnRefreshGrid.disabled = false;
+        $('scan-loading').hidden = true;
     }
 }
 
 function setScanStatus(text) {
     if (scanStatus) scanStatus.textContent = text;
+    $('scan-loading-text').textContent = text;
+}
+
+function setMediaLoading(text = '') {
+    $('media-loading').hidden = !text || !controlsEnabled;
+    $('media-loading-text').textContent = text;
+    container.setAttribute('aria-busy', String(Boolean(text)));
+}
+
+function watchThumbnail(element, item, videoThumbnail = false) {
+    item.classList.add('thumb-loading');
+    const finish = () => { item.classList.remove('thumb-loading'); element.classList.add('thumb-loaded'); };
+    element.onload = finish;
+    if (videoThumbnail) element.onloadeddata = element.onloadedmetadata = finish;
+    element.onerror = () => {
+        finish();
+        item.classList.add('thumb-error');
+        const fallback = document.createElement('span');
+        fallback.className = 'thumbnail-unavailable';
+        fallback.textContent = 'Preview unavailable';
+        item.appendChild(fallback);
+    };
 }
 
 function showWarning(show) { warningOverlay.style.display = show ? 'flex' : 'none'; }
@@ -382,7 +421,7 @@ function renderBreadcrumb() {
     breadcrumb.innerHTML = '';
     const root = document.createElement('button');
     root.className = 'crumb';
-    root.textContent = 'Photos';
+    root.textContent = activeSource.label;
     root.addEventListener('click', () => navigateToFolder(''));
     breadcrumb.appendChild(root);
 
@@ -411,6 +450,7 @@ function renderBreadcrumb() {
 }
 
 async function navigateToFolder(folder) {
+    if (isScanning) return;
     currentFolder = folder;
     currentIndex = 0;
     isGridViewActive = true;
@@ -420,6 +460,21 @@ async function navigateToFolder(folder) {
 }
 
 function renderGridView() {
+    setMediaLoading();
+    if (!controlsEnabled) {
+        gridViewContainer.style.display = 'none';
+        if (mediaFiles.length) enterFullScreenViewer(currentIndex);
+        else {
+            mediaLoadId++;
+            stopSlideshow();
+            video.pause();
+            viewport.style.display = 'none';
+        }
+        return;
+    }
+    mediaLoadId++;
+    mediaFailed = false;
+    videoErrorOverlay.style.display = 'none';
     isGridViewActive = true;
     thumbnailGrid.innerHTML = '';
     const total = mediaFiles.length;
@@ -454,7 +509,7 @@ function renderGridView() {
                 .then(url => { el.src = url; el.classList.add('thumb-loaded'); })
                 .catch(err => {
                     console.error(`HEIC/HEIF thumbnail generation failed for ${file}:`, err);
-                    el.closest('.grid-item')?.classList.add('thumb-error');
+                    el.onerror?.();
                 });
         });
     }, { root: gridViewContainer, rootMargin: '300px' }) : null;
@@ -468,6 +523,7 @@ function renderGridView() {
 
         if (isVideoFile(file)) {
             const vid = document.createElement('video');
+            watchThumbnail(vid, item, true);
             vid.src = file;
             vid.preload = 'metadata';
             vid.disablePictureInPicture = true;
@@ -480,12 +536,13 @@ function renderGridView() {
             item.appendChild(badge);
         } else if (isHeicFile(file)) {
             const imgEl = document.createElement('img');
+            watchThumbnail(imgEl, item);
             imgEl.alt = filename;
             imgEl.decoding = 'async';
             imgEl.dataset.heicSrc = file;
             imgEl.className = 'heic-thumb';
             if (observer) observer.observe(imgEl);
-            else getSpecialImageURL(file).then(url => { imgEl.src = url; imgEl.classList.add('thumb-loaded'); }).catch(console.error);
+            else getSpecialImageURL(file).then(url => { imgEl.src = url; }).catch(() => imgEl.onerror());
             item.appendChild(imgEl);
             const fallback = document.createElement('div');
             fallback.className = 'heic-fallback';
@@ -493,6 +550,7 @@ function renderGridView() {
             item.appendChild(fallback);
         } else {
             const imgEl = document.createElement('img');
+            watchThumbnail(imgEl, item);
             imgEl.src = file;
             imgEl.alt = filename;
             imgEl.loading = 'lazy';
@@ -503,7 +561,7 @@ function renderGridView() {
         const caption = document.createElement('div');
         caption.className = 'grid-item-caption';
         if (galleryViewMode === 'all') {
-            let relative = decodeURIComponent(file.replace(new RegExp(`^${ROOT_PATH}/`), ''));
+            let relative = settingsApi.relativeMediaPath(activeSource, file);
             if (currentFolder) {
                 const prefix = `${currentFolder}/`;
                 if (relative.startsWith(prefix)) relative = relative.slice(prefix.length);
@@ -531,6 +589,7 @@ function renderGridView() {
 
 function enterFullScreenViewer(index) {
     if (!mediaFiles.length) return;
+    const openingViewer = isGridViewActive;
     isGridViewActive = false;
     gridViewContainer.style.display = 'none';
     viewport.style.display = 'flex';
@@ -540,21 +599,30 @@ function enterFullScreenViewer(index) {
     progressContainer.style.display = 'block';
     helpHint.style.display = 'block';
     showMedia(index);
+    if (openingViewer) showUI();
 }
 
 function showMedia(index) {
     if (!mediaFiles.length) return;
+    const loadId = ++mediaLoadId;
+    const isCurrent = () => loadId === mediaLoadId && !isGridViewActive;
+    mediaFailed = false;
+    imageReady = false;
+    cancelSlideshowTimer();
     currentIndex = (index + mediaFiles.length) % mediaFiles.length;
     const filepath = mediaFiles[currentIndex];
     const filename = decodeURIComponent(filepath.split('/').pop());
     const displayName = galleryViewMode === 'all'
-        ? decodeURIComponent(filepath.replace(new RegExp(`^${ROOT_PATH}/`), ''))
+        ? settingsApi.relativeMediaPath(activeSource, filepath)
         : filename;
 
     resetZoomAndPan();
+    setMediaLoading(isHeicFile(filepath) ? 'Preparing HEIC image…' : isImageFile(filepath) ? 'Loading image…' : 'Loading video…');
     videoErrorOverlay.style.display = 'none';
-    img.style.display = 'none'; img.src = ''; img.onload = null; img.onerror = null;
-    video.style.display = 'none'; video.pause(); video.src = ''; video.onended = null; video.ontimeupdate = null; video.onerror = null;
+    img.onload = null; img.onerror = null; img.style.display = 'none'; img.src = '';
+    video.onended = null; video.ontimeupdate = null; video.onerror = null;
+    video.onwaiting = null; video.onstalled = null; video.oncanplay = null; video.onplaying = null;
+    video.style.display = 'none'; video.pause(); video.src = '';
     mediaTitle.textContent = displayName;
     mediaIndex.textContent = `${currentIndex + 1} / ${mediaFiles.length}`;
 
@@ -562,45 +630,113 @@ function showMedia(index) {
         img.classList.remove('mode-fit', 'mode-original');
         img.classList.add(imageMode === 'fit' ? 'mode-fit' : 'mode-original');
         container.classList.add('grab-mode');
-        img.onload = () => { img.style.display = 'block'; mediaTitle.textContent = displayName; };
-        img.onerror = () => { console.error('Image loading failed:', filepath); mediaTitle.textContent = `${displayName} (Loading Failed)`; };
+        img.onload = () => {
+            if (!isCurrent() || mediaFailed) return;
+            imageReady = true;
+            setMediaLoading();
+            img.style.display = 'block'; mediaTitle.textContent = displayName;
+            if (slideshowPlaying) startSlideshowTimer();
+        };
+        img.onerror = () => { if (isCurrent()) showMediaError('image', filepath); };
 
         if (isHeicFile(filepath)) {
             mediaTitle.textContent = `${displayName} (Preparing…)`;
             getSpecialImageURL(filepath)
-                .then(url => { img.src = url; })
+                .then(url => { if (isCurrent()) img.src = url; })
                 .catch(err => {
                     console.error('HEIC/HEIF image handling failed:', err);
-                    mediaTitle.textContent = `${displayName} (Image Error: ${err.message || err})`;
+                    if (isCurrent()) showMediaError('heic', filepath, err);
                 });
         } else {
             img.src = filepath;
         }
-        if (slideshowPlaying) startSlideshowTimer();
     } else {
         container.classList.remove('grab-mode');
         video.src = filepath;
         video.style.display = 'block';
-        video.controls = !tvModeEnabled;
+        video.controls = controlsEnabled && !tvModeEnabled;
+        video.muted = !controlsEnabled;
+        video.onwaiting = video.onstalled = () => { if (isCurrent() && !mediaFailed) setMediaLoading('Buffering video…'); };
+        video.oncanplay = video.onplaying = () => { if (isCurrent() && !mediaFailed) setMediaLoading(); };
         video.onerror = () => {
-            const name = decodeURIComponent(filepath.split('/').pop());
-            let msg = 'The format or codec is not supported by your browser.';
-            if (video.error?.code === 3) msg = 'Video decoding failed. This file likely uses an unsupported codec such as H.265/HEVC.';
-            videoErrorText.textContent = msg;
-            videoErrorFfmpeg.textContent = `ffmpeg -i "${filepath}" -c:v libx264 -pix_fmt yuv420p -c:a aac "fixed_${name}"`;
-            videoErrorOverlay.style.display = 'flex';
-            if (slideshowPlaying) slideshowTimer = setTimeout(nextSlideshowMedia, 5000);
+            if (isCurrent()) showMediaError('video', filepath, video.error);
         };
-        video.play().catch(err => console.log('Video autoplay blocked or failed:', err));
-        video.onended = () => { if (slideshowPlaying) nextSlideshowMedia(); };
+        video.play().catch(err => {
+            if (isCurrent() && !mediaFailed && err.name !== 'AbortError') showMediaError('video', filepath, err);
+        });
+        video.onended = () => { if (isCurrent() && slideshowPlaying) nextSlideshowMedia(); };
         video.ontimeupdate = () => {
             if (slideshowPlaying && video.duration) progressBar.style.width = `${(video.currentTime / video.duration) * 100}%`;
         };
         cancelSlideshowTimer();
         progressBar.style.width = '0%';
     }
-    showUI();
     savePreferences();
+}
+
+function showMediaError(kind, filepath, error) {
+    setMediaLoading();
+    mediaFailed = true;
+    cancelSlideshowTimer();
+    progressBar.style.width = '0%';
+    img.style.display = 'none';
+    video.pause();
+    video.style.display = 'none';
+    let title = 'This image could not be opened';
+    let message = 'The file may be unavailable, damaged, or in a format this browser cannot display.';
+    let guidance = 'Retry after checking your connection, or open the original file to check it. Exporting a new JPEG or PNG copy may help.';
+    if (kind === 'heic' || isHeicFile(filepath)) {
+        title = 'This HEIC / HEIF image could not be opened';
+        message = 'FolderFrame could not prepare this image for your browser. The file may use an unsupported HEIC variant or be damaged.';
+        guidance = 'Try opening the original in your photo app and exporting a JPEG or PNG copy. Your original file is unchanged.';
+        if (error?.message === 'HEIC decoder library did not load') {
+            message = 'The HEIC decoder is unavailable.';
+            guidance = 'Reload the page. If this continues, check that heic2any.min.js is hosted beside index.html and is not blocked.';
+        } else if (/HTTP|fetch|network/i.test(error?.message || '')) {
+            message = 'The image could not be downloaded.';
+            guidance = 'Check your connection and that the file is still available, then retry.';
+        }
+    } else if (kind === 'video') {
+        title = 'This video could not be played';
+        message = 'The video format may be unsupported or the file may be unavailable.';
+        guidance = 'Open the original in a video player to check it. For broader browser compatibility, export an MP4 copy using H.264 video and AAC audio.';
+        if (error?.name === 'NotAllowedError') {
+            title = 'Your browser paused video playback';
+            message = 'Automatic playback was blocked. This does not mean the video is broken.';
+            guidance = 'Choose Retry to start playback with a click. Embedded pages may also need permission to autoplay.';
+        } else if (error?.code === 2) {
+            message = 'The video download was interrupted by a network error.';
+            guidance = 'Check your connection and that the file is still available, then retry.';
+        } else if (error?.code === 1) {
+            message = 'Video loading was interrupted.';
+            guidance = 'Choose Retry to load the video again.';
+        } else if (error?.code === 3) {
+            message = 'The browser could not decode the video. Its codec may be unsupported, or the file may be damaged.';
+        }
+    }
+    $('media-error-title').textContent = title;
+    $('media-error-filename').textContent = decodeURIComponent(filepath.split('/').pop());
+    videoErrorText.textContent = message;
+    videoErrorFfmpeg.textContent = guidance;
+    $('media-error-original').href = filepath;
+    $('btn-next-media-error').disabled = mediaFiles.length < 2;
+    mediaTitle.textContent = decodeURIComponent(filepath.split('/').pop());
+    videoErrorOverlay.style.display = 'flex';
+    scheduleErrorAdvance();
+    if (!slideshowPlaying) showUI();
+}
+
+function scheduleErrorAdvance() {
+    cancelSlideshowTimer();
+    $('media-error-status').textContent = slideshowPlaying
+        ? (mediaFiles.length > 1 ? 'Slideshow continues: skipping this file in 3 seconds.' : 'Slideshow continues: retrying this file in 3 seconds.')
+        : 'Choose Retry or another file. Press Play to continue the slideshow.';
+    if (!slideshowPlaying || !mediaFailed || isGridViewActive) return;
+    const loadId = mediaLoadId;
+    slideshowTimer = setTimeout(() => {
+        slideshowTimer = null;
+        if (slideshowPlaying && mediaFailed && !isGridViewActive && loadId === mediaLoadId) nextSlideshowMedia();
+    }, 3000);
 }
 
 function nextMedia() { showMedia(currentIndex + 1); }
@@ -618,7 +754,7 @@ function applyTransform() {
     btnResetZoom.disabled = !changed;
     container.classList.toggle('grabbing-mode', changed);
 }
-function resetZoomAndPan() { zoom = 1.0; panX = 0; panY = 0; applyTransform(); }
+function resetZoomAndPan() { cancelTouchGesture(); zoom = 1.0; panX = 0; panY = 0; applyTransform(); }
 
 function toggleImageMode() {
     imageMode = imageMode === 'fit' ? 'original' : 'fit';
@@ -632,6 +768,8 @@ function toggleImageMode() {
 }
 
 function handleWheel(e) {
+    if (!controlsEnabled) return;
+    if (mediaFailed) return;
     if (!isPhotoActive()) return;
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
@@ -650,11 +788,20 @@ function handleWheel(e) {
 }
 
 function setupEventListeners() {
+    $('select-source').addEventListener('change', event => {
+        const url = new URL(location.href);
+        url.searchParams.set('source', event.target.value);
+        url.searchParams.set('album', '');
+        // A new load prevents old scans, media callbacks, and timers leaking
+        // into the next source. Other explicit URL options are preserved.
+        location.assign(url.href);
+    });
     btnShowGrid.addEventListener('click', renderGridView);
     btnRefreshGrid.addEventListener('click', () => loadGallery({ preserveView: true, forceCacheClear: true }));
     btnShuffle.addEventListener('click', () => { shuffleEnabled = !shuffleEnabled; updateControlStates(); savePreferences(); });
     btnAutoRefresh.addEventListener('click', () => { autoRefreshEnabled = !autoRefreshEnabled; updateControlStates(); startAutoRefreshTimer(); savePreferences(); });
     btnViewMode.addEventListener('click', async () => {
+        if (isScanning) return;
         galleryViewMode = galleryViewMode === 'all' ? 'folders' : 'all';
         currentIndex = 0;
         stopSlideshow();
@@ -674,6 +821,9 @@ function setupEventListeners() {
     viewport.addEventListener('touchstart', handleTouchStart, { passive: false });
     viewport.addEventListener('touchmove', handleTouchMove, { passive: false });
     viewport.addEventListener('touchend', handleTouchEnd);
+    viewport.addEventListener('touchcancel', cancelTouchGesture);
+    $('overlay-header').addEventListener('focusin', showUI);
+    $('overlay-header').addEventListener('focusout', resetIdleTimer);
     btnPlayPause.addEventListener('click', toggleSlideshow);
     selectInterval.addEventListener('change', e => {
         slideshowInterval = Number(e.target.value);
@@ -681,12 +831,19 @@ function setupEventListeners() {
         savePreferences();
     });
     btnFullscreen.addEventListener('click', toggleFullscreen);
-    document.addEventListener('fullscreenchange', updateFullscreenButton);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
     btnRetryWarning.addEventListener('click', () => loadGallery({ preserveView: false, forceCacheClear: true }));
-    btnCloseVideoError.addEventListener('click', () => { videoErrorOverlay.style.display = 'none'; if (slideshowPlaying) nextSlideshowMedia(); });
+    btnCloseVideoError.addEventListener('click', renderGridView);
+    $('btn-retry-media-error').addEventListener('click', () => {
+        removeCacheEntry(mediaFiles[currentIndex]);
+        showMedia(currentIndex);
+    });
+    $('btn-next-media-error').addEventListener('click', nextMedia);
 
     window.addEventListener('keydown', e => {
+        if (!controlsEnabled) return;
         if (isGridViewActive) return;
+        if (e.target?.closest?.('button, a, select, input, textarea, video, [contenteditable="true"]')) return;
         if (e.key === 'ArrowLeft') prevMedia();
         if (e.key === 'ArrowRight') nextMedia();
         if (e.key === ' ') { e.preventDefault(); toggleSlideshow(); }
@@ -716,6 +873,7 @@ function startAutoRefreshTimer() {
 
 async function toggleTvMode() {
     tvModeEnabled = !tvModeEnabled;
+    video.controls = controlsEnabled && !tvModeEnabled;
     if (tvModeEnabled) {
         imageMode = 'fit';
         shuffleEnabled = true;
@@ -749,6 +907,8 @@ async function toggleTvMode() {
 }
 
 function handleMouseDown(e) {
+    if (!controlsEnabled) return;
+    if (mediaFailed) return;
     if (!isPhotoActive()) return;
     if (zoom !== 1.0 || imageMode === 'original' || panX !== 0 || panY !== 0) {
         isDragging = true; startX = e.clientX; startY = e.clientY; startPanX = panX; startPanY = panY;
@@ -758,12 +918,15 @@ function handleMouseMove(e) { if (isDragging) { panX = startPanX + e.clientX - s
 function handleMouseUp() { isDragging = false; }
 
 function handleTouchStart(e) {
+    if (!controlsEnabled) return;
+    if (mediaFailed) return;
     if (!isPhotoActive()) return;
+    if (e.target?.closest?.('button, a, select, input, video')) return;
     resetIdleTimer();
     if (e.touches.length === 2) {
         isPinching = true; isDragging = false;
         const [t1, t2] = e.touches;
-        initialDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+        initialDist = Math.max(1, Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY));
         const midX = (t1.clientX + t2.clientX) / 2, midY = (t1.clientY + t2.clientY) / 2;
         const rect = container.getBoundingClientRect();
         initialMidX = midX - rect.left - rect.width / 2;
@@ -776,6 +939,8 @@ function handleTouchStart(e) {
 }
 
 function handleTouchMove(e) {
+    if (!controlsEnabled) return;
+    if (mediaFailed) return;
     if (!isPhotoActive()) return;
     if (isPinching && e.touches.length === 2) {
         e.preventDefault();
@@ -801,12 +966,25 @@ function handleTouchMove(e) {
         applyTransform();
     }
 }
-function handleTouchEnd(e) { if (e.touches.length < 2) isPinching = false; if (e.touches.length === 0) isDragging = false; }
+function cancelTouchGesture() { isDragging = false; isPinching = false; }
+function handleTouchEnd(e) {
+    if (e.touches.length === 0) { cancelTouchGesture(); return; }
+    if (e.touches.length === 1 && isPinching) {
+        isPinching = false;
+        isDragging = true;
+        startX = e.touches[0].clientX; startY = e.touches[0].clientY;
+        startPanX = panX; startPanY = panY;
+    }
+}
 
 function toggleSlideshow() { setSlideshowPlaying(!slideshowPlaying); }
 function setSlideshowPlaying(value) {
     slideshowPlaying = Boolean(value);
     syncPlayButton();
+    if (mediaFailed) {
+        scheduleErrorAdvance();
+        return;
+    }
     if (slideshowPlaying) {
         if (!isPhotoActive()) video.play().catch(() => {});
         else startSlideshowTimer();
@@ -832,7 +1010,9 @@ function cancelSlideshowTimer() {
 }
 
 function startSlideshowTimer() {
+    if (mediaFailed) { scheduleErrorAdvance(); return; }
     cancelSlideshowTimer();
+    if (!imageReady || mediaFailed || isGridViewActive) return;
     slideProgress = 0;
     progressBar.style.width = '0%';
 
@@ -861,10 +1041,23 @@ function startSlideshowTimer() {
     slideshowAnimationFrame = requestAnimationFrame(tick);
 }
 
+function handleFullscreenChange() {
+    updateFullscreenButton();
+    if (!document.fullscreenElement && tvModeEnabled) {
+        tvModeEnabled = false;
+        stopSlideshow();
+        video.pause();
+        video.controls = controlsEnabled;
+        updateControlStates();
+        showUI();
+        savePreferences();
+    }
+}
+
 function updateFullscreenButton() {
     const label = btnFullscreen.querySelector('.button-label');
     const isFullscreen = Boolean(document.fullscreenElement);
-    if (label) label.textContent = isFullscreen ? 'Exit Fullscreen' : 'Fullscreen';
+    if (label) label.textContent = isFullscreen ? 'Exit Full' : 'Full';
     btnFullscreen.setAttribute('aria-pressed', String(isFullscreen));
     btnFullscreen.title = isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen';
 }
@@ -879,6 +1072,7 @@ async function toggleFullscreen() {
 }
 
 function showUI() {
+    if (!controlsEnabled) return;
     if (isGridViewActive) return;
     uiVisible = true;
     $('overlay-header').classList.remove('ui-hidden');
@@ -889,7 +1083,9 @@ function showUI() {
     resetIdleTimer();
 }
 function hideUI() {
-    if (isGridViewActive || isDragging || isPinching) return;
+    if (isGridViewActive || isDragging || isPinching || mediaFailed) return;
+    if (document.activeElement?.matches?.(':focus-visible') &&
+        document.activeElement?.closest?.('#overlay-header, .nav-arrow')) return;
     uiVisible = false;
     $('overlay-header').classList.add('ui-hidden');
     progressContainer.classList.add('ui-hidden');
@@ -898,6 +1094,7 @@ function hideUI() {
     document.body.classList.add('cursor-hidden');
 }
 function resetIdleTimer() {
+    if (!controlsEnabled) return;
     if (idleTimer) clearTimeout(idleTimer);
     if (isGridViewActive) return;
     if (!uiVisible) {
