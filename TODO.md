@@ -5,6 +5,10 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ## Remaining work
 
+### Album recovery
+
+- [ ] **Recover from deleted or renamed albums** — When an album is deleted or renamed while in use, explain that the folder is unavailable and offer navigation to an existing parent or the gallery root. Clear or replace the invalid saved album path so reopening the base URL does not retry it. Do not require cache clearing or URL workarounds, and distinguish missing folders from connection or server-configuration failures. Add regression coverage for active browsing, slideshow playback, and startup with stale saved preferences.
+
 ### Large-library resilience
 
 - [x] **Large-library resilience** — Extend existing bounded metadata/album lookups across the app without requiring a database, PHP, or server-side generated thumbnails. Implemented; device validation pending (see RESILIENCE.md).
