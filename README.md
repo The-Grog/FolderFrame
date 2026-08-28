@@ -9,7 +9,7 @@
 FolderFrame works as a standalone, self-hosted photo and video gallery or as
 an embedded gallery or slideshow within your websites. Use it on its own,
 or add it to an existing page with a standard iframe—including an optional
-controls-free slideshow mode.  No database or PHP required.
+controls-free slideshow mode. No database or PHP required.
 
 Manage one gallery on your host and open it on multiple devices—digital photo
 frames, tablets, wall displays, or desktop browsers. Each display can use its
@@ -41,13 +41,18 @@ Compact controls put slideshow playback, Shuffle, Fit, fullscreen, and TV Mode w
 
 Browse albums with cover previews and cycle between Newest, Oldest, and Filename sorting.
 
-### Mobile viewer
+### Mobile viewer and gallery
 
-<img src="docs/images/folderframe-mobile-viewer.png" alt="FolderFrame mobile viewer with compact touch controls and a lunar photograph" width="320">
+<p>
+  <img src="docs/images/folderframe-mobile-viewer.png" alt="FolderFrame mobile viewer with compact touch controls and a lunar photograph" width="320">
+  <img src="docs/images/folderframe-mobile-gallery.png" alt="FolderFrame mobile gallery with album cover previews and a two-column photo grid" width="320">
+</p>
 
 Phone-sized controls keep playback, Shuffle, interval, Fit/Original, fullscreen,
 and TV Mode organized above the media. Swipe fitted photos, pinch to zoom, and
-drag to pan when zoomed. Fullscreen availability varies by mobile browser.
+drag to pan when zoomed. The mobile gallery pairs a two-column photo grid with
+album cover previews and compact browsing controls. Fullscreen availability
+varies by mobile browser.
 
 ## Overview
 
@@ -175,13 +180,42 @@ To restore the controls, use `controls=1`. Browser video-autoplay and fullscreen
 restrictions still apply. See [CONFIGURATION.md](CONFIGURATION.md) for source
 examples, all URL aliases, validation rules, and full precedence details.
 
-IMPORTANT: DO NOT OPEN index.html DIRECTLY
+## Refresh frequency and long slideshows
+
+`refreshInterval` sets automatic folder rescanning in **seconds**: index defaults
+to 60 (one minute), embed to 300 (five minutes). Allowed values are integers
+from 1 to 86400. It is a config-only setting, not a saved browser preference
+or URL option. `autoRefresh: false` disables automatic rescanning.
+
+Set it under `defaults` for both profiles or under `index`/`embed` separately:
+
+```json
+"index": { "refreshInterval": 60 },
+"embed": { "refreshInterval": 300 }
+```
+
+This is a configuration fragment; keep your other sections and settings.
+Profile entries override shared defaults, including the explicit entries in
+the shipped file. Choose shorter refresh periods for frequently changing media
+and longer periods for stable photo-frame displays or many devices sharing one
+host. Each display scans independently. Refresh Folder still scans immediately;
+returning to a visible tab also triggers a scan when Auto Refresh is enabled.
+
+Slideshow `interval` is separate: 300, 900, and 3600 seconds appear as **5m**,
+**15m**, and **60m** in the viewer. These values also work in config, saved
+preferences, and the `interval` URL option. They control photo duration;
+videos advance on completion during a slideshow.
+
+Filename is now the default sort. Existing saved sort choices or explicit URL
+options still take precedence; use `?remember=0` to test config defaults.
+
+## Hosting requirements
 
 Browsers restrict directory scanning when a page is opened with the
 file:// protocol. The gallery must be served over HTTP or HTTPS by a web
 server that provides directory listings for photos/ and its subfolders.
 
-PROJECT LAYOUT
+### Project layout
 
 The photos/ folder included in the GitHub repository contains test photos and
 videos for checking various supported media formats. These sample files are
@@ -192,6 +226,9 @@ Keep the files arranged like this:
 
     FolderFrame/
     ├── index.html
+    ├── embed.html       # Optional iframe example
+    ├── docs/images/
+    │   └── folderframe-logo.png
     ├── styles.css
     ├── app.js
     ├── resilience.js
@@ -212,7 +249,7 @@ Keep the files arranged like this:
 
 Subfolders under photos/ automatically appear as albums.
 
-OPTION 1 — QUICK LOCAL TEST WITH PYTHON
+### Option 1: Quick local test with Python
 
 Python’s built-in HTTP server is the easiest way to test or use the
 gallery on a local machine.
@@ -249,7 +286,7 @@ NOTE: Python’s built-in server is excellent for testing and trusted
 local-network use. For a permanent installation, use any static web
 server that can provide directory listings.
 
-OPTION 2 — HOSTING ON A WEB SERVER OR UNRAID
+### Option 2: Web server or Unraid
 
 FolderFrame is not tied to a specific web server. Caddy, NGINX, lighttpd,
 Apache, and similar static servers are suitable when HTML directory browsing
@@ -265,6 +302,7 @@ The web root should contain:
     settings.js
     folderframe.config.json
     heic2any.min.js
+    docs/images/folderframe-logo.png
     photos/
 
 Configure the server to return a browsable directory listing for photos/
@@ -292,9 +330,9 @@ Then open:
 
 to use the gallery.
 
-ADDING, REMOVING, AND ORGANIZING MEDIA
+## Organizing media
 
-MEDIA
+### Supported media
 
 Add or remove files directly inside photos/ or any album subfolder.
 
@@ -310,7 +348,7 @@ Videos: .mp4 .mov
 The browser must support the codec contained inside a video file. A .mov
 or .mp4 extension alone does not guarantee browser playback.
 
-ALBUMS
+### Albums
 
 Create folders inside photos/ to create albums.
 
@@ -328,7 +366,7 @@ Folders appear as album cards. Albums can contain additional subfolders.
 Use the breadcrumb at the top of the gallery to move back through the
 album hierarchy.
 
-REFRESHING
+### Refreshing
 
 Click “Refresh Folder” to scan immediately.
 
@@ -338,7 +376,7 @@ When Auto Refresh is enabled, the current folder is rescanned at the configured 
 This means newly added or removed media can appear without manually
 rebuilding anything.
 
-HEIC / HEIF SUPPORT
+### HEIC / HEIF support
 
 The gallery includes the local heic2any.min.js decoder.
 
@@ -358,15 +396,15 @@ HEIC decoding is more CPU- and memory-intensive than displaying normal
 JPEG, PNG, or WebP images. Large collections of genuine HEIC files may
 therefore take longer to populate than JPEG-based galleries.
 
-GALLERY CONTROLS
+## Gallery controls
 
-GRID / ALBUM VIEW
+### Grid and album view
 
 View, sorting, and Auto Refresh buttons show their current mode using neutral
 styling; Refresh Folder uses the same styling. In the viewer, Shuffle means
 shuffle is enabled and Shuffle Off means it is disabled.
 
-SORTING
+### Sorting
 
 The button between By Folder and Auto Refresh shows the current sorting.
 Click it to cycle Newest, Oldest, Filename. Filename is the default.
@@ -419,7 +457,7 @@ override yet.
 -   Toggle “By Folder” / “All Pics” to switch between album browsing and
     recursively showing media from the current folder and its subfolders.
 
-VIEWER NAVIGATION
+### Viewer navigation
 
 -   Left Arrow button: previous media
 -   Right Arrow button: next media
@@ -428,20 +466,20 @@ VIEWER NAVIGATION
 -   Gallery button: return to the thumbnail/album grid
 -   Press G to return to the thumbnail/album grid
 
-SLIDESHOW
+### Slideshow
 
 -   Click Play / Pause to start or stop the slideshow.
 -   Press Space to start/pause from the full viewer.
 -   Available intervals are: 3 seconds 5 seconds 10 seconds 15 seconds
     30 seconds 60 seconds 5 minutes 15 minutes 60 minutes
 
-SHUFFLE
+### Shuffle
 
 -   Click Shuffle to toggle randomized slideshow progression.
 -   Press S while in the full viewer to toggle Shuffle.
 -   Manual Previous/Next navigation remains available.
 
-LOADING FEEDBACK
+### Loading feedback
 
 Folder scans show a scanning/refreshing message; recursive scans report folders
 checked and files found (not a percentage). Existing tiles stay visible while
@@ -452,7 +490,7 @@ video until ready. Empty folders and scan failures have separate messages.
 Controls-free slideshows hide loading indicators. Reduced-motion preferences
 are respected. These indicators do not reduce the original download/decode cost.
 
-ZOOM AND PAN
+### Zoom, pan, and mobile layout
 
 Swipe left/right on a fitted, unzoomed photo to browse. Once zoomed or panned,
 dragging pans instead; pinch gestures, short taps, and vertical swipes do not
@@ -477,11 +515,14 @@ do not magnify the page. Pinch calculations use the stationary viewport to avoid
 feedback flicker. On desktop, long filenames truncate to leave room for controls;
 controls still wrap when the window is too narrow to fit them.
 
-Photos support: - Mouse wheel zoom - Touch pinch-to-zoom - Mouse/finger
-drag to pan - Reset Zoom button on wider layouts - Escape to reset zoom/pan when the
-image is magnified or displaced
+Photos support:
 
-IMAGE SIZING
+- Mouse-wheel zoom and touch pinch-to-zoom.
+- Mouse/finger dragging to pan.
+- Reset Zoom on wider layouts.
+- Escape to reset zoom/pan when the image is magnified or displaced.
+
+### Image sizing
 
 Use the image sizing button to switch between:
 
@@ -491,7 +532,7 @@ Use the image sizing button to switch between:
 The selected mode is remembered by the browser. Press Enter in the full
 viewer to switch between Fit Screen and Original Size.
 
-FULLSCREEN / THEATER MODE
+### Fullscreen
 
 Use the Full button (beside TV Mode), or press F
 in the full viewer, to enter or leave browser fullscreen.
@@ -500,14 +541,17 @@ While viewing media, controls and the mouse cursor fade after
 approximately 3 seconds of inactivity. Mouse, touch, or keyboard
 activity brings them back.
 
-TV / PHOTO-FRAME MODE
+### TV / photo-frame mode
 
 TV Mode is intended for a television, wall display, tablet, or other
 dedicated photo-frame screen.
 
-Enabling TV Mode: - switches images to Fit Screen - enables Shuffle -
-enables Auto Refresh - starts the slideshow - attempts to enter browser
-fullscreen
+Enabling TV Mode:
+
+- Switches images to Fit.
+- Enables Shuffle and Auto Refresh.
+- Starts the slideshow.
+- Attempts to enter browser fullscreen.
 
 Press T in the full viewer to toggle TV Mode.
 
@@ -519,13 +563,12 @@ Browsers generally require a user gesture before true fullscreen is
 allowed, so automatic URL startup can configure TV behavior but may not
 be able to force fullscreen by itself.
 
-SAVED SETTINGS
+## Saved settings
 
 The gallery stores preferences in the browser’s localStorage.
 
-Settings such as the following can persist between visits: - current
-album - sorting - slideshow interval - image sizing mode - folder/all-pics view -
-Shuffle - Auto Refresh
+Saved settings include the current album, sorting, slideshow interval, image
+sizing, folder/All Pics view, Shuffle, and Auto Refresh.
 
 These preferences are local to that browser/device.
 
@@ -534,7 +577,7 @@ The supplied embed profile ignores saved preferences. Use rememberPreferences
 in folderframe.config.json or the remember URL option to control persistence.
 See [CONFIGURATION.md](CONFIGURATION.md) for settings and precedence.
 
-URL OPTIONS
+## URL options
 
 The gallery supports URL query parameters, which are useful for
 bookmarks and dedicated displays.
@@ -608,7 +651,7 @@ Open an album directly in TV mode:
 Replace SERVER-IP:PORT with the actual address of the machine hosting
 the gallery.
 
-EMBEDDING FOLDERFRAME
+## Embedding FolderFrame
 
 FolderFrame can be embedded in another site with a standard iframe. This
 keeps its controls, styles, slideshow, and media handling isolated from the
@@ -674,9 +717,9 @@ X-Frame-Options header that blocks the host page, and ensure any Content-
 Security-Policy frame-ancestors directive allows the site doing the embedding.
 Fullscreen and autoplay remain subject to browser policies.
 
-TROUBLESHOOTING
+## Troubleshooting
 
-NO MEDIA FILES DETECTED
+### No media files detected
 
 1.  Verify photos/ exists beside index.html.
 2.  Open /photos/ directly in the browser.
@@ -687,7 +730,7 @@ NO MEDIA FILES DETECTED
 6.  If using Python, make sure python3 -m http.server 8000 was started
     from the FolderFrame project directory, not from inside photos/.
 
-CHANGES DO NOT APPEAR
+### Changes do not appear
 
 -   Click Refresh Folder.
 -   Verify Auto Refresh is enabled.
@@ -696,7 +739,7 @@ CHANGES DO NOT APPEAR
 -   Confirm you edited the copy of the site that the active web server
     is serving.
 
-HEIC IMAGE FAILS
+### HEIC image fails
 
 The viewer shows recovery guidance for image and video failures. Retry reloads
 the file, Next file moves on, Gallery returns to the grid, and Open original
@@ -716,65 +759,38 @@ from network and decoding errors. Originals are never modified.
 -   A .heic filename is not proof that the file actually contains HEIC
     data.
 
-VIDEO FAILS
+### Video fails
 
 A recognized filename can still contain a codec the browser cannot
 decode. Check the browser console for playback errors. Converting the
 video to a browser-friendly H.264/AAC MP4 is generally the most
 compatible option.
 
-PYTHON SERVER IS RUNNING BUT ANOTHER DEVICE CANNOT CONNECT
+### Another device cannot connect to the Python server
 
 -   Use the server’s LAN IP instead of localhost.
 -   Confirm TCP port 8000 is allowed by the host firewall.
 -   Confirm both devices can reach each other on the network.
 
-SECURITY NOTES
+## Security notes
 
 The gallery does not provide authentication by itself.
 
-If the server is exposed outside your trusted LAN: - add authentication
-at the web-server/reverse-proxy layer - use HTTPS - do not expose a raw
-directory listing of private photos to the public Internet
+If the server is exposed outside your trusted LAN:
+
+- Add authentication at the web-server/reverse-proxy layer.
+- Use HTTPS.
+- Do not expose private photos or their directory listings to the public Internet.
 
 For a local-only family gallery, keeping the service accessible only
 from the trusted LAN is the simplest arrangement.
 
-SUPPORT FOLDERFRAME
+## Support FolderFrame
 
 If FolderFrame is useful to you, you can support its continued development:
 
     https://paypal.me/machogrog
 
-LICENSE
+## License
 
 FolderFrame is available under the MIT License. See LICENSE for details.
-
-## Refresh frequency and long slideshows
-
-`refreshInterval` sets automatic folder rescanning in **seconds**: index defaults
-to 60 (one minute), embed to 300 (five minutes). Allowed values are integers
-from 1 to 86400. It is a config-only setting, not a saved browser preference
-or URL option. `autoRefresh: false` disables automatic rescanning.
-
-Set it under `defaults` for both profiles or under `index`/`embed` separately:
-
-```json
-"index": { "refreshInterval": 60 },
-"embed": { "refreshInterval": 300 }
-```
-
-This is a configuration fragment; keep your other sections and settings.
-Profile entries override shared defaults, including the explicit entries in
-the shipped file. Choose shorter refresh periods for frequently changing media
-and longer periods for stable photo-frame displays or many devices sharing one
-host. Each display scans independently. Refresh Folder still scans immediately;
-returning to a visible tab also triggers a scan when Auto Refresh is enabled.
-
-Slideshow `interval` is separate: 300, 900, and 3600 seconds appear as **5m**,
-**15m**, and **60m** in the viewer. These values also work in config, saved
-preferences, and the `interval` URL option. They control photo duration;
-videos advance on completion during a slideshow.
-
-Filename is now the default sort. Existing saved sort choices or explicit URL
-options still take precedence; use `?remember=0` to test config defaults.
