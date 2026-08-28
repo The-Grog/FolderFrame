@@ -319,9 +319,12 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     #grid-header .grid-header-main, #grid-header .grid-actions { display:contents; }
     #grid-header .gallery-path-bar { min-width:0; width:auto; max-width:100%; flex:0 1 auto; }
     #grid-header .grid-actions .btn { flex:0 0 auto; width:auto; height:44px; min-height:44px; padding:6px 10px; flex-direction:row; white-space:nowrap; gap:6px; }
-    #grid-header .scan-status { order:1; flex:1 0 100%; text-align:right; }
+    /* Keep the timestamp on the last control row when space permits. */
+    #grid-header .scan-status { order:1; flex:0 0 auto; margin-left:auto; text-align:right; }
 }
 @media (max-width:900px), (pointer:coarse) {
+    /* Breadcrumb links already supply the 44px touch target. */
+    #grid-header .gallery-path-bar { min-height:44px; padding-top:0; padding-bottom:0; }
     #overlay-header { flex-direction:row; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:6px; }
     #overlay-header .header-left { flex:0 1 auto; max-width:100%; margin-right:auto; justify-content:flex-start; }
     #overlay-header #media-title { flex:0 1 auto; max-width:clamp(72px, 24vw, 220px); }
