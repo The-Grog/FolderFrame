@@ -37,7 +37,7 @@ Compact controls put slideshow playback, Shuffle, Fit, fullscreen, and TV Mode w
 
 ### Gallery and album view
 
-![FolderFrame gallery with album cover previews, Newest sorting, and compact neutral controls](docs/images/folderframe-gallery.png)
+![FolderFrame gallery with album cover previews, Filename sorting, and compact neutral controls](docs/images/folderframe-gallery.png)
 
 Browse albums with cover previews and cycle between Newest, Oldest, and Filename sorting.
 
