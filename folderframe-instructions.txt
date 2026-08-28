@@ -222,6 +222,8 @@ Refresh Folder reloads dates; Filename skips date lookups entirely.
 See CONFIGURATION.md for examples and server requirements.
 
 The compact header places the album/file count beside the directory breadcrumb.
+Parent folders remain clickable; the current folder appears once as plain text,
+including on phones. Hover over that label to see its full relative path.
 Click or tap the FolderFrame logo to return to the current source's top-level
 gallery. This works in both the standalone gallery and the embedded grid.
 
@@ -323,6 +325,10 @@ Long album breadcrumbs scroll sideways. Use the
 arrow buttons to change media; drag on a zoomed photo to pan it.
 The grid scrolls vertically, with a content-sized header and visible filenames.
 Photo pinch gestures zoom the image; page zoom remains available outside the photo.
+Controls suppress browser double-tap zoom so rapid taps on navigation buttons
+do not magnify the page. Pinch calculations use the stationary viewport to avoid
+feedback flicker. On desktop, long filenames truncate to leave room for controls;
+controls still wrap when the window is too narrow to fit them.
 
 Photos support: - Mouse wheel zoom - Touch pinch-to-zoom - Mouse/finger
 drag to pan - Reset Zoom button on wider layouts - Escape to reset zoom/pan when the

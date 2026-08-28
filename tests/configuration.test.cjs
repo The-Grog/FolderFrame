@@ -20,6 +20,14 @@ test('scan errors remain distinguishable from routine mobile timestamps', async 
     assert.equal(classes.has('is-error'), false);
 });
 
+test('breadcrumb links only ancestors and shows the current folder once as text', async () => {
+    const app = await boot({ search: '?album=Family/2026' });
+    const labels = app.get('breadcrumb').children.map(child => child.textContent);
+    assert.deepEqual(labels, ['Photos', '›', 'Family']);
+    assert.equal(app.get('grid-path').textContent, '2026');
+    assert.equal(app.get('grid-path').title, 'Family/2026');
+});
+
 test('shipped defaults preserve the index grid and isolate embed preferences', () => {
     const config = normalize(shipped);
     const index = api.resolveSettings(config, '');
@@ -655,7 +663,7 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
 
 test('pinch zoom transitions smoothly to one-finger pan and cancellation clears gestures', async () => {
     const app = await boot({ search: '?autoplay=1' });
-    app.get('media-container').getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 600 });
+    app.get('media-viewport').getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 600 });
     const viewport = app.get('media-viewport');
     const point = (clientX, clientY) => ({ clientX, clientY });
     let prevented = false;
@@ -671,6 +679,32 @@ test('pinch zoom transitions smoothly to one-finger pan and cancellation clears 
     assert.equal(vm.runInContext('isDragging || isPinching', app.context), false);
     vm.runInContext('resetZoomAndPan()', app.context);
     assert.equal(vm.runInContext('zoom', app.context), 1);
+});
+
+test('off-center pinch is stable across repeated moves, zoom out, and midpoint movement', async () => {
+    const app = await boot({ search: '?autoplay=1' });
+    const viewport = app.get('media-viewport');
+    viewport.getBoundingClientRect = () => ({ left: 10, top: 20, width: 400, height: 600 });
+    app.get('media-container').getBoundingClientRect = () => { throw new Error('Do not measure transformed bounds'); };
+    const touches = (distance, x = 310, y = 420) => [
+        { clientX: x - distance / 2, clientY: y },
+        { clientX: x + distance / 2, clientY: y }
+    ];
+    viewport.listeners.touchstart({ touches: touches(100) });
+    const move = (distance, x, y) => viewport.listeners.touchmove({ touches: touches(distance, x, y), preventDefault() {} });
+    move(200);
+    assert.equal(vm.runInContext('panX', app.context), -100);
+    assert.equal(vm.runInContext('panY', app.context), -100);
+    move(200);
+    assert.equal(vm.runInContext('panX', app.context), -100);
+    move(150);
+    assert.equal(vm.runInContext('panX', app.context), -50);
+    move(200, 330, 450);
+    assert.equal(vm.runInContext('panX', app.context), -80);
+    assert.equal(vm.runInContext('panY', app.context), -70);
+    move(100);
+    assert.equal(vm.runInContext('zoom', app.context), 1);
+    assert.equal(vm.runInContext('panX', app.context), 0);
 });
 
 test('touch controls, video, and error cards do not start image gestures', async () => {

@@ -3,6 +3,29 @@
 Checked items are implemented. Device-confirmation notes identify remaining
 manual checks; automated tests do not verify browser layout or codecs.
 
+## Remaining work
+
+### Large-library resilience
+
+- [ ] **Large-library resilience** — Extend existing bounded metadata/album lookups across the app without requiring a database, PHP, or generated thumbnails.
+  - [ ] **Timeouts and recovery** — Bound directory and media loading waits, show actionable errors, and skip stalled files during a running slideshow.
+  - [ ] **Cancel outdated work** — Cancel unnecessary requests when changing folders or leaving the viewer; ignore late results from superseded work.
+  - [ ] **Limit HEIC processing** — Queue conversions with a small concurrency limit to avoid overwhelming phone CPU and memory.
+  - [ ] **Manage memory** — Bound the converted-image cache, release unused object URLs safely, and clean up thumbnail observers across navigation.
+  - [ ] **Handle partial failures** — Keep successfully discovered media when a subfolder fails and identify which folders could not be scanned.
+
+### Deployment and performance
+
+- [ ] **Thumbnail generation (optional)** — Evaluate pre-generated thumbnails with original-image fallback for larger libraries. Preserve static-server hosting; client-side resizing still incurs original download/decode cost.
+- [ ] **Docker packaging and Unraid templates** — Build a Docker image and an Unraid container template for easy deployment. Include configurable media/config mounts, port mapping, a web server with directory listings, and setup/update instructions. Keep ordinary static-server hosting supported.
+
+### Browser and device testing
+
+- [ ] **Final device follow-up** — Confirm the latest slideshow visibility and TV-mode fixes, media failures/loading, and controls-free embeds in the target browsers.
+- [ ] **Browser compatibility matrix** — Record browser/OS versions and verify Android/iOS video, fullscreen, storage restrictions, and controls-free embeds. Owner-approved layouts are not a full compatibility matrix.
+
+## Completed
+
 - [x] **Refresh README screenshots** — Replaced viewer and grid previews with user-supplied screenshots of the updated interface. Full viewer first; no browser chrome or hosting URL.
 - [x] **README configuration example and settings reference** — Added complete JSON, all settings/defaults, source paths, profile overrides, recursion, autoplay, controls-free mode, and preference/URL precedence. Full details in CONFIGURATION.md.
 - [x] **Highlight key features in the overview** — Added a scannable list of implemented gallery, media, slideshow, mobile, embedding, configuration, loading, and hosting features.
@@ -16,21 +39,16 @@ manual checks; automated tests do not verify browser layout or codecs.
 - [x] **Slideshow UI visibility** — Automatic transitions no longer reveal controls or restart their idle timer. Verify latest fix on device.
 - [x] **TV mode state** — Exiting fullscreen clears TV mode and pauses its slideshow. Saved preferences no longer restore TV mode; explicit config/URL defaults still apply. Verify latest fix on device.
 - [x] **Controls-free slideshow configuration** — controls=false plus autoplay=true enables an unattended viewer with muted video. Documented config and URL overrides.
-- [ ] **Thumbnail generation (optional)** — Evaluate pre-generated thumbnails with original-image fallback for larger libraries. Preserve static-server hosting; client-side resizing still incurs original download/decode cost.
-- [ ] **Final device follow-up** — Confirm the latest slideshow visibility and TV-mode fixes, media failures/loading, and controls-free embeds in the target browsers.
-
-- [ ] **Docker packaging and Unraid templates** — Build a Docker image and an Unraid container template for easy deployment. Include configurable media/config mounts, port mapping, a web server with directory listings, and setup/update instructions. Keep ordinary static-server hosting supported.
-
 - [x] **Swipe between photos** — Implemented horizontal swipes for fitted, unzoomed/unpanned photos. Zoomed photos still pan; short/vertical/cancelled gestures do not navigate. User tested and approved.
 - [x] **Album cover previews** — Added lazy single-image covers using the first direct image in natural filename order, a blue folder badge, and album-name overlay. Empty/video-only/nested-only albums and preview failures retain the folder icon. Bounded lookups, cancellation, HEIC support, and regression tests included. User supplied updated screenshots for publication.
 - [x] **Compact grid header and logo navigation** — Directory breadcrumb sits beside the matching album/file count box. Clicking the logo returns to the current source root in index and embed. Updated README previews and usage instructions.
 - [x] **Optional filename display in configuration** — Added showFilenames (default true), shared/index/embed support, and showFilenames=0/1 URL overrides. Hides viewer filenames and media captions, retaining album names, accessible labels, and error details. Published and user-approved.
 - [x] **Remember grid scroll position** — Restores the originally opened tile and saved scroll position, with a brief static highlight. Adjusts for moved tiles; falls back to scroll position if removed, and resets on folder navigation. Published and user-approved.
-
 - [x] **Sorting: Newest, Oldest, Filename** — Added the cycling gallery button between By Folder and Auto Refresh; Newest is the default. Config defaults/index/embed, saved preferences, and sort URL overrides supported. Uses bounded/cached Last-Modified HEAD lookups with filename ties and missing dates last. Documented and regression-tested; user supplied updated screenshots for publication.
 
-User tested and approved the swipe, filename visibility, and grid-return update.
-Validation for this update: 47 automated settings/startup/media/gesture/sorting/status tests.
+## Validation notes
 
-- [ ] **Browser compatibility matrix** — Record browser/OS versions and verify Android/iOS video, fullscreen, storage restrictions, and controls-free embeds. Owner-approved layouts are not a full compatibility matrix.
-- [ ] **Large-library resilience** — Add timeouts to main directory/media fetches and review HEIC thumbnail observer/cache cleanup across repeated navigation. Existing bounded metadata/album lookups do not cover all network/decoder work.
+- User tested and approved the swipe, filename visibility, and grid-return update.
+- User tested and approved the mobile double-tap and pinch-flicker fixes.
+- Current regression suite: 49 automated settings/startup/media/gesture/sorting/status/breadcrumb tests.
+- Long-filename desktop layout still needs visual confirmation; Node tests do not validate CSS layout.

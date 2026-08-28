@@ -597,7 +597,7 @@ function renderBreadcrumb() {
 
     const parts = currentFolder.split('/').filter(Boolean);
     let running = '';
-    parts.forEach((part) => {
+    parts.slice(0, -1).forEach((part) => {
         const sep = document.createElement('span');
         sep.className = 'crumb-separator';
         sep.textContent = '›';
@@ -612,11 +612,13 @@ function renderBreadcrumb() {
     });
     if (galleryViewMode === 'all') {
         gridPath.textContent = currentFolder
-            ? `${currentFolder} • including subfolders`
+            ? `${parts[parts.length - 1]} • including subfolders`
             : 'All media • including subfolders';
     } else {
-        gridPath.textContent = currentFolder || 'Sorted by folder';
+        gridPath.textContent = parts[parts.length - 1] || 'Sorted by folder';
     }
+    gridPath.title = currentFolder || activeSource.label;
+    gridPath.setAttribute('aria-current', currentFolder ? 'location' : 'false');
 }
 
 async function navigateToFolder(folder) {
@@ -1133,7 +1135,8 @@ function handleTouchStart(e) {
         const [t1, t2] = e.touches;
         initialDist = Math.max(1, Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY));
         const midX = (t1.clientX + t2.clientX) / 2, midY = (t1.clientY + t2.clientY) / 2;
-        const rect = container.getBoundingClientRect();
+        // Measure in the stationary viewport, never the already-transformed image.
+        const rect = viewport.getBoundingClientRect();
         initialMidX = midX - rect.left - rect.width / 2;
         initialMidY = midY - rect.top - rect.height / 2;
         initialZoom = zoom; initialPanX = panX; initialPanY = panY;
@@ -1161,7 +1164,7 @@ function handleTouchMove(e) {
             panX = initialMidX - (initialMidX - initialPanX) * (zoom / initialZoom);
             panY = initialMidY - (initialMidY - initialPanY) * (zoom / initialZoom);
             const midX = (t1.clientX + t2.clientX) / 2, midY = (t1.clientY + t2.clientY) / 2;
-            const rect = container.getBoundingClientRect();
+            const rect = viewport.getBoundingClientRect();
             panX += (midX - rect.left - rect.width / 2) - initialMidX;
             panY += (midY - rect.top - rect.height / 2) - initialMidY;
         }
