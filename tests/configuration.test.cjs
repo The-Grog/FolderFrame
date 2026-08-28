@@ -8,6 +8,61 @@ const base = 'https://example.test/frame/index.html';
 const shipped = JSON.parse(fs.readFileSync(path.join(__dirname, '../folderframe.config.json'), 'utf8'));
 const normalize = raw => api.normalizeConfig(raw, base);
 
+test('viewer shortcuts override focused buttons without native Space/Enter clicks', async () => {
+    const app = await boot();
+    vm.runInContext("mediaFiles.push('https://example.test/frame/photos/b.jpg'); enterFullScreenViewer(0)", app.context);
+    for (const id of ['btn-image-mode', 'nav-next', 'btn-play-pause']) {
+        const button = app.get(id);
+        button.closest = selector => selector.split(',').map(s => s.trim()).includes('button') ? button : null;
+        let nativeClicks = 0;
+        const press = key => {
+            let prevented = false;
+            app.windowListeners.keydown({ key, target: button, preventDefault() { prevented = true; } });
+            // Browsers activate a focused button on Enter keydown or Space keyup
+            // unless keydown's default action was cancelled.
+            if (!prevented && (key === ' ' || key === 'Enter')) nativeClicks++;
+            assert.equal(prevented, true);
+        };
+        vm.runInContext('currentIndex = 0; setSlideshowPlaying(false)', app.context);
+        press('ArrowRight');
+        assert.equal(vm.runInContext('currentIndex', app.context), 1);
+        press('ArrowLeft');
+        assert.equal(vm.runInContext('currentIndex', app.context), 0);
+        const mode = app.state().imageMode;
+        press(' ');
+        assert.equal(app.state().slideshowPlaying, true);
+        assert.equal(app.state().imageMode, mode);
+        assert.equal(vm.runInContext('currentIndex', app.context), 0);
+        press('Enter');
+        assert.notEqual(app.state().imageMode, mode);
+        assert.equal(nativeClicks, 0);
+    }
+});
+
+test('shortcuts preserve native fields and modifiers, and ignore repeated toggles', async () => {
+    const app = await boot();
+    vm.runInContext('enterFullScreenViewer(0)', app.context);
+    let prevented = false;
+    const press = extra => app.windowListeners.keydown({ key: ' ', preventDefault() { prevented = true; }, ...extra });
+    for (const tag of ['select', 'input', 'textarea', 'video', 'a']) {
+        press({ target: { closest: selector => selector.split(',').map(s => s.trim()).includes(tag) ? {} : null } });
+    }
+    press({ target: { isContentEditable: true } });
+    for (const modifier of ['ctrlKey', 'altKey', 'metaKey', 'isComposing', 'defaultPrevented']) press({ [modifier]: true });
+    assert.equal(prevented, false);
+    assert.equal(app.state().slideshowPlaying, false);
+    press({ repeat: true });
+    assert.equal(prevented, true);
+    assert.equal(app.state().slideshowPlaying, false);
+    prevented = false;
+    vm.runInContext('renderGridView()', app.context);
+    press({});
+    assert.equal(prevented, false);
+    vm.runInContext('enterFullScreenViewer(0); controlsEnabled = false', app.context);
+    press({});
+    assert.equal(prevented, false);
+});
+
 test('scan errors remain distinguishable from routine mobile timestamps', async () => {
     const app = await boot();
     const classes = new Set();
@@ -925,7 +980,7 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8'), context);
     await listeners.DOMContentLoaded();
     const state = () => JSON.parse(vm.runInContext('JSON.stringify({ currentFolder, galleryViewMode, imageMode, slideshowInterval, slideshowPlaying, isGridViewActive, mediaFiles, activeSource, rememberPreferences })', context));
-    return { context, get, state, requests, saved, sourceLabels, get animationFrames() { return animationFrames; } };
+    return { context, get, state, requests, saved, sourceLabels, windowListeners: listeners, get animationFrames() { return animationFrames; } };
 }
 
 test('pinch zoom transitions smoothly to one-finger pan and cancellation clears gestures', async () => {

@@ -1208,7 +1208,14 @@ function setupEventListeners() {
     window.addEventListener('keydown', e => {
         if (!controlsEnabled) return;
         if (isGridViewActive) return;
-        if (e.target?.closest?.('button, a, select, input, textarea, video, [contenteditable="true"]')) return;
+        if (e.defaultPrevented || e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return;
+        if (e.target?.isContentEditable || e.target?.closest?.('a, select, input, textarea, video, [contenteditable]:not([contenteditable="false"])')) return;
+        const key = e.key.toLowerCase();
+        if (!['arrowleft', 'arrowright', ' ', 'enter', 's', 'f', 't', 'g', 'escape'].includes(key)) return;
+        // Viewer shortcuts own these keys even after a toolbar/arrow button is
+        // clicked. Prevent native Space/Enter activation of the focused button.
+        e.preventDefault();
+        if (e.repeat && key !== 'arrowleft' && key !== 'arrowright') return;
         if (e.key === 'ArrowLeft') prevMedia();
         if (e.key === 'ArrowRight') nextMedia();
         if (e.key === ' ') { e.preventDefault(); toggleSlideshow(); }
