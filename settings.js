@@ -2,13 +2,13 @@
 (function (root) {
     'use strict';
     const DEFAULTS = Object.freeze({
-        album: '', view: 'folders', sort: 'newest', interval: 5, imageMode: 'fit',
-        shuffle: false, autoRefresh: true, tvMode: false,
+        album: '', view: 'folders', sort: 'filename', interval: 5, imageMode: 'fit',
+        shuffle: false, autoRefresh: true, refreshInterval: 60, tvMode: false,
         autoplay: false, rememberPreferences: true, controls: true, showFilenames: true
     });
     const BOOLEAN_KEYS = ['shuffle', 'autoRefresh', 'tvMode', 'autoplay', 'rememberPreferences', 'controls', 'showFilenames'];
     const SAVED_KEYS = ['album', 'view', 'sort', 'interval', 'imageMode', 'shuffle', 'autoRefresh'];
-    const INTERVALS = [3, 5, 10, 15, 30, 60];
+    const INTERVALS = [3, 5, 10, 15, 30, 60, 300, 900, 3600];
 
     function object(value) {
         return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -38,8 +38,10 @@
                 if (!['newest', 'oldest', 'filename'].includes(item)) throw new Error('sort must be newest, oldest, or filename');
             } else if (key === 'imageMode') {
                 if (!['fit', 'original'].includes(item)) throw new Error('imageMode must be fit or original');
+            } else if (key === 'refreshInterval') {
+                if (!Number.isInteger(item) || item < 1 || item > 86400) throw new Error('refreshInterval must be an integer from 1 to 86400 seconds');
             } else if (key === 'interval') {
-                if (!INTERVALS.includes(item)) throw new Error('interval must be 3, 5, 10, 15, 30, or 60');
+                if (!INTERVALS.includes(item)) throw new Error('interval must be 3, 5, 10, 15, 30, 60, 300, 900, or 3600');
             } else {
                 throw new Error(`Unknown setting: ${key}`);
             }
@@ -111,7 +113,7 @@
         const params = new URLSearchParams(search);
         const profile = params.get('profile') === 'embed' ? 'embed' : 'index';
         if (params.has('profile') && !['index', 'embed'].includes(params.get('profile'))) warnings.push('Unknown profile; using index');
-        let settings = { ...DEFAULTS, source: config.sources[0].id, rememberPreferences: profile === 'index' };
+        let settings = { ...DEFAULTS, source: config.sources[0].id, refreshInterval: profile === 'embed' ? 300 : 60, rememberPreferences: profile === 'index' };
         settings = applyLayer(settings, config.defaults);
         settings = applyLayer(settings, config[profile]);
         const overrides = urlSettings(params, config.sources, warnings);

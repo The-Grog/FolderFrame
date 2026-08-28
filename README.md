@@ -11,6 +11,14 @@ an embedded gallery or slideshow within your websites. Use it on its own,
 or add it to an existing page with a standard iframe—including an optional
 controls-free slideshow mode.  No database or PHP required.
 
+Manage one gallery on your host and open it on multiple devices—digital photo
+frames, tablets, wall displays, or desktop browsers. Each display can use its
+own album and slideshow settings while sharing the same media library.
+
+Make it your own: FolderFrame is MIT-licensed, so you can edit the site and its
+files, customize the branding, and adapt it to your needs. Keep the required
+copyright and license notice when distributing copies (see [LICENSE](LICENSE)).
+
 [![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-0070ba?logo=paypal&logoColor=white)](https://paypal.me/machogrog)
 
 See the [project roadmap](TODO.md) for planned improvements to thumbnails, performance, mobile controls, and configuration. Interested in helping? Read the [contributing guide](CONTRIBUTING.md).
@@ -33,6 +41,14 @@ Compact controls put slideshow playback, Shuffle, Fit, fullscreen, and TV Mode w
 
 Browse albums with cover previews and cycle between Newest, Oldest, and Filename sorting.
 
+### Mobile viewer
+
+<img src="docs/images/folderframe-mobile-viewer.png" alt="FolderFrame mobile viewer with compact touch controls and a lunar photograph" width="320">
+
+Phone-sized controls keep playback, Shuffle, interval, Fit/Original, fullscreen,
+and TV Mode organized above the media. Swipe fitted photos, pinch to zoom, and
+drag to pan when zoomed. Fullscreen availability varies by mobile browser.
+
 ## Overview
 
 This is a lightweight, self-hosted photo and video gallery. It reads the
@@ -41,7 +57,7 @@ directory listing, so there is no database, import process, or manually
 maintained media list.
 
 - **Folder-based albums:** thumbnail grid, image cover previews with folder badges, nested albums, breadcrumbs, and recursive All Pics view.
-- **Flexible sorting:** Newest by default, plus Oldest and natural Filename order, with separate index/embed defaults. Date sorting uses server modification dates, not photo capture dates.
+- **Flexible sorting:** Natural Filename order by default, plus Newest and Oldest, with separate index/embed defaults. Date sorting uses server modification dates, not photo capture dates.
 - **Photos and videos:** JPEG, PNG, WebP, GIF, HEIC/HEIF conversion, and MP4/MOV playback (browser codec support applies).
 - **Slideshow and TV mode:** selectable intervals, Shuffle, fullscreen, automatic rescans, and automatic skipping of failed media.
 - **Responsive viewer:** compact mobile controls, pinch zoom, pan, and Fit/Original sizing.
@@ -51,6 +67,10 @@ maintained media list.
 - **Static-server hosting:** no database or build step; works with a web server that supplies HTML directory listings.
 
 ## Browser and mobile support
+
+Large libraries use bounded loading, cancelled stale requests, partial-scan
+recovery, and separate HEIC viewer/thumbnail caches. See [resilience and testing
+notes](RESILIENCE.md) for limits, the stuck-decoder caveat, and device checks.
 
 FolderFrame is designed for modern desktop and mobile browsers, including
 Chrome/Edge/Firefox and Safari. Desktop and phone layouts have been manually
@@ -87,7 +107,7 @@ and starts the embed as a controls-free slideshow including subfolders:
     "source": "photos",
     "album": "",
     "view": "folders",
-    "sort": "newest",
+    "sort": "filename",
     "interval": 5,
     "imageMode": "fit",
     "shuffle": false,
@@ -98,8 +118,9 @@ and starts the embed as a controls-free slideshow including subfolders:
     "showFilenames": true,
     "rememberPreferences": true
   },
-  "index": {},
+  "index": { "refreshInterval": 60 },
   "embed": {
+    "refreshInterval": 300,
     "view": "all",
     "autoplay": true,
     "controls": false,
@@ -121,11 +142,12 @@ Put settings in `defaults` for both profiles or in `index`/`embed` to override t
 | `source` | First configured source | A source ID from `sources` |
 | `album` | `""` | Path within the source, e.g. `"Friends/2026"` |
 | `view` | `"folders"` | `"folders"` or `"all"` (recursive) |
-| `sort` | `"newest"` | `"newest"`, `"oldest"`, or `"filename"` |
-| `interval` | `5` | Seconds: 3, 5, 10, 15, 30, 60 |
+| `sort` | `"filename"` | `"newest"`, `"oldest"`, or `"filename"` |
+| `interval` | `5` | Seconds: 3, 5, 10, 15, 30, 60, 300, 900, 3600 |
 | `imageMode` | `"fit"` | `"fit"` or `"original"` |
 | `shuffle` | `false` | Boolean |
-| `autoRefresh` | `true` | Boolean: rescan every 30 seconds |
+| `autoRefresh` | `true` | Boolean: enable automatic rescanning |
+| `refreshInterval` | Index: `60`; embed: `300` | Integer seconds, 1–86400; config only |
 | `tvMode` | `false` | Boolean: fit/shuffle/auto-refresh/autoplay preset |
 | `autoplay` | `false` | Boolean: enter viewer and start slideshow |
 | `controls` | `true` | Boolean: false opens viewer without controls; videos are muted |
@@ -172,6 +194,7 @@ Keep the files arranged like this:
     ├── index.html
     ├── styles.css
     ├── app.js
+    ├── resilience.js
     ├── settings.js
     ├── folderframe.config.json
     ├── heic2any.min.js
@@ -228,8 +251,9 @@ server that can provide directory listings.
 
 OPTION 2 — HOSTING ON A WEB SERVER OR UNRAID
 
-FolderFrame is not tied to a specific web server. Apache, Nginx, Caddy,
-lighttpd, and similar servers can all work. On Unraid, use any suitable
+FolderFrame is not tied to a specific web server. Caddy, NGINX, lighttpd,
+Apache, and similar static servers are suitable when HTML directory browsing
+is enabled for the media folders. On Unraid, use any suitable
 web-server container and map the FolderFrame directory into its web root.
 
 The web root should contain:
@@ -237,6 +261,7 @@ The web root should contain:
     index.html
     styles.css
     app.js
+    resilience.js
     settings.js
     folderframe.config.json
     heic2any.min.js
@@ -307,8 +332,8 @@ REFRESHING
 
 Click “Refresh Folder” to scan immediately.
 
-When Auto Refresh is enabled, the current folder is rescanned every 30
-seconds. The gallery also rescans when you return to the browser tab.
+When Auto Refresh is enabled, the current folder is rescanned at the configured refreshInterval
+(default: one minute for index, five minutes for embed). The gallery also rescans when you return to the browser tab.
 
 This means newly added or removed media can appear without manually
 rebuilding anything.
@@ -344,7 +369,7 @@ shuffle is enabled and Shuffle Off means it is disabled.
 SORTING
 
 The button between By Folder and Auto Refresh shows the current sorting.
-Click it to cycle Newest, Oldest, Filename. Newest is the default.
+Click it to cycle Newest, Oldest, Filename. Filename is the default.
 Newest/Oldest use the server's file modification date (HTTP Last-Modified),
 not when the photo was taken. Files with missing dates sort last by filename;
 equal dates use natural filename order. Folders remain first and alphabetical.
@@ -354,7 +379,13 @@ Set "sort": "newest", "oldest", or "filename" in folderframe.config.json under
 defaults, index, or embed. Shared defaults apply to both; profile settings
 override them. Saved preferences win when enabled; ?sort=filename explicitly
 overrides them, and ?remember=0 lets you test config defaults.
-Date lookups use bounded HEAD requests and cache results for one minute.
+Date lookups use bounded HEAD requests and cache results for 24 hours in localStorage.
+The cache is capped at 2,000 entries per app/source, evicting oldest checked
+entries first. It survives reloads and browser restarts when storage is available;
+blocked/full storage falls back to a bounded in-memory cache. It is separate
+from remembered preferences, so remember=0 does not disable this metadata cache.
+Cached media URLs and dates remain on the device until replaced, evicted, or
+site storage is cleared; expired entries are discarded when date sorting runs.
 Refresh Folder reloads dates; Filename skips date lookups entirely.
 See CONFIGURATION.md for examples and server requirements.
 
@@ -370,8 +401,10 @@ A blue folder badge and the album name distinguish covers from individual
 photos. Empty, video-only, nested-folder-only, or failed previews keep the
 folder icon. Covers do not recursively scan descendant albums.
 
-Previews load near the visible grid, with up to three directory lookups/HEIC
-conversions at once. They use original images, not generated thumbnails.
+Previews load near the visible grid, with up to three album-preview jobs and
+two shared HEIC-processing jobs at once. HEIC previews are downscaled to a
+480-pixel maximum edge; other formats still use original images. No server-side
+thumbnail generation is required. Offscreen HEIC previews release their leases.
 Use Refresh Folder to reselect covers after changing files inside albums;
 unchanged background refreshes keep existing tiles. There is no cover.jpg
 override yet.
@@ -381,7 +414,7 @@ override yet.
 -   Click an album card to enter that folder.
 -   Use the breadcrumb to navigate back through albums.
 -   Click “Refresh Folder” for an immediate rescan.
--   Toggle “Auto Refresh” to enable or disable the 30-second automatic
+-   Toggle “Auto Refresh” to enable or disable the configured automatic
     rescan.
 -   Toggle “By Folder” / “All Pics” to switch between album browsing and
     recursively showing media from the current folder and its subfolders.
@@ -400,7 +433,7 @@ SLIDESHOW
 -   Click Play / Pause to start or stop the slideshow.
 -   Press Space to start/pause from the full viewer.
 -   Available intervals are: 3 seconds 5 seconds 10 seconds 15 seconds
-    30 seconds 60 seconds
+    30 seconds 60 seconds 5 minutes 15 minutes 60 minutes
 
 SHUFFLE
 
@@ -525,7 +558,7 @@ Supported options:
 
     interval=SECONDS
         Set slideshow interval.
-        Valid values: 3, 5, 10, 15, 30, 60
+        Valid values: 3, 5, 10, 15, 30, 60, 300, 900, 3600
 
     shuffle=1 or shuffle=0
         Enable or disable Shuffle.
@@ -540,7 +573,7 @@ Supported options:
         Show the normal folder/album view.
 
     sort=newest or sort=oldest or sort=filename
-        Choose media order (Newest by default).
+        Choose media order (Filename by default).
 
     autoplay=1 or autoplay=0
         Enter the viewer and start slideshow playback, or start paused in the grid.
@@ -716,3 +749,32 @@ If FolderFrame is useful to you, you can support its continued development:
 LICENSE
 
 FolderFrame is available under the MIT License. See LICENSE for details.
+
+## Refresh frequency and long slideshows
+
+`refreshInterval` sets automatic folder rescanning in **seconds**: index defaults
+to 60 (one minute), embed to 300 (five minutes). Allowed values are integers
+from 1 to 86400. It is a config-only setting, not a saved browser preference
+or URL option. `autoRefresh: false` disables automatic rescanning.
+
+Set it under `defaults` for both profiles or under `index`/`embed` separately:
+
+```json
+"index": { "refreshInterval": 60 },
+"embed": { "refreshInterval": 300 }
+```
+
+This is a configuration fragment; keep your other sections and settings.
+Profile entries override shared defaults, including the explicit entries in
+the shipped file. Choose shorter refresh periods for frequently changing media
+and longer periods for stable photo-frame displays or many devices sharing one
+host. Each display scans independently. Refresh Folder still scans immediately;
+returning to a visible tab also triggers a scan when Auto Refresh is enabled.
+
+Slideshow `interval` is separate: 300, 900, and 3600 seconds appear as **5m**,
+**15m**, and **60m** in the viewer. These values also work in config, saved
+preferences, and the `interval` URL option. They control photo duration;
+videos advance on completion during a slideshow.
+
+Filename is now the default sort. Existing saved sort choices or explicit URL
+options still take precedence; use `?remember=0` to test config defaults.

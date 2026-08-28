@@ -3,6 +3,36 @@
 // auto-rescan, TV/photo-frame mode, local preferences, and recursive folder browsing.
 
 const settingsApi = window.FolderFrameSettings;
+const resilience = window.FolderFrameResilience;
+let scanSession = null, gridSession = null, viewerSession = null;
+let failedNavigation = null;
+const DIRECTORY_TIMEOUT = 15000, MEDIA_TIMEOUT = 30000;
+function clearMediaSource(element) {
+    if (element.removeAttribute) element.removeAttribute('src');
+    else element.src = '';
+    element.load?.();
+}
+
+function stopViewerSession() {
+    if (!viewerSession) return;
+    viewerSession.controller.abort();
+    clearTimeout(viewerSession.timer);
+    viewerSession = null;
+}
+function stopGridSession() {
+    stopAlbumPreviews();
+    if (!gridSession) return;
+    gridSession.controller.abort();
+    gridSession.observer?.disconnect();
+    gridSession.cleanups.forEach(cleanup => cleanup());
+    gridSession = null;
+}
+function startGridSession() {
+    stopGridSession();
+    gridSession = { controller: new AbortController(), cleanups: [], observer: null };
+    return gridSession;
+}
+
 let galleryConfig;
 let activeSource;
 let preferenceKey;
@@ -15,6 +45,7 @@ let albumPreviewSession = null;
 function stopAlbumPreviews() {
     if (!albumPreviewSession) return;
     albumPreviewSession.controller.abort();
+    albumPreviewSession.items?.forEach((controller, item) => { controller.abort(); item.coverImage && (item.coverImage.src = ''); });
     albumPreviewSession.observer?.disconnect();
     albumPreviewSession.queue.length = 0;
     albumPreviewSession = null;
@@ -22,23 +53,33 @@ function stopAlbumPreviews() {
 
 function startAlbumPreviews() {
     stopAlbumPreviews();
-    const session = { controller: new AbortController(), observer: null, queue: [], active: 0 };
+    const session = { controller: new AbortController(), observer: null, queue: [], active: 0, items: new Map() };
     albumPreviewSession = session;
     const pump = () => {
         if (session.controller.signal.aborted) return;
         while (session.active < 3 && session.queue.length) {
-            const { item, folder } = session.queue.shift();
+            const { item, folder, controller } = session.queue.shift();
+            if (controller.signal.aborted) continue;
             session.active++;
-            loadAlbumPreview(item, folder, session.controller.signal)
+            loadAlbumPreview(item, folder, controller.signal)
                 .finally(() => { session.active--; pump(); });
         }
     };
-    const enqueue = item => { session.queue.push({ item, folder: item.dataset.albumFolder }); pump(); };
+    const enqueue = item => {
+        if (session.items.has(item)) return;
+        const controller = new AbortController();
+        session.items.set(item, controller);
+        session.queue.push({ item, folder: item.dataset.albumFolder, controller }); pump();
+    };
     if ('IntersectionObserver' in window) {
         session.observer = new IntersectionObserver(entries => {
-            for (const entry of entries) if (entry.isIntersecting) {
-                session.observer.unobserve(entry.target);
-                enqueue(entry.target);
+            for (const entry of entries) {
+                if (entry.isIntersecting) enqueue(entry.target);
+                else {
+                    session.items.get(entry.target)?.abort(); session.items.delete(entry.target);
+                    if (entry.target.coverImage) entry.target.coverImage.src = '';
+                    entry.target.classList.remove('has-album-cover');
+                }
             }
         }, { root: gridViewContainer, rootMargin: '300px' });
     }
@@ -49,9 +90,10 @@ async function loadAlbumPreview(item, folder, signal) {
     const controller = new AbortController();
     const cancel = () => controller.abort();
     signal.addEventListener('abort', cancel, { once: true });
-    const timeout = setTimeout(cancel, 12000);
+    let timeout;
     let preview;
     const fallback = () => {
+        if (signal.aborted) return;
         if (preview) preview.hidden = true;
         item.classList.remove('has-album-cover');
     };
@@ -61,30 +103,33 @@ async function loadAlbumPreview(item, folder, signal) {
         // scanDirectory already sorts naturally by filename. Do not crawl descendants.
         const file = listing.filePaths.find(isImageFile);
         if (!file || signal.aborted || controller.signal.aborted) return;
-        const url = isHeicFile(file) ? await getSpecialImageURL(file) : file;
+        const url = isHeicFile(file) ? await getSpecialImageURL(file, signal, 'thumbnail') : file;
         if (signal.aborted || controller.signal.aborted) return;
-        preview = document.createElement('img');
+        preview = item.coverImage || document.createElement('img');
+        item.coverImage = preview;
         preview.className = 'album-cover';
         preview.alt = '';
         preview.hidden = true;
         preview.decoding = 'async';
         preview.onload = () => {
             if (signal.aborted) return;
+            clearTimeout(timeout);
             preview.hidden = false;
             item.classList.add('has-album-cover');
         };
-        preview.onerror = fallback;
-        item.appendChild(preview);
+        preview.onerror = () => { clearTimeout(timeout); fallback(); };
+        timeout = setTimeout(() => { fallback(); preview.src = ''; }, MEDIA_TIMEOUT);
+        signal.addEventListener('abort', () => { clearTimeout(timeout); preview.src = ''; }, { once: true });
+        if (!preview.parentNode) item.appendChild(preview);
         preview.src = url;
     } catch (error) {
         // An unavailable preview never prevents opening the album.
         fallback();
     } finally {
-        clearTimeout(timeout);
         signal.removeEventListener('abort', cancel);
     }
 }
-const AUTO_REFRESH_MS = 30000;
+let refreshInterval = 60; // Seconds; resolved per index/embed profile.
 
 let mediaFiles = [];
 let subfolders = [];
@@ -98,8 +143,53 @@ let slideshowAnimationFrame = null, slideshowStartedAt = 0;
 let uiVisible = true, idleTimer = null, imageMode = 'fit', isGridViewActive = true;
 let shuffleEnabled = false, autoRefreshEnabled = true, tvModeEnabled = false;
 let galleryViewMode = 'folders'; // 'folders' or 'all'
-let sortMode = 'newest';
+let sortMode = 'filename';
 const modifiedDateCache = new Map();
+const DATE_CACHE_TTL = 24 * 60 * 60 * 1000;
+const DATE_CACHE_LIMIT = 2000;
+let dateCacheKey = null;
+
+function trimDateCache(now = Date.now()) {
+    for (const [file, entry] of modifiedDateCache) {
+        if (!entry || !Number.isFinite(entry.checked) || entry.checked > now ||
+            now - entry.checked >= DATE_CACHE_TTL ||
+            (entry.date !== null && !Number.isFinite(entry.date))) modifiedDateCache.delete(file);
+    }
+    const oldest = [...modifiedDateCache].sort((a, b) => a[1].checked - b[1].checked);
+    for (const [file] of oldest.slice(0, Math.max(0, oldest.length - DATE_CACHE_LIMIT))) modifiedDateCache.delete(file);
+}
+
+function loadDateCache() {
+    const key = `folderframe.date-cache:v1:${galleryConfig.baseUrl}:${activeSource.id}:${activeSource.url}`;
+    if (dateCacheKey === key) return;
+    modifiedDateCache.clear();
+    dateCacheKey = key;
+    try {
+        const entries = JSON.parse(localStorage.getItem(key) || '[]');
+        if (!Array.isArray(entries)) return;
+        for (const entry of entries) {
+            if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string') continue;
+            const [file, value] = entry;
+            // Cached metadata must never introduce URLs outside the selected source.
+            if (!file.startsWith(activeSource.url) || !value || typeof value !== 'object') continue;
+            modifiedDateCache.set(file, { date: value.date, checked: value.checked });
+        }
+        trimDateCache();
+    } catch (error) {
+        // Private browsing, corrupt JSON, and denied storage must not stop sorting.
+        modifiedDateCache.clear();
+    }
+}
+
+function saveDateCache() {
+    trimDateCache();
+    try {
+        localStorage.setItem(dateCacheKey, JSON.stringify([...modifiedDateCache]
+            .filter(([file]) => file.startsWith(activeSource.url))));
+    } catch (error) {
+        // Keep the bounded in-memory cache if storage is full or unavailable.
+    }
+}
 let autoRefreshTimer = null;
 let isScanning = false;
 let scannedFolders = 0, scannedFiles = 0;
@@ -108,8 +198,7 @@ let mediaFailed = false;
 let imageReady = false;
 
 // Cache only object URLs we create ourselves. Normal HTTP URLs are never revoked.
-const imageBlobCache = new Map(); // filepath -> blob URL
-const cacheKind = new Map();      // filepath -> detected format
+let specialImagePool = null;
 
 const $ = (id) => document.getElementById(id);
 const viewport = $('media-viewport');
@@ -167,7 +256,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 });
 
-window.addEventListener('beforeunload', () => clearImageBlobCache());
+window.addEventListener('beforeunload', () => {
+    scanSession?.abort(); stopViewerSession(); stopGridSession(); clearImageBlobCache();
+});
 
 function isHeicFile(path) { return /\.(heic|heif)$/i.test(path); }
 function isImageFile(path) { return /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(path); }
@@ -225,6 +316,7 @@ async function loadConfiguration() {
     imageMode = startupSettings.imageMode;
     shuffleEnabled = startupSettings.shuffle;
     autoRefreshEnabled = startupSettings.autoRefresh;
+    refreshInterval = startupSettings.refreshInterval;
     tvModeEnabled = startupSettings.tvMode;
     slideshowPlaying = startupSettings.autoplay;
 
@@ -257,6 +349,7 @@ function updateControlStates() {
     btnShuffle.classList.remove('is-active');
     btnShuffle.setAttribute('aria-pressed', String(shuffleEnabled));
     btnShuffle.querySelector('.button-label').textContent = shuffleEnabled ? 'Shuffle' : 'Shuffle Off';
+    btnAutoRefresh.title = `Automatically rescan every ${refreshInterval} seconds`;
     btnAutoRefresh.classList.remove('is-active');
     btnAutoRefresh.setAttribute('aria-pressed', String(autoRefreshEnabled));
     btnAutoRefresh.querySelector('.button-label').textContent = autoRefreshEnabled ? 'Auto Refresh On' : 'Auto Refresh Off';
@@ -279,26 +372,8 @@ function syncPlayButton() {
     slideshowText.textContent = slideshowPlaying ? 'Pause' : 'Play';
 }
 
-function clearImageBlobCache() {
-    imageBlobCache.forEach(url => URL.revokeObjectURL(url));
-    imageBlobCache.clear();
-    cacheKind.clear();
-}
-
-function removeCacheEntry(filepath) {
-    const url = imageBlobCache.get(filepath);
-    if (url) URL.revokeObjectURL(url);
-    imageBlobCache.delete(filepath);
-    cacheKind.delete(filepath);
-}
-
-function pruneCache(validFiles) {
-    const valid = new Set(validFiles);
-    for (const path of imageBlobCache.keys()) {
-        if (!valid.has(path)) removeCacheEntry(path);
-    }
-}
-
+function clearImageBlobCache() { specialImagePool?.invalidate(); }
+function removeCacheEntry(filepath) { specialImagePool?.invalidate(filepath); }
 function detectImageFormat(arrayBuffer) {
     const b = new Uint8Array(arrayBuffer);
     if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'jpeg';
@@ -330,42 +405,50 @@ function mimeForFormat(format) {
     return ({ jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' })[format] || '';
 }
 
-async function getSpecialImageURL(filepath) {
-    if (imageBlobCache.has(filepath)) return imageBlobCache.get(filepath);
-
-    const response = await fetch(filepath, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const arrayBuffer = await response.arrayBuffer();
-    const actualFormat = detectImageFormat(arrayBuffer);
-    cacheKind.set(filepath, actualFormat);
-
-    if (['jpeg', 'png', 'webp', 'gif'].includes(actualFormat)) {
-        const mime = mimeForFormat(actualFormat);
-        const objectURL = URL.createObjectURL(new Blob([arrayBuffer], { type: mime }));
-        imageBlobCache.set(filepath, objectURL);
-        console.info(`${filepath}: extension suggests HEIC/HEIF but content is ${actualFormat.toUpperCase()}; using ${mime} Blob.`);
-        return objectURL;
-    }
-
-    if (actualFormat === 'heic') {
-        if (typeof heic2any !== 'function') throw new Error('HEIC decoder library did not load');
-        console.info(`${filepath}: genuine HEIC/HEIF detected; converting with heic2any.`);
-        const sourceBlob = new Blob([arrayBuffer], { type: 'image/heic' });
-        const converted = await heic2any({ blob: sourceBlob, toType: 'image/jpeg', quality: 0.92 });
-        const convertedBlob = Array.isArray(converted) ? converted[0] : converted;
-        const objectURL = URL.createObjectURL(convertedBlob);
-        imageBlobCache.set(filepath, objectURL);
-        return objectURL;
-    }
-
-    throw new Error('Unknown or corrupt image format');
+async function makeThumbnail(blob) {
+    const temporary = URL.createObjectURL(blob);
+    try {
+        const image = new Image();
+        await new Promise((resolve, reject) => {
+            image.onload = resolve; image.onerror = () => reject(new Error('Thumbnail decode failed'));
+            image.src = temporary;
+        });
+        const scale = Math.min(1, 480 / Math.max(image.naturalWidth, image.naturalHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+        return await new Promise((resolve, reject) => canvas.toBlob(
+            result => result ? resolve(result) : reject(new Error('Thumbnail resize failed')), 'image/jpeg', 0.8));
+    } finally { URL.revokeObjectURL(temporary); }
+}
+function getImagePool() {
+    if (!specialImagePool) specialImagePool = resilience.createImagePool({
+        download: (file, signal) => resilience.request(file, { signal, timeout: MEDIA_TIMEOUT, body: 'arrayBuffer', cache: 'no-store' }),
+        decode: async data => {
+            const format = detectImageFormat(data);
+            if (['jpeg', 'png', 'webp', 'gif'].includes(format)) return new Blob([data], { type: mimeForFormat(format) });
+            if (format !== 'heic') throw new Error('Unknown or corrupt image format');
+            if (typeof heic2any !== 'function') throw new Error('HEIC decoder library did not load');
+            const result = await heic2any({ blob: new Blob([data], { type: 'image/heic' }), toType: 'image/jpeg', quality: 0.92 });
+            return Array.isArray(result) ? result[0] : result;
+        },
+        thumbnail: makeThumbnail,
+        createURL: blob => URL.createObjectURL(blob), revokeURL: url => URL.revokeObjectURL(url)
+    });
+    return specialImagePool;
+}
+async function getSpecialImageURL(filepath, signal, kind = 'viewer') {
+    const lease = await getImagePool().acquire(filepath, kind, signal);
+    if (signal?.aborted) { lease.release(); throw resilience.abortError(); }
+    if (signal) signal.addEventListener('abort', lease.release, { once: true });
+    else lease.release();
+    return lease.url;
 }
 
 async function scanDirectory(folder = currentFolder, options = {}) {
     const url = currentDirectoryUrl(folder);
-    const response = await fetch(url, { cache: 'no-store', ...options });
-    if (!response.ok) throw new Error(`Could not fetch directory (${response.status})`);
-    const html = await response.text();
+    const html = await resilience.request(url, { cache: 'no-store', timeout: DIRECTORY_TIMEOUT, ...options });
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const files = new Set();
     const folders = new Set();
@@ -389,29 +472,28 @@ async function scanDirectory(folder = currentFolder, options = {}) {
     return { filePaths, folderNames };
 }
 
-async function scanDirectoryRecursive(folder = currentFolder, visited = new Set(), listing = null) {
-    const normalized = folder.replace(/^\/+|\/+$/g, '');
-    if (visited.has(normalized)) return [];
+async function scanDirectoryRecursive(folder = currentFolder, visited = new Set(), listing = null, signal) {
+    const normalized = folder.split('/').filter(Boolean).join('/');
+    if (signal?.aborted) throw resilience.abortError();
+    if (visited.has(normalized)) return { files: [], failedFolders: [] };
     visited.add(normalized);
-
-    const { filePaths, folderNames } = listing || await scanDirectory(normalized);
-    scannedFolders++;
-    scannedFiles += filePaths.length;
+    const { filePaths, folderNames } = listing || await scanDirectory(normalized, { signal });
+    const result = { files: [...filePaths], failedFolders: [] };
+    scannedFolders++; scannedFiles += filePaths.length;
     setScanStatus(`Scanning… ${scannedFolders} folders checked · ${scannedFiles} files found`);
-    let allFiles = [...filePaths];
-
     for (const child of folderNames) {
-        const childFolder = normalized ? `${normalized}/${child}` : child;
-        const childFiles = await scanDirectoryRecursive(childFolder, visited);
-        allFiles.push(...childFiles);
+        if (signal?.aborted) throw resilience.abortError();
+        const path = normalized ? normalized + '/' + child : child;
+        try {
+            const nested = await scanDirectoryRecursive(path, visited, null, signal);
+            result.files.push(...nested.files);
+            result.failedFolders.push(...nested.failedFolders);
+        } catch (error) {
+            if (signal?.aborted || error.name === 'AbortError') throw error;
+            result.failedFolders.push(path);
+        }
     }
-
-    return allFiles.sort((a, b) =>
-        decodeURIComponent(a).localeCompare(decodeURIComponent(b), undefined, {
-            numeric: true,
-            sensitivity: 'base'
-        })
-    );
+    return result;
 }
 
 function compareFilenames(a, b) {
@@ -420,9 +502,14 @@ function compareFilenames(a, b) {
         a.localeCompare(b);
 }
 
-async function sortMediaFiles(files, mode, refreshDates = false) {
+async function sortMediaFiles(files, mode, refreshDates = false, signal) {
+    if (signal?.aborted) throw resilience.abortError();
     if (mode === 'filename') return [...files].sort(compareFilenames);
+    loadDateCache();
+    trimDateCache();
     const controller = new AbortController();
+    const cancel = () => controller.abort();
+    signal?.addEventListener('abort', cancel, { once: true });
     // Bound the entire metadata pass, rather than waiting per file indefinitely.
     const timeout = setTimeout(() => controller.abort(), 8000);
     let cursor = 0;
@@ -433,7 +520,7 @@ async function sortMediaFiles(files, mode, refreshDates = false) {
             while (cursor < files.length) {
                 const file = files[cursor++];
                 const cached = modifiedDateCache.get(file);
-                if (!refreshDates && cached && now - cached.checked < 60000) {
+                if (!refreshDates && cached && now - cached.checked < DATE_CACHE_TTL) {
                     dates.set(file, cached.date);
                     continue;
                 }
@@ -452,7 +539,8 @@ async function sortMediaFiles(files, mode, refreshDates = false) {
             }
         };
         await Promise.all(Array.from({ length: Math.min(4, files.length) }, worker));
-    } finally { clearTimeout(timeout); }
+    } finally { clearTimeout(timeout); signal?.removeEventListener('abort', cancel); saveDateCache(); }
+    if (signal?.aborted) throw resilience.abortError();
     const missing = files.filter(file => dates.get(file) == null).length;
     $('btn-sort').title = `Sorting: ${mode === 'newest' ? 'Newest' : 'Oldest'} by file modification date. ${missing} files without dates sort last by filename. Click to change sorting.`;
     return [...files].sort((a, b) => {
@@ -466,92 +554,87 @@ async function sortMediaFiles(files, mode, refreshDates = false) {
 
 async function cycleSort() {
     if (isScanning) return;
-    isScanning = true;
-    $('btn-sort').disabled = true;
-    btnRefreshGrid.disabled = true;
-    thumbnailGrid.setAttribute('aria-busy', 'true');
-    $('scan-loading').hidden = false;
-    const previousFile = mediaFiles[currentIndex];
-    try {
-        const modes = ['newest', 'oldest', 'filename'];
-        sortMode = modes[(modes.indexOf(sortMode) + 1) % modes.length];
-        updateControlStates();
-        setScanStatus(sortMode === 'filename' ? 'Sorting by filename…' : 'Reading file dates…');
-        mediaFiles = await sortMediaFiles(mediaFiles, sortMode);
-        currentIndex = Math.max(0, mediaFiles.indexOf(previousFile));
-        renderGridView();
-        savePreferences();
-        setScanStatus(`Sorted: ${$('sort-label').textContent}`);
-    } finally {
-        isScanning = false;
-        $('btn-sort').disabled = false;
-        btnRefreshGrid.disabled = false;
-        thumbnailGrid.setAttribute('aria-busy', 'false');
-        $('scan-loading').hidden = true;
-    }
+    const modes = ['newest', 'oldest', 'filename'];
+    sortMode = modes[(modes.indexOf(sortMode) + 1) % modes.length];
+    updateControlStates();
+    await loadGallery();
+}
+
+function showScanFailures(folders) {
+    const notice = $('scan-failures');
+    notice.hidden = !folders.length;
+    $('scan-failure-text').textContent = folders.length
+        ? 'Scan incomplete. Could not read: ' + folders.join(', ') + '. Previously loaded files from these folders were retained.'
+        : '';
 }
 
 async function loadGallery({ preserveView = true, forceCacheClear = false, silent = false } = {}) {
-    if (isScanning) return;
+    if (isScanning && silent) return;
+    scanSession?.abort();
+    const session = new AbortController();
+    scanSession = session;
+    const folder = currentFolder, mode = galleryViewMode;
+    const current = () => scanSession === session && !session.signal.aborted;
     isScanning = true;
     scannedFolders = 0; scannedFiles = 0;
     thumbnailGrid.setAttribute('aria-busy', 'true');
-    btnRefreshGrid.disabled = true;
-    $('btn-sort').disabled = true;
+    btnRefreshGrid.disabled = true; $('btn-sort').disabled = true;
     $('scan-loading').hidden = false;
-    showWarning(false);
-    const oldFile = mediaFiles[currentIndex];
-    const oldViewWasGrid = isGridViewActive;
     setScanStatus(mediaFiles.length || subfolders.length ? 'Refreshing folders…' : 'Scanning folders…');
-
     try {
-        const currentListing = await scanDirectory(currentFolder);
-        const folderNames = currentListing.folderNames;
-        let filePaths = galleryViewMode === 'all'
-            ? await scanDirectoryRecursive(currentFolder, new Set(), currentListing)
-            : currentListing.filePaths;
-        const validFiles = new Set(filePaths);
-        for (const file of modifiedDateCache.keys()) if (!validFiles.has(file)) modifiedDateCache.delete(file);
-        if (sortMode !== 'filename') setScanStatus('Reading file dates…');
-        filePaths = await sortMediaFiles(filePaths, sortMode, forceCacheClear);
-
-        const changed = JSON.stringify(filePaths) !== JSON.stringify(mediaFiles) || JSON.stringify(folderNames) !== JSON.stringify(subfolders);
-        mediaFiles = filePaths;
-        subfolders = folderNames;
-        if (forceCacheClear) clearImageBlobCache();
-        pruneCache(mediaFiles);
-
-        if (oldFile) {
-            const existingIndex = mediaFiles.indexOf(oldFile);
-            currentIndex = existingIndex >= 0 ? existingIndex : Math.min(currentIndex, Math.max(0, mediaFiles.length - 1));
-        } else {
-            currentIndex = Math.min(currentIndex, Math.max(0, mediaFiles.length - 1));
+        const listing = await scanDirectory(folder, { signal: session.signal });
+        const result = mode === 'all'
+            ? await scanDirectoryRecursive(folder, new Set(), listing, session.signal)
+            : { files: listing.filePaths, failedFolders: [] };
+        if (!current()) return;
+        // A failed descendant is unknown, not deleted. Preserve only its previous files.
+        for (const file of mediaFiles) {
+            if (result.failedFolders.some(path => file.startsWith(currentDirectoryUrl(path))) && !result.files.includes(file)) result.files.push(file);
         }
-
+        const sorted = await sortMediaFiles(result.files, sortMode, forceCacheClear, session.signal);
+        if (!current()) return;
+        // Capture live viewer identity after awaits: the user may have advanced meanwhile.
+        const viewed = mediaFiles[currentIndex];
+        const wasGrid = isGridViewActive;
+        const changed = JSON.stringify(sorted) !== JSON.stringify(mediaFiles) ||
+            JSON.stringify(listing.folderNames) !== JSON.stringify(subfolders);
+        mediaFiles = sorted; subfolders = listing.folderNames;
+        const retained = viewed && mediaFiles.includes(viewed);
+        currentIndex = retained ? mediaFiles.indexOf(viewed) : Math.min(currentIndex, Math.max(0, mediaFiles.length - 1));
+        if (forceCacheClear) clearImageBlobCache();
+        showScanFailures(result.failedFolders);
+        failedNavigation = null;
         $('warning-title').textContent = 'No Media Detected';
-        $('warning-message').textContent = 'No supported media found in the selected folder/view. Check the source below or choose an album or All Pics.';
-        showWarning(mediaFiles.length === 0 && (subfolders.length === 0 || !controlsEnabled));
+        $('warning-message').textContent = 'No supported media found in the selected folder/view.';
+        showWarning(!result.failedFolders.length && mediaFiles.length === 0 && (subfolders.length === 0 || !controlsEnabled));
         renderBreadcrumb();
-        setScanStatus(`Updated ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
-
-        if (!preserveView || (oldViewWasGrid && (changed || forceCacheClear)) || mediaFiles.length === 0) {
+        setScanStatus(result.failedFolders.length ? 'Scan incomplete — some folders unavailable' :
+            `Updated ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`, Boolean(result.failedFolders.length));
+        if (!preserveView || (wasGrid && (changed || forceCacheClear)) || !mediaFiles.length) {
             renderGridView();
-        } else if (mediaFiles.length > 0 && (changed || forceCacheClear)) {
+        } else if (!wasGrid && !retained) {
             enterFullScreenViewer(currentIndex);
+        } else if (!wasGrid) {
+            mediaIndex.textContent = `${currentIndex + 1} / ${mediaFiles.length}`;
         }
         savePreferences();
-    } catch (err) {
-        console.error('Directory scanning error:', err);
+        return true;
+    } catch (error) {
+        if (!current() || error.name === 'AbortError') return;
+        console.error('Directory scanning error:', error);
         setScanStatus('Scan failed — check connection and retry', true);
+        showScanFailures([folder || activeSource.label]);
         $('warning-title').textContent = 'Could not scan this folder';
-        $('warning-message').textContent = 'Check your connection, source path, and server directory listing, then choose Scan Again.';
-        if (mediaFiles.length === 0 && subfolders.length === 0) showWarning(true);
+        $('warning-message').textContent = 'Check the connection and directory listing, then choose Scan Again.';
+        if (!mediaFiles.length && !subfolders.length) showWarning(true);
+        return false;
     } finally {
-        isScanning = false;
-        thumbnailGrid.setAttribute('aria-busy', 'false');
-        btnRefreshGrid.disabled = false;
-        $('btn-sort').disabled = false;
-        $('scan-loading').hidden = true;
+        if (scanSession === session) {
+            isScanning = false;
+            thumbnailGrid.setAttribute('aria-busy', 'false');
+            btnRefreshGrid.disabled = false; $('btn-sort').disabled = false;
+            $('scan-loading').hidden = true;
+        }
     }
 }
 
@@ -570,18 +653,38 @@ function setMediaLoading(text = '') {
 }
 
 function watchThumbnail(element, item, videoThumbnail = false) {
+    const session = gridSession;
+    let timer;
     item.classList.add('thumb-loading');
-    const finish = () => { item.classList.remove('thumb-loading'); element.classList.add('thumb-loaded'); };
+    const finish = () => {
+        clearTimeout(timer);
+        if (session?.controller.signal.aborted || element.resourceActive === false) return;
+        item.classList.remove('thumb-loading'); element.classList.add('thumb-loaded');
+    };
     element.onload = finish;
     if (videoThumbnail) element.onloadeddata = element.onloadedmetadata = finish;
     element.onerror = () => {
         finish();
+        if (session?.controller.signal.aborted || element.resourceActive === false) return;
         item.classList.add('thumb-error');
+        if (item.failedPreview) return;
+        item.failedPreview = true;
         const fallback = document.createElement('span');
-        fallback.className = 'thumbnail-unavailable';
-        fallback.textContent = 'Preview unavailable';
+        fallback.className = 'thumbnail-unavailable'; fallback.textContent = 'Preview unavailable';
         item.appendChild(fallback);
     };
+    // Native lazy images start their deadline only once in preload range.
+    element.startDeadline = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => { element.onerror?.(); element.src = ''; }, MEDIA_TIMEOUT);
+    };
+    element.cancelDeadline = () => clearTimeout(timer);
+    if (videoThumbnail) element.startDeadline();
+    session?.cleanups.push(() => {
+        clearTimeout(timer);
+        element.onload = element.onerror = element.onloadeddata = element.onloadedmetadata = null;
+        element.pause?.(); clearMediaSource(element);
+    });
 }
 
 function showWarning(show) { warningOverlay.style.display = show ? 'flex' : 'none'; }
@@ -622,19 +725,26 @@ function renderBreadcrumb() {
 }
 
 async function navigateToFolder(folder) {
-    if (isScanning) return;
+    scanSession?.abort();
+    stopViewerSession(); stopGridSession();
+    const previousFolder = currentFolder;
     gridReturn = null;
     currentFolder = folder;
     gridViewContainer.scrollTop = 0;
     currentIndex = 0;
     isGridViewActive = true;
     stopSlideshow();
-    clearImageBlobCache();
-    await loadGallery({ preserveView: false });
+    const succeeded = await loadGallery({ preserveView: false });
+    if (succeeded === false && currentFolder === folder) {
+        failedNavigation = folder;
+        currentFolder = previousFolder;
+        renderBreadcrumb(); renderGridView();
+    }
 }
 
 function renderGridView() {
-    stopAlbumPreviews();
+    stopViewerSession();
+    const session = startGridSession();
     const returnPosition = !isGridViewActive && gridReturn &&
         gridReturn.folder === currentFolder && gridReturn.view === galleryViewMode ? gridReturn : null;
     let returnTile = null;
@@ -681,21 +791,41 @@ function renderGridView() {
         observeAlbum(item);
     });
 
-    const observer = 'IntersectionObserver' in window ? new IntersectionObserver(entries => {
-        entries.forEach(entry => {
-            if (!entry.isIntersecting) return;
-            const el = entry.target;
-            observer.unobserve(el);
-            const file = el.dataset.heicSrc;
-            if (!file) return;
-            getSpecialImageURL(file)
-                .then(url => { el.src = url; el.classList.add('thumb-loaded'); })
-                .catch(err => {
-                    console.error(`HEIC/HEIF thumbnail generation failed for ${file}:`, err);
-                    el.onerror?.();
-                });
-        });
-    }, { root: gridViewContainer, rootMargin: '300px' }) : null;
+    const observed = new Map();
+    const updateThumbnail = (el, visible) => {
+        const state = observed.get(el);
+        if (!state) return;
+        if (!visible) {
+            if (state.heic) {
+                el.resourceActive = false;
+                el.cancelDeadline();
+                clearMediaSource(el); state.controller?.abort(); state.controller = null;
+                el.classList.remove('thumb-loaded');
+            }
+            return;
+        }
+        if (state.controller) return;
+        el.resourceActive = true;
+        const owner = new AbortController();
+        state.controller = owner;
+        if (state.heic) {
+            getSpecialImageURL(state.file, owner.signal, 'thumbnail').then(url => {
+                if (!owner.signal.aborted) { el.startDeadline(); el.src = url; }
+            }).catch(error => { if (!owner.signal.aborted && error.name !== 'AbortError') el.onerror?.(); });
+        } else {
+            el.startDeadline(); el.src = state.file;
+        }
+    };
+    if ('IntersectionObserver' in window) session.observer = new IntersectionObserver(entries => {
+        if (session.controller.signal.aborted) return;
+        entries.forEach(entry => updateThumbnail(entry.target, entry.isIntersecting));
+    }, { root: gridViewContainer, rootMargin: '300px' });
+    const observeImage = (el, file, heic = false) => {
+        observed.set(el, { file, heic, controller: null });
+        session.cleanups.push(() => { observed.get(el)?.controller?.abort(); });
+        if (session.observer) session.observer.observe(el);
+        else updateThumbnail(el, true);
+    };
 
     mediaFiles.forEach((file, index) => {
         const filename = decodeURIComponent(file.split('/').pop());
@@ -725,8 +855,7 @@ function renderGridView() {
             imgEl.decoding = 'async';
             imgEl.dataset.heicSrc = file;
             imgEl.className = 'heic-thumb';
-            if (observer) observer.observe(imgEl);
-            else getSpecialImageURL(file).then(url => { imgEl.src = url; }).catch(() => imgEl.onerror());
+            observeImage(imgEl, file, true);
             item.appendChild(imgEl);
             const fallback = document.createElement('div');
             fallback.className = 'heic-fallback';
@@ -735,7 +864,7 @@ function renderGridView() {
         } else {
             const imgEl = document.createElement('img');
             watchThumbnail(imgEl, item);
-            imgEl.src = file;
+            observeImage(imgEl, file);
             imgEl.alt = filename;
             imgEl.loading = 'lazy';
             imgEl.decoding = 'async';
@@ -788,7 +917,7 @@ function renderGridView() {
 function enterFullScreenViewer(index) {
     if (!mediaFiles.length) return;
     const openingViewer = isGridViewActive;
-    if (openingViewer) stopAlbumPreviews();
+    if (openingViewer) stopGridSession();
     if (openingViewer && mediaFiles[index]) gridReturn = {
         folder: currentFolder, view: galleryViewMode,
         file: mediaFiles[index], scrollTop: gridViewContainer.scrollTop || 0
@@ -807,8 +936,18 @@ function enterFullScreenViewer(index) {
 
 function showMedia(index) {
     if (!mediaFiles.length) return;
+    stopViewerSession();
+    const session = { controller: new AbortController(), timer: null, progress: 0 };
+    viewerSession = session;
     const loadId = ++mediaLoadId;
-    const isCurrent = () => loadId === mediaLoadId && !isGridViewActive;
+    const isCurrent = () => loadId === mediaLoadId && !isGridViewActive && !session.controller.signal.aborted;
+    const clearWatchdog = () => { clearTimeout(session.timer); session.timer = null; };
+    const watch = () => {
+        if (session.timer) return;
+        session.timer = setTimeout(() => {
+            if (isCurrent() && !mediaFailed) showMediaError('timeout', mediaFiles[currentIndex], resilience.timeoutError('Media loading stalled'));
+        }, MEDIA_TIMEOUT);
+    };
     mediaFailed = false;
     imageReady = false;
     cancelSlideshowTimer();
@@ -831,11 +970,13 @@ function showMedia(index) {
     mediaIndex.textContent = `${currentIndex + 1} / ${mediaFiles.length}`;
 
     if (isImageFile(filepath)) {
+        if (!isHeicFile(filepath)) watch();
         img.classList.remove('mode-fit', 'mode-original');
         img.classList.add(imageMode === 'fit' ? 'mode-fit' : 'mode-original');
         container.classList.add('grab-mode');
         img.onload = () => {
             if (!isCurrent() || mediaFailed) return;
+            clearWatchdog();
             imageReady = true;
             setMediaLoading();
             img.style.display = 'block'; mediaTitle.textContent = displayName;
@@ -845,9 +986,10 @@ function showMedia(index) {
 
         if (isHeicFile(filepath)) {
             mediaTitle.textContent = `${displayName} (Preparing…)`;
-            getSpecialImageURL(filepath)
-                .then(url => { if (isCurrent()) img.src = url; })
+            getSpecialImageURL(filepath, session.controller.signal)
+                .then(url => { if (isCurrent()) { watch(); img.src = url; } })
                 .catch(err => {
+                    if (!isCurrent() || err.name === 'AbortError') return;
                     console.error('HEIC/HEIF image handling failed:', err);
                     if (isCurrent()) showMediaError('heic', filepath, err);
                 });
@@ -856,12 +998,14 @@ function showMedia(index) {
         }
     } else {
         container.classList.remove('grab-mode');
+        watch();
         video.src = filepath;
         video.style.display = 'block';
         video.controls = controlsEnabled && !tvModeEnabled;
         video.muted = !controlsEnabled;
-        video.onwaiting = video.onstalled = () => { if (isCurrent() && !mediaFailed) setMediaLoading('Buffering video…'); };
-        video.oncanplay = video.onplaying = () => { if (isCurrent() && !mediaFailed) setMediaLoading(); };
+        video.onwaiting = video.onstalled = () => { if (isCurrent() && !mediaFailed && !video.paused) { setMediaLoading('Buffering video…'); watch(); } };
+        video.onpause = clearWatchdog;
+        video.oncanplay = video.onplaying = () => { if (isCurrent() && !mediaFailed) { clearWatchdog(); setMediaLoading(); } };
         video.onerror = () => {
             if (isCurrent()) showMediaError('video', filepath, video.error);
         };
@@ -870,6 +1014,8 @@ function showMedia(index) {
         });
         video.onended = () => { if (isCurrent() && slideshowPlaying) nextSlideshowMedia(); };
         video.ontimeupdate = () => {
+            if (!isCurrent()) return;
+            if (video.currentTime !== session.progress) { session.progress = video.currentTime; clearWatchdog(); if (!video.paused) watch(); }
             if (slideshowPlaying && video.duration) progressBar.style.width = `${(video.currentTime / video.duration) * 100}%`;
         };
         cancelSlideshowTimer();
@@ -879,6 +1025,10 @@ function showMedia(index) {
 }
 
 function showMediaError(kind, filepath, error) {
+    stopViewerSession();
+    img.onload = null; img.onerror = null; img.src = '';
+    video.onerror = null; video.onwaiting = null; video.onstalled = null;
+    video.pause(); video.src = '';
     setMediaLoading();
     mediaFailed = true;
     cancelSlideshowTimer();
@@ -917,6 +1067,11 @@ function showMediaError(kind, filepath, error) {
         } else if (error?.code === 3) {
             message = 'The browser could not decode the video. Its codec may be unsupported, or the file may be damaged.';
         }
+    }
+    if (error?.name === 'TimeoutError') {
+        title = 'Media took too long to load';
+        message = error.message;
+        guidance = 'Check your connection and retry. If HEIC processing remains stalled, reload the page. Other supported media can still play.';
     }
     $('media-error-title').textContent = title;
     $('media-error-filename').textContent = decodeURIComponent(filepath.split('/').pop());
@@ -993,6 +1148,10 @@ function handleWheel(e) {
 
 function setupEventListeners() {
     $('btn-sort').addEventListener('click', cycleSort);
+    $('btn-retry-scan').addEventListener('click', () => {
+        if (failedNavigation !== null) { const target = failedNavigation; failedNavigation = null; return navigateToFolder(target); }
+        return loadGallery({ forceCacheClear: true });
+    });
     $('btn-gallery-home').addEventListener('click', () => navigateToFolder(''));
     $('select-source').addEventListener('change', event => {
         const url = new URL(location.href);
@@ -1007,7 +1166,7 @@ function setupEventListeners() {
     btnShuffle.addEventListener('click', () => { shuffleEnabled = !shuffleEnabled; updateControlStates(); savePreferences(); });
     btnAutoRefresh.addEventListener('click', () => { autoRefreshEnabled = !autoRefreshEnabled; updateControlStates(); startAutoRefreshTimer(); savePreferences(); });
     btnViewMode.addEventListener('click', async () => {
-        if (isScanning) return;
+        scanSession?.abort();
         galleryViewMode = galleryViewMode === 'all' ? 'folders' : 'all';
         currentIndex = 0;
         stopSlideshow();
@@ -1074,7 +1233,7 @@ function startAutoRefreshTimer() {
     if (!autoRefreshEnabled) return;
     autoRefreshTimer = setInterval(() => {
         if (!document.hidden) loadGallery({ preserveView: true, silent: true });
-    }, AUTO_REFRESH_MS);
+    }, refreshInterval * 1000);
 }
 
 async function toggleTvMode() {

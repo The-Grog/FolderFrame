@@ -28,6 +28,166 @@ test('breadcrumb links only ancestors and shows the current folder once as text'
     assert.equal(app.get('grid-path').title, 'Family/2026');
 });
 
+test('silent refresh preserves viewer state when files are added or reordered', async () => {
+    const app = await boot({ search: '?autoplay=1' });
+    vm.runInContext("zoom = 2; panX = 31; panY = 12; uiVisible = false; imageReady = true", app.context);
+    const loadId = vm.runInContext('mediaLoadId', app.context);
+    const controller = vm.runInContext('viewerSession.controller', app.context);
+    app.context.scanDirectory = async () => ({ filePaths: [
+        'https://example.test/frame/photos/aaa.jpg', 'https://example.test/frame/photos/photo.jpg'
+    ], folderNames: [] });
+    await vm.runInContext('loadGallery({silent:true})', app.context);
+    assert.equal(vm.runInContext('mediaLoadId', app.context), loadId);
+    assert.equal(vm.runInContext('viewerSession.controller', app.context), controller);
+    assert.equal(vm.runInContext('zoom', app.context), 2);
+    assert.equal(vm.runInContext('panX', app.context), 31);
+    assert.equal(vm.runInContext('uiVisible', app.context), false);
+    assert.equal(app.state().currentFolder, '');
+    assert.equal(vm.runInContext('currentIndex', app.context), 1);
+    assert.equal(app.state().slideshowPlaying, true);
+});
+
+test('refresh uses current identity at completion and replaces only confirmed missing media', async () => {
+    const app = await boot({ search: '?autoplay=1' });
+    vm.runInContext("mediaFiles.push('https://example.test/frame/photos/b.jpg')", app.context);
+    let done;
+    app.context.scanDirectory = () => new Promise(resolve => { done = resolve; });
+    const scan = vm.runInContext('loadGallery({silent:true})', app.context);
+    vm.runInContext('showMedia(1)', app.context);
+    const id = vm.runInContext('mediaLoadId', app.context);
+    done({ filePaths: ['https://example.test/frame/photos/b.jpg'], folderNames: [] });
+    await scan;
+    assert.equal(vm.runInContext('mediaLoadId', app.context), id);
+    app.context.scanDirectory = async () => ({ filePaths: ['https://example.test/frame/photos/c.jpg'], folderNames: [] });
+    await vm.runInContext('loadGallery({silent:true})', app.context);
+    assert.ok(vm.runInContext('mediaLoadId', app.context) > id);
+    assert.match(app.get('gallery-image').src, /c.jpg$/);
+});
+
+test('partial recursive scan keeps successful media and previous files below failed folders', async () => {
+    const app = await boot({ search: '?autoplay=1' });
+    vm.runInContext("galleryViewMode = 'all'; mediaFiles = ['https://example.test/frame/photos/Bad/old.jpg']; showMedia(0)", app.context);
+    const id = vm.runInContext('mediaLoadId', app.context);
+    app.context.scanDirectory = async folder => {
+        if (folder === 'Bad') throw new Error('offline');
+        return folder === '' ? { filePaths: [], folderNames: ['Bad', 'Good'] }
+            : { filePaths: ['https://example.test/frame/photos/Good/new.jpg'], folderNames: [] };
+    };
+    await vm.runInContext('loadGallery({silent:true})', app.context);
+    assert.equal(app.state().mediaFiles.length, 2);
+    assert.equal(vm.runInContext('mediaLoadId', app.context), id);
+    assert.equal(app.get('scan-failures').hidden, false);
+    assert.match(app.get('scan-failure-text').textContent, /Bad/);
+    assert.equal(app.get('warning-overlay').style.display, 'none');
+});
+
+test('navigation supersedes a stalled scan and late response cannot overwrite the new folder', async () => {
+    const app = await boot();
+    let old;
+    app.context.fetch = url => url.endsWith('/Old/') ? new Promise(resolve => { old = resolve; })
+        : Promise.resolve({ ok: true, text: async () => '' });
+    const pending = vm.runInContext("navigateToFolder('Old')", app.context);
+    await vm.runInContext("navigateToFolder('New')", app.context);
+    old({ ok: true, text: async () => '' });
+    await pending;
+    assert.equal(app.state().currentFolder, 'New');
+    assert.equal(app.get('scan-failures').hidden, true);
+    assert.ok(app.state().mediaFiles[0].includes('/New/'));
+});
+
+test('root navigation failure retains previous gallery and retry targets failed destination', async () => {
+    const app = await boot();
+    app.context.scanDirectory = async () => { throw new Error('offline'); };
+    await vm.runInContext("navigateToFolder('Bad')", app.context);
+    assert.equal(app.state().currentFolder, '');
+    assert.equal(app.state().mediaFiles.length, 1);
+    assert.match(app.get('scan-failure-text').textContent, /Bad/);
+    app.context.scanDirectory = async () => ({ filePaths: [], folderNames: [] });
+    await app.get('btn-retry-scan').listeners.click();
+    assert.equal(app.state().currentFolder, 'Bad');
+});
+
+test('media watchdog reports stalls, skips only while playing, and ignores superseded timers', async () => {
+    for (const playing of [false, true]) {
+        const app = await boot();
+        const timers = [];
+        app.context.setTimeout = (fn, delay) => { timers.push({ fn, delay }); return timers.length; };
+        vm.runInContext('enterFullScreenViewer(0)', app.context);
+        if (playing) vm.runInContext('setSlideshowPlaying(true)', app.context);
+        const first = timers.find(t => t.delay === 30000).fn;
+        first();
+        assert.match(app.get('media-error-title').textContent, /too long/);
+        assert.equal(timers.some(t => t.delay === 3000 && t.fn.toString().includes('nextSlideshowMedia')), playing);
+        vm.runInContext('showMedia(0)', app.context);
+        const newId = vm.runInContext('mediaLoadId', app.context);
+        first();
+        assert.equal(vm.runInContext('mediaLoadId', app.context), newId);
+        assert.equal(vm.runInContext('mediaFailed', app.context), false);
+    }
+});
+
+test('HEIC thumbnail observer releases its consumer offscreen and disconnects on viewer entry', async () => {
+    const app = await boot();
+    const observers = [];
+    app.context.window.IntersectionObserver = true;
+    app.context.IntersectionObserver = class {
+        constructor(callback) { this.callback = callback; this.items = []; observers.push(this); }
+        observe(item) { this.items.push(item); }
+        disconnect() { this.disconnected = true; }
+    };
+    const signals = [];
+    app.context.getSpecialImageURL = async (_file, signal) => { signals.push(signal); return 'blob:thumb'; };
+    vm.runInContext("mediaFiles = ['https://example.test/frame/photos/a.heic']; renderGridView()", app.context);
+    const observer = observers.find(o => o.items.length);
+    const target = observer.items[0];
+    observer.callback([{ target, isIntersecting: true }]);
+    await Promise.resolve(); await Promise.resolve();
+    observer.callback([{ target, isIntersecting: false }]);
+    assert.equal(signals[0].aborted, true);
+    observer.callback([{ target, isIntersecting: true }]);
+    await Promise.resolve();
+    vm.runInContext('enterFullScreenViewer(0)', app.context);
+    assert.equal(signals[1].aborted, true);
+    assert.equal(observer.disconnected, true);
+});
+
+test('HEIC thumbnail resizing caps the long edge at 480 pixels without upscaling', async () => {
+    const app = await boot();
+    const revoked = [];
+    app.context.URL = class extends URL {
+        static createObjectURL() { return 'blob:temporary'; }
+        static revokeObjectURL(url) { revoked.push(url); }
+    };
+    for (const [width, height, expected] of [[4000, 2000, [480, 240]], [100, 200, [100, 200]]]) {
+        app.context.Image = class {
+            constructor() { this.naturalWidth = width; this.naturalHeight = height; }
+            set src(value) { this.onload(); }
+        };
+        const canvas = { getContext: () => ({ drawImage() {} }), toBlob(callback) { callback({ size: 8 }); } };
+        app.context.document.createElement = () => canvas;
+        await vm.runInContext('makeThumbnail({})', app.context);
+        assert.deepEqual([canvas.width, canvas.height], expected);
+    }
+    assert.equal(revoked.length, 2);
+});
+
+test('video progress refreshes watchdog and user pause cancels it', async () => {
+    const app = await boot();
+    const timers = new Map(); let id = 0;
+    app.context.setTimeout = (fn, delay) => { timers.set(++id, { fn, delay }); return id; };
+    app.context.clearTimeout = key => timers.delete(key);
+    vm.runInContext("mediaFiles = ['https://example.test/v.mp4']; enterFullScreenViewer(0)", app.context);
+    const video = app.get('gallery-video');
+    video.paused = false;
+    video.onplaying();
+    video.currentTime = 1; video.ontimeupdate();
+    assert.equal([...timers.values()].filter(t => t.delay === 30000).length, 1);
+    video.currentTime = 2; video.ontimeupdate();
+    assert.equal([...timers.values()].filter(t => t.delay === 30000).length, 1);
+    video.paused = true; video.onpause();
+    assert.equal([...timers.values()].filter(t => t.delay === 30000).length, 0);
+});
+
 test('shipped defaults preserve the index grid and isolate embed preferences', () => {
     const config = normalize(shipped);
     const index = api.resolveSettings(config, '');
@@ -145,9 +305,9 @@ test('directory listings accept only direct child links within the requested dir
 });
 
 // Exercise recovery using the same minimal DOM/HTTP fixture as startup.
-test('sort defaults to newest with profile, saved preference, and URL overrides', () => {
+test('sort defaults to filename with profile, saved preference, and URL overrides', () => {
     const config = normalize({ index: { sort: 'oldest' }, embed: { sort: 'filename' } });
-    assert.equal(api.resolveSettings(normalize(shipped), '').settings.sort, 'newest');
+    assert.equal(api.resolveSettings(normalize(shipped), '').settings.sort, 'filename');
     assert.equal(api.resolveSettings(config, '').settings.sort, 'oldest');
     assert.equal(api.resolveSettings(config, '?profile=embed').settings.sort, 'filename');
     assert.equal(api.resolveSettings(config, '', () => JSON.stringify({ sort: 'filename' })).settings.sort, 'filename');
@@ -180,14 +340,118 @@ test('date sorts use Last-Modified, tie by filename, and keep missing dates last
 
 test('sort button cycles current label and saves choice without changing source or folder', async () => {
     const app = await boot({ search: '?album=Family' });
-    assert.equal(app.get('sort-label').textContent, 'Newest');
-    for (const [label, value] of [['Oldest', 'oldest'], ['Filename', 'filename'], ['Newest', 'newest']]) {
+    assert.equal(app.get('sort-label').textContent, 'Filename');
+    for (const [label, value] of [['Newest', 'newest'], ['Oldest', 'oldest'], ['Filename', 'filename']]) {
         await app.get('btn-sort').listeners.click();
         assert.equal(app.get('sort-label').textContent, label);
         assert.equal(vm.runInContext('sortMode', app.context), value);
         assert.equal(app.state().currentFolder, 'Family');
         assert.equal(app.get('btn-sort').disabled, false);
-        assert.equal(JSON.parse([...app.saved.values()].pop()).sort, value);
+        assert.equal(JSON.parse(app.saved.get(vm.runInContext('preferenceKey', app.context))).sort, value);
+    }
+});
+test('refresh timing has profile defaults and validated config overrides', () => {
+    for (const raw of [{}, shipped]) {
+        const config = normalize(raw);
+        assert.equal(api.resolveSettings(config, '').settings.refreshInterval, 60);
+        assert.equal(api.resolveSettings(config, '?profile=embed').settings.refreshInterval, 300);
+    }
+    const config = normalize({ defaults: { refreshInterval: 120 }, embed: { refreshInterval: 600 } });
+    assert.equal(api.resolveSettings(config, '', () => JSON.stringify({ refreshInterval: 1 })).settings.refreshInterval, 120);
+    assert.equal(api.resolveSettings(config, '?profile=embed').settings.refreshInterval, 600);
+    for (const value of [0, -1, 1.5, 86401, '60', null]) {
+        assert.throws(() => normalize({ defaults: { refreshInterval: value } }));
+    }
+});
+
+test('automatic refresh uses resolved timing and respects disabled refresh', async () => {
+    for (const [search, config, seconds] of [
+        ['', {}, 60], ['?profile=embed', {}, 300],
+        ['', { index: { refreshInterval: 120 } }, 120]
+    ]) {
+        const app = await boot({ search, config });
+        const delays = [];
+        app.context.setInterval = (_callback, delay) => { delays.push(delay); return 1; };
+        vm.runInContext('startAutoRefreshTimer()', app.context);
+        assert.deepEqual(delays, [seconds * 1000]);
+        vm.runInContext('autoRefreshEnabled = false; startAutoRefreshTimer()', app.context);
+        assert.equal(delays.length, 1);
+    }
+});
+
+test('long slideshow intervals resolve from config saved preferences and URL and reach the timer', async () => {
+    for (const interval of [300, 900, 3600]) {
+        assert.equal(api.resolveSettings(normalize({ embed: { interval } }), '?profile=embed').settings.interval, interval);
+        assert.equal(api.resolveSettings(normalize({}), '', () => JSON.stringify({ interval })).settings.interval, interval);
+        const app = await boot({ search: '?autoplay=1&interval=' + interval });
+        assert.equal(app.get('select-interval').value, String(interval));
+        let tick;
+        app.context.requestAnimationFrame = callback => { tick = callback; return 1; };
+        vm.runInContext('imageReady = true; startSlideshowTimer()', app.context);
+        tick(interval * 500);
+        assert.equal(app.get('progress-bar').style.width, '50%');
+    }
+});
+
+test('date cache persists across reloads and manual refresh replaces stored dates', async () => {
+    const app = await boot();
+    app.context.sortFiles = ['https://example.test/frame/photos/a.jpg'];
+    app.context.fetch = async () => ({ ok: true, headers: { get: () => 'Thu, 01 Jan 2026 00:00:00 GMT' } });
+    await vm.runInContext("sortMediaFiles(sortFiles, 'newest')", app.context);
+    const key = vm.runInContext('dateCacheKey', app.context);
+    const stored = app.saved.get(key);
+    assert.equal(JSON.parse(stored).length, 1);
+    const reload = await boot();
+    reload.saved.set(key, stored);
+    reload.context.sortFiles = app.context.sortFiles;
+    let calls = 0;
+    reload.context.fetch = async () => { calls++; return { ok: true, headers: { get: () => 'Fri, 02 Jan 2026 00:00:00 GMT' } }; };
+    await vm.runInContext("sortMediaFiles(sortFiles, 'oldest')", reload.context);
+    assert.equal(calls, 0);
+    await vm.runInContext("sortMediaFiles(sortFiles, 'oldest', true)", reload.context);
+    assert.equal(calls, 1);
+    assert.equal(JSON.parse(reload.saved.get(key))[0][1].date, Date.parse('2026-01-02T00:00:00Z'));
+});
+
+test('date cache expires after 24 hours and evicts oldest checked entries', async () => {
+    const app = await boot();
+    vm.runInContext('loadDateCache()', app.context);
+    const key = vm.runInContext('dateCacheKey', app.context);
+    const now = Date.now();
+    const root = 'https://example.test/frame/photos/';
+    const entries = Array.from({ length: 2002 }, (_, i) => [root + i + '.jpg', { date: i, checked: now - 5000 + i }]);
+    entries.push([root + 'expired.jpg', { date: 1, checked: now - 86400000 }]);
+    entries.push([root + 'future.jpg', { date: 1, checked: now + 86400000 }]);
+    app.saved.set(key, JSON.stringify(entries));
+    vm.runInContext('dateCacheKey = null; loadDateCache(); saveDateCache()', app.context);
+    const kept = JSON.parse(app.saved.get(key));
+    assert.equal(kept.length, 2000);
+    assert.equal(kept[0][0], root + '2.jpg');
+    assert.ok(!kept.some(([url]) => /expired|future/.test(url)));
+    app.context.sortFiles = [root + 'expired.jpg'];
+    let calls = 0;
+    app.context.fetch = async () => { calls++; return { ok: true, headers: { get: () => null } }; };
+    await vm.runInContext("sortMediaFiles(sortFiles, 'newest')", app.context);
+    assert.equal(calls, 1);
+    assert.equal(JSON.parse(app.saved.get(key)).length, 2000);
+});
+
+test('date cache tolerates corrupt or unavailable storage and isolates sources', async () => {
+    for (const blocked of [false, true]) {
+        const app = await boot({ storageBlocked: blocked });
+        const key = vm.runInContext('loadDateCache(); dateCacheKey', app.context);
+        app.saved.set(key, '{broken');
+        vm.runInContext('dateCacheKey = null', app.context);
+        app.context.sortFiles = ['https://example.test/frame/photos/a.jpg'];
+        let calls = 0;
+        app.context.fetch = async () => { calls++; return { ok: true, headers: { get: () => null } }; };
+        if (!blocked) app.context.localStorage.setItem = () => { throw new Error('Quota exceeded'); };
+        await vm.runInContext("sortMediaFiles(sortFiles, 'newest')", app.context);
+        await vm.runInContext("sortMediaFiles(sortFiles, 'oldest')", app.context);
+        assert.equal(calls, 1, 'memory fallback avoids repeated requests');
+        vm.runInContext("activeSource = { id: 'other', url: 'https://other.test/photos/' }; loadDateCache()", app.context);
+        assert.notEqual(vm.runInContext('dateCacheKey', app.context), key);
+        assert.equal(vm.runInContext('modifiedDateCache.size', app.context), 0);
     }
 });
 
@@ -556,6 +820,7 @@ test('video errors distinguish network, decoding, and blocked autoplay', async (
     video.error = { code: 2 };
     video.onerror();
     assert.match(app.get('video-error-text').textContent, /network/);
+    app.get('btn-retry-media-error').listeners.click();
     video.error = { code: 3 };
     video.onerror();
     assert.match(app.get('video-error-text').textContent, /decode/);
@@ -655,6 +920,8 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
         setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {},
         requestAnimationFrame: () => { animationFrames++; return 1; }, cancelAnimationFrame() {}, performance: { now: () => 0 }
     });
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../resilience.js'), 'utf8'), context);
+    context.window.FolderFrameResilience = context.FolderFrameResilience;
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8'), context);
     await listeners.DOMContentLoaded();
     const state = () => JSON.parse(vm.runInContext('JSON.stringify({ currentFolder, galleryViewMode, imageMode, slideshowInterval, slideshowPlaying, isGridViewActive, mediaFiles, activeSource, rememberPreferences })', context));

@@ -36,8 +36,13 @@ review `git status` before submitting and never overwrite them with private medi
 
 Run checks appropriate to the change. For JavaScript edits, if Node.js is
 installed, run `node --check app.js` and `node --check settings.js`. These check
-syntax, not browser behavior. Run `node --test tests/configuration.test.cjs`
+syntax, not browser behavior. Also check `node --check resilience.js`.
+Run `node --test tests/configuration.test.cjs tests/resilience.test.cjs`
 for settings validation, precedence, source URL handling, and app startup tests.
+
+The resilience suite also checks request deadlines, cancellation, shared HEIC
+jobs, cache eviction, and pinned object URLs. See RESILIENCE.md for limits and
+the manual large-library/device checklist. Deploy resilience.js alongside app.js.
 
 For UI or behavior changes, test the affected paths in a browser:
 

@@ -6,7 +6,7 @@
     "source": "photos",
     "album": "",
     "view": "folders",
-    "sort": "newest",
+    "sort": "filename",
     "interval": 5,
     "imageMode": "fit",
     "shuffle": false,
@@ -17,8 +17,9 @@
     "showFilenames": true,
     "rememberPreferences": true
   },
-  "index": {},
+  "index": { "refreshInterval": 60 },
   "embed": {
+    "refreshInterval": 300,
     "rememberPreferences": false
   }
 }

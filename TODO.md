@@ -7,12 +7,12 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ### Large-library resilience
 
-- [ ] **Large-library resilience** — Extend existing bounded metadata/album lookups across the app without requiring a database, PHP, or generated thumbnails.
-  - [ ] **Timeouts and recovery** — Bound directory and media loading waits, show actionable errors, and skip stalled files during a running slideshow.
-  - [ ] **Cancel outdated work** — Cancel unnecessary requests when changing folders or leaving the viewer; ignore late results from superseded work.
-  - [ ] **Limit HEIC processing** — Queue conversions with a small concurrency limit to avoid overwhelming phone CPU and memory.
-  - [ ] **Manage memory** — Bound the converted-image cache, release unused object URLs safely, and clean up thumbnail observers across navigation.
-  - [ ] **Handle partial failures** — Keep successfully discovered media when a subfolder fails and identify which folders could not be scanned.
+- [x] **Large-library resilience** — Extend existing bounded metadata/album lookups across the app without requiring a database, PHP, or server-side generated thumbnails. Implemented; device validation pending (see RESILIENCE.md).
+  - [x] **Timeouts and recovery** — Bound directory and media loading waits, show actionable errors, and skip stalled files during a running slideshow.
+  - [x] **Cancel outdated work** — Cancel unnecessary requests when changing folders or leaving the viewer; ignore late results from superseded work.
+  - [x] **Limit HEIC processing** — Queue conversions with a small concurrency limit to avoid overwhelming phone CPU and memory.
+  - [x] **Manage memory** — Bound the converted-image cache, release unused object URLs safely, and clean up thumbnail observers across navigation.
+  - [x] **Handle partial failures** — Keep successfully discovered media when a subfolder fails and identify which folders could not be scanned.
 
 ### Deployment and performance
 
@@ -26,6 +26,7 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ## Completed
 
+- [x] **Persistent sorting-date cache** — 24-hour localStorage cache with 2,000 entries per app/source, oldest-first eviction, storage-failure fallback, and Refresh Folder bypass. Persistence, expiry, eviction, and source isolation tests included.
 - [x] **Refresh README screenshots** — Replaced viewer and grid previews with user-supplied screenshots of the updated interface. Full viewer first; no browser chrome or hosting URL.
 - [x] **README configuration example and settings reference** — Added complete JSON, all settings/defaults, source paths, profile overrides, recursion, autoplay, controls-free mode, and preference/URL precedence. Full details in CONFIGURATION.md.
 - [x] **Highlight key features in the overview** — Added a scannable list of implemented gallery, media, slideshow, mobile, embedding, configuration, loading, and hosting features.
@@ -44,11 +45,12 @@ manual checks; automated tests do not verify browser layout or codecs.
 - [x] **Compact grid header and logo navigation** — Directory breadcrumb sits beside the matching album/file count box. Clicking the logo returns to the current source root in index and embed. Updated README previews and usage instructions.
 - [x] **Optional filename display in configuration** — Added showFilenames (default true), shared/index/embed support, and showFilenames=0/1 URL overrides. Hides viewer filenames and media captions, retaining album names, accessible labels, and error details. Published and user-approved.
 - [x] **Remember grid scroll position** — Restores the originally opened tile and saved scroll position, with a brief static highlight. Adjusts for moved tiles; falls back to scroll position if removed, and resets on folder navigation. Published and user-approved.
-- [x] **Sorting: Newest, Oldest, Filename** — Added the cycling gallery button between By Folder and Auto Refresh; Newest is the default. Config defaults/index/embed, saved preferences, and sort URL overrides supported. Uses bounded/cached Last-Modified HEAD lookups with filename ties and missing dates last. Documented and regression-tested; user supplied updated screenshots for publication.
+- [x] **Sorting: Newest, Oldest, Filename** — Added the cycling gallery button between By Folder and Auto Refresh; Filename is the default. Config defaults/index/embed, saved preferences, and sort URL overrides supported. Uses bounded/cached Last-Modified HEAD lookups with filename ties and missing dates last. Documented and regression-tested; user supplied updated screenshots for publication.
+- [x] **Configurable refresh and long slideshows** — refreshInterval uses seconds, with one-minute index and five-minute embed defaults. Added 5m/15m/60m photo intervals. Documented and tested.
 
 ## Validation notes
 
 - User tested and approved the swipe, filename visibility, and grid-return update.
 - User tested and approved the mobile double-tap and pinch-flicker fixes.
-- Current regression suite: 49 automated settings/startup/media/gesture/sorting/status/breadcrumb tests.
-- Long-filename desktop layout still needs visual confirmation; Node tests do not validate CSS layout.
+- Current regression suite: 72 automated app/settings/cache and resilience tests. Run both tests/configuration.test.cjs and tests/resilience.test.cjs.
+- User visually tested and approved the long-filename desktop layout. Node tests do not validate CSS layout.

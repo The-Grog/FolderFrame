@@ -127,14 +127,15 @@ Omitted settings retain the lower-priority value.
 | `source` | First configured source | A configured source ID |
 | `album` | `""` (source root) | Folder path within that source, e.g. `"Family/2026"` |
 | `view` | `"folders"` | `"folders"` or `"all"` |
-| `sort` | `"newest"` | `"newest"`, `"oldest"`, or `"filename"` |
+| `sort` | `"filename"` | `"newest"`, `"oldest"`, or `"filename"` |
 | `autoplay` | `false` | Boolean: start slideshow and enter viewer |
 | `controls` | `true` | Boolean: false opens a controls-free viewer; pair with autoplay for a slideshow |
 | `showFilenames` | `true` | Boolean: show viewer filename and grid media captions |
-| `interval` | `5` | Seconds: 3, 5, 10, 15, 30, or 60 |
+| `interval` | `5` | Seconds: 3, 5, 10, 15, 30, 60, 300, 900, or 3600 |
 | `imageMode` | `"fit"` | `"fit"` or `"original"` |
 | `shuffle` | `false` | Boolean |
-| `autoRefresh` | `true` | Boolean: rescan every 30 seconds |
+| `autoRefresh` | `true` | Boolean: enable automatic rescanning |
+| `refreshInterval` | Index: `60`; embed: `300` | Integer seconds, 1–86400; config only |
 | `tvMode` | `false` | Boolean: TV controls and photo-frame preset |
 | `rememberPreferences` | `true` for index; `false` for embed | Boolean: read/write saved settings |
 
@@ -182,7 +183,7 @@ or tv=1 URLs still apply on reload; use tv=0 to override them.
 | `source=ID` | Select a configured source |
 | `album=Family/2026` | Select an album within the source |
 | `view=folders` or `view=all` | Album browsing or recursive media view |
-| `sort=newest`, `sort=oldest`, or `sort=filename` | Media order; default newest |
+| `sort=newest`, `sort=oldest`, or `sort=filename` | Media order; default filename |
 | `autoplay=1` or `autoplay=0` | Start playing or paused |
 | `controls=1` or `controls=0` | Show controls or use the controls-free viewer |
 | `showFilenames=1` or `showFilenames=0` | Show or hide viewer filenames and media captions |
@@ -225,8 +226,19 @@ filename-based. Non-shuffled slideshows follow the selected media order.
 
 Date lookup uses HEAD requests (no media bodies), up to four concurrently,
 with an eight-second budget for each metadata pass. Missing, failed, blocked,
-or timed-out dates fall back to filename order. Metadata is cached for one
-minute; Refresh Folder bypasses that cache. Filename mode skips date lookups.
+or timed-out dates fall back to filename order. Metadata is cached in localStorage
+for 24 hours, capped at 2,000 entries per app location/source. Oldest checked
+entries are evicted first. Index and embed share the same source cache; other
+sources use separate keys. Refresh Folder bypasses the cache when date sorting
+is selected. Filename mode skips metadata loading and HEAD requests entirely.
+
+The cache survives reloads/browser restarts, retaining dates and media URLs,
+not image data. Missing dates are cached too; Refresh Folder can retry them.
+Expired entries are discarded on the next date sort, not by a background timer.
+Clear site storage to remove persistent metadata. This cache is independent of
+rememberPreferences and remember=0. Corrupt/denied/full storage does not prevent
+sorting: a bounded in-memory cache remains available. Cache misses retain the
+four-request concurrency limit and eight-second total timeout.
 Cross-origin servers must permit HEAD requests and expose Last-Modified to
 the browser. Copying/editing files can change their modified dates.
 
@@ -244,6 +256,10 @@ hides the entire interface and mutes video, regardless of viewport size.
 
 ## Configuration errors
 
+Loading deadlines and HEIC cache/queue limits are internal constants, not JSON
+settings. No configuration migration is required. Deploy resilience.js with the
+other app assets; see [RESILIENCE.md](RESILIENCE.md) for recovery behavior and limits.
+
 A missing, unreadable, malformed, invalid, or timed-out config (8 seconds) causes a visible notice
 and a fallback to built-in defaults (`photos/`). Correct the file and reload.
 Unknown settings, invalid types, unsupported intervals, and duplicate source
@@ -252,3 +268,32 @@ options are ignored with a notice; valid options still apply.
 
 There is no in-browser config editor. Editing the JSON file changes startup
 defaults; the existing controls still change the current session normally.
+
+## Refresh frequency and long slideshows
+
+`refreshInterval` sets automatic folder rescanning in **seconds**: index defaults
+to 60 (one minute), embed to 300 (five minutes). Allowed values are integers
+from 1 to 86400. It is a config-only setting, not a saved browser preference
+or URL option. `autoRefresh: false` disables automatic rescanning.
+
+Set it under `defaults` for both profiles or under `index`/`embed` separately:
+
+```json
+"index": { "refreshInterval": 60 },
+"embed": { "refreshInterval": 300 }
+```
+
+This is a configuration fragment; keep your other sections and settings.
+Profile entries override shared defaults, including the explicit entries in
+the shipped file. Choose shorter refresh periods for frequently changing media
+and longer periods for stable photo-frame displays or many devices sharing one
+host. Each display scans independently. Refresh Folder still scans immediately;
+returning to a visible tab also triggers a scan when Auto Refresh is enabled.
+
+Slideshow `interval` is separate: 300, 900, and 3600 seconds appear as **5m**,
+**15m**, and **60m** in the viewer. These values also work in config, saved
+preferences, and the `interval` URL option. They control photo duration;
+videos advance on completion during a slideshow.
+
+Filename is now the default sort. Existing saved sort choices or explicit URL
+options still take precedence; use `?remember=0` to test config defaults.

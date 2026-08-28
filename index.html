@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#050505">
     <title>FolderFrame</title>
-    <link rel="stylesheet" href="styles.css?v=20260827-title-fit">
+    <link rel="stylesheet" href="styles.css?v=20260828-resilience">
     <script src="heic2any.min.js"></script>
 </head>
 <body>
@@ -67,6 +67,9 @@
                         <option value="15">15s</option>
                         <option value="30">30s</option>
                         <option value="60">60s</option>
+                        <option value="300">5m</option>
+                        <option value="900">15m</option>
+                        <option value="3600">60m</option>
                     </select>
                 </div>
 
@@ -122,9 +125,9 @@
                     </button>
                     <button id="btn-sort" class="btn btn-secondary" title="Change sorting">
                         <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M3 5h18v2H3V5zm0 6h12v2H3v-2zm0 6h6v2H3v-2z"/></svg>
-                        <span id="sort-label">Newest</span>
+                        <span id="sort-label">Filename</span>
                     </button>
-                    <button id="btn-auto-refresh" class="btn btn-secondary" aria-pressed="true" title="Automatically rescan every 30 seconds">
+                    <button id="btn-auto-refresh" class="btn btn-secondary" aria-pressed="true" title="Automatically rescan every 60 seconds">
                         <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 6V3l-4 4 4 4V8c2.76 0 5 2.24 5 5 0 .75-.17 1.46-.46 2.1l1.46 1.46A6.96 6.96 0 0 0 19 13c0-3.87-3.13-7-7-7zm-5.54.9L5 5.44A6.96 6.96 0 0 0 4 9c0 3.87 3.13 7 7 7v3l4-4-4-4v3c-2.76 0-5-2.24-5-5 0-.75.17-1.46.46-2.1z"/></svg>
                         <span class="button-label">Auto Refresh On</span>
                     </button>
@@ -134,6 +137,7 @@
                     </button>
                 </div>
             </header>
+            <div id="scan-failures" role="status" hidden><span id="scan-failure-text"></span> <button id="btn-retry-scan" class="btn btn-secondary" type="button">Retry scan</button></div>
             <div id="scan-loading" class="scan-loading" role="status" hidden><span class="loading-spinner" aria-hidden="true"></span><span id="scan-loading-text">Scanning folders…</span></div>
             <div id="thumbnail-grid"></div>
         </div>
@@ -156,7 +160,8 @@
     </div>
 
     <p id="config-notice" role="status" hidden></p>
-    <script src="settings.js?v=20260827-sorting"></script>
-    <script src="app.js?v=20260827-touch-fix"></script>
+    <script src="resilience.js?v=20260828-resilience"></script>
+    <script src="settings.js?v=20260827-timing"></script>
+    <script src="app.js?v=20260828-resilience"></script>
 </body>
 </html>
