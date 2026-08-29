@@ -191,8 +191,10 @@ and iframe policies.
 Copy Image is disabled on ordinary `http://LAN-IP` pages because browsers allow
 image clipboard writes only in secure contexts. Use HTTPS (such as a Cloudflare
 Tunnel hostname) or a browser-trusted localhost context.
-Viewer toolbar buttons are icon-only by default. Set `showButtonLabels: true`
-or use `?buttonLabels=1` to display text; `?buttonLabels=0` restores icons only.
+Primary viewer toolbar buttons are icon-only by default. Interval, Download,
+and Copy Image are grouped under the right-side three-dot options menu. Set
+`showButtonLabels: true` or use `?buttonLabels=1` to display text on the primary
+buttons; `?buttonLabels=0` restores icons only.
 
 An iframe uses the embed profile only when its URL includes `?profile=embed`.
 For example, `?profile=embed&controls=0&autoplay=1&view=all`.
@@ -519,7 +521,7 @@ and never modifies originals. Run it again after adding or changing media.
 -   Keyboard Left Arrow: previous media
 -   Keyboard Right Arrow: next media
 -   Gallery button: return to the thumbnail/album grid
--   Press G to return to the thumbnail/album grid
+-   Press G or Escape to return to the thumbnail/album grid
 
 ### Slideshow
 
@@ -575,7 +577,7 @@ Photos support:
 - Mouse-wheel zoom and touch pinch-to-zoom.
 - Mouse/finger dragging to pan.
 - Reset Zoom on wider layouts.
-- Escape to reset zoom/pan when the image is magnified or displaced.
+- Escape returns from the viewer to the thumbnail/album grid.
 
 ### Image sizing
 

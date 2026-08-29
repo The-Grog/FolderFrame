@@ -91,6 +91,50 @@ test('gallery scrolling keys work after a tile control receives focus', async ()
     assert.equal(container.scrollTop, 0);
 });
 
+test('Escape exits the viewer and returns to the gallery', async () => {
+    const app = await boot({ search: '?autoplay=1' });
+    vm.runInContext('zoom = 2; panX = 40; panY = 20', app.context);
+    let prevented = false;
+    app.windowListeners.keydown({ key: 'Escape', target: app.get('btn-play-pause'),
+        preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(app.state().isGridViewActive, true);
+    assert.equal(app.state().slideshowPlaying, true);
+    assert.equal(app.get('grid-view-container').style.display, 'flex');
+});
+
+test('viewer options menu owns secondary controls and closes before Escape exits viewer', async () => {
+    const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+    const menu = html.indexOf('id="viewer-options-menu"');
+    const headerEnd = html.indexOf('</header>', menu);
+    for (const id of ['select-interval', 'btn-download', 'btn-copy-link']) {
+        const position = html.indexOf(`id="${id}"`);
+        assert.ok(position > menu && position < headerEnd);
+    }
+    const options = html.indexOf('id="btn-viewer-options"');
+    const displayGroup = html.indexOf('class="viewer-display-controls"');
+    for (const id of ['btn-image-mode', 'btn-fullscreen', 'btn-tv-mode']) {
+        const position = html.indexOf(`id="${id}"`);
+        assert.ok(position > displayGroup && position < options);
+    }
+    assert.ok(html.indexOf('id="btn-shuffle"') < displayGroup);
+
+    const app = await boot();
+    vm.runInContext('enterFullScreenViewer(0)', app.context);
+    const panel = app.get('viewer-options-menu');
+    assert.equal(panel.hidden, true);
+    app.get('btn-viewer-options').listeners.click();
+    assert.equal(panel.hidden, false);
+    let prevented = false;
+    app.windowListeners.keydown({ key: 'Escape', target: app.get('btn-viewer-options'),
+        preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(panel.hidden, true);
+    assert.equal(app.state().isGridViewActive, false);
+    app.windowListeners.keydown({ key: 'Escape', target: app.get('btn-viewer-options'), preventDefault() {} });
+    assert.equal(app.state().isGridViewActive, true);
+});
+
 test('scan errors remain distinguishable from routine mobile timestamps', async () => {
     const app = await boot();
     const classes = new Set();
@@ -812,9 +856,6 @@ test('download and copy buttons are independently configurable by profile and UR
     assert.throws(() => normalize({ defaults: { showDownloadButton: 'yes' } }), /showDownloadButton/);
     assert.throws(() => normalize({ defaults: { showButtonLabels: 'yes' } }), /showButtonLabels/);
     assert.ok(api.resolveSettings(config, '?download=yes').warnings.length);
-    const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-    assert.ok(html.indexOf('id="btn-copy-link"') < html.indexOf('id="btn-image-mode"'));
-    assert.ok(html.indexOf('id="btn-image-mode"') < html.indexOf('id="btn-fullscreen"'));
 });
 
 test('viewer actions download the original, copy the displayed image, and show the current shuffle icon', async () => {
@@ -1016,6 +1057,20 @@ test('large grids render incrementally and keep a bounded media-tile DOM window'
     container.scrollHeight = 1000000;
     container.listeners.scroll();
     assert.ok(vm.runInContext('gridVirtualizer.start', app.context) < forwardStart);
+    assert.ok(mediaCount() <= 300);
+
+    let blurred = 0;
+    app.context.document.activeElement = {
+        closest: selector => selector === '.grid-item' ? { blur() { blurred++; } } : null
+    };
+    let prevented = false;
+    app.windowListeners.keydown({ key: 'End', target: app.get('focused-grid-tile'),
+        preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(blurred, 1);
+    assert.equal(vm.runInContext('gridVirtualizer.start', app.context), 15633 - 300);
+    assert.equal(vm.runInContext('gridVirtualizer.end', app.context), 15633);
+    assert.equal(container.scrollTop, container.scrollHeight);
     assert.ok(mediaCount() <= 300);
 });
 

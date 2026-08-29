@@ -293,7 +293,7 @@ VIEWER NAVIGATION
 -   Keyboard Left Arrow: previous media
 -   Keyboard Right Arrow: next media
 -   Gallery button: return to the thumbnail/album grid
--   Press G to return to the thumbnail/album grid
+-   Press G or Escape to return to the thumbnail/album grid
 
 SLIDESHOW
 
@@ -366,10 +366,11 @@ image clipboard access can depend on HTTPS, CORS, and iframe/browser permissions
 Copy Image is disabled on ordinary http://LAN-IP pages. Use HTTPS or a
 browser-trusted localhost context for programmatic image clipboard writes.
 
-Viewer toolbar buttons are icon-only by default. Set showButtonLabels to true
-under defaults, index, or embed to show their text. URL override:
-?buttonLabels=0 or 1. Tooltips and accessible names remain available when text
-is hidden.
+Primary viewer toolbar buttons are icon-only by default. Interval, Download,
+and Copy Image are grouped under the right-side three-dot options menu. Set
+showButtonLabels to true under defaults, index, or embed to show text on the
+primary buttons. URL override: ?buttonLabels=0 or 1. Tooltips and accessible
+names remain available when text is hidden.
 
 At widths up to 560 CSS pixels (including narrow embeds), the gallery uses
 a logo/count row, a separate breadcrumb, and a 2-by-2 button grid. Routine
@@ -388,8 +389,7 @@ feedback flicker. On desktop, long filenames truncate to leave room for controls
 controls still wrap when the window is too narrow to fit them.
 
 Photos support: - Mouse wheel zoom - Touch pinch-to-zoom - Mouse/finger
-drag to pan - Reset Zoom button on wider layouts - Escape to reset zoom/pan when the
-image is magnified or displaced
+drag to pan - Reset Zoom button on wider layouts - Escape returns to the gallery
 
 IMAGE SIZING
 

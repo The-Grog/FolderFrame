@@ -238,6 +238,8 @@ const btnResetZoom = $('btn-reset-zoom');
 const btnImageMode = $('btn-image-mode');
 const btnDownload = $('btn-download');
 const btnCopyLink = $('btn-copy-link');
+const btnViewerOptions = $('btn-viewer-options');
+const viewerOptionsMenu = $('viewer-options-menu');
 const imageModeText = $('image-mode-text');
 const btnPlayPause = $('btn-play-pause');
 const playIcon = btnPlayPause.querySelector('.play-icon');
@@ -413,6 +415,12 @@ function updateMediaActions(filepath, filename) {
     btnCopyLink.title = !copyable ? 'Copy Image is unavailable for video'
         : !clipboardAvailable ? 'Copy Image requires HTTPS or a trusted local context'
         : 'Copy displayed image after it loads';
+}
+
+function setViewerOptionsOpen(open) {
+    const expanded = Boolean(open);
+    viewerOptionsMenu.hidden = !expanded;
+    btnViewerOptions.setAttribute('aria-expanded', String(expanded));
 }
 
 function imageClipboardBlob() {
@@ -909,6 +917,7 @@ async function navigateToFolder(folder) {
 }
 
 function renderGridView() {
+    setViewerOptionsOpen(false);
     stopViewerSession();
     const session = startGridSession();
     const returnPosition = !isGridViewActive && gridReturn &&
@@ -1114,6 +1123,21 @@ function renderGridView() {
         start: initialStart,
         end: Math.min(mediaFiles.length, initialStart +
             (virtualized ? (targetIndex >= 0 ? GRID_WINDOW_SIZE : GRID_BATCH_SIZE) : mediaFiles.length)),
+        jumpToStart() {
+            document.activeElement?.closest?.('.grid-item')?.blur?.();
+            if (virtualized) renderMediaWindow(0, Math.min(mediaFiles.length, GRID_BATCH_SIZE));
+            gridViewContainer.scrollTop = 0;
+        },
+        jumpToEnd() {
+            document.activeElement?.closest?.('.grid-item')?.blur?.();
+            if (virtualized) {
+                const start = Math.max(0, mediaFiles.length - GRID_WINDOW_SIZE);
+                renderMediaWindow(start, mediaFiles.length);
+            }
+            // Read scrollHeight after replacing the window so one keypress lands
+            // at the final geometry instead of relying on scroll anchoring.
+            gridViewContainer.scrollTop = gridViewContainer.scrollHeight;
+        },
         update() {
             if (!virtualized || !isGridViewActive || session.controller.signal.aborted) return;
             const { columns, rowHeight } = gridMetrics();
@@ -1427,6 +1451,7 @@ function setupEventListeners() {
     btnResetZoom.addEventListener('click', resetZoomAndPan);
     btnImageMode.addEventListener('click', toggleImageMode);
     btnCopyLink.addEventListener('click', copyCurrentImage);
+    btnViewerOptions.addEventListener('click', () => setViewerOptionsOpen(viewerOptionsMenu.hidden));
     viewport.addEventListener('wheel', handleWheel, { passive: false });
     viewport.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('mousemove', handleMouseMove);
@@ -1466,8 +1491,8 @@ function setupEventListeners() {
             const direction = { ArrowUp: -48, ArrowDown: 48, PageUp: -0.85, PageDown: 0.85 };
             if (!['Home', 'End', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown'].includes(e.key)) return;
             e.preventDefault();
-            if (e.key === 'Home') gridViewContainer.scrollTop = 0;
-            else if (e.key === 'End') gridViewContainer.scrollTop = gridViewContainer.scrollHeight;
+            if (e.key === 'Home') gridVirtualizer?.jumpToStart?.() ?? (gridViewContainer.scrollTop = 0);
+            else if (e.key === 'End') gridVirtualizer?.jumpToEnd?.() ?? (gridViewContainer.scrollTop = gridViewContainer.scrollHeight);
             else {
                 const value = direction[e.key];
                 gridViewContainer.scrollTop = Math.max(0, Math.min(gridViewContainer.scrollHeight,
@@ -1490,13 +1515,16 @@ function setupEventListeners() {
         if (e.key.toLowerCase() === 's') { shuffleEnabled = !shuffleEnabled; updateControlStates(); savePreferences(); }
         if (e.key.toLowerCase() === 'f') toggleFullscreen();
         if (e.key.toLowerCase() === 't') toggleTvMode();
-        if (e.key.toLowerCase() === 'g') renderGridView();
-        if (e.key === 'Escape' && (zoom !== 1.0 || panX || panY)) resetZoomAndPan();
+        if (e.key === 'Escape' && !viewerOptionsMenu.hidden) setViewerOptionsOpen(false);
+        else if (e.key.toLowerCase() === 'g' || e.key === 'Escape') renderGridView();
         resetIdleTimer();
     });
 
     window.addEventListener('mousemove', () => { if (!isGridViewActive) resetIdleTimer(); });
-    window.addEventListener('click', () => { if (!isGridViewActive) resetIdleTimer(); });
+    window.addEventListener('click', event => {
+        if (!event.target?.closest?.('#viewer-options')) setViewerOptionsOpen(false);
+        if (!isGridViewActive) resetIdleTimer();
+    });
     window.addEventListener('touchstart', () => { if (!isGridViewActive) resetIdleTimer(); });
     gridViewContainer.addEventListener('scroll', () => {
         $('btn-back-to-top').hidden = gridViewContainer.scrollTop < 320;

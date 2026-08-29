@@ -25,6 +25,7 @@ manual checks; automated tests do not verify browser layout or codecs.
   - [ ] **Progressive directory discovery** — Reduce the remaining cost of downloading/parsing exceptionally large directory listings and recursively discovering deep trees.
 - [x] **Thumbnail generation (optional)** — Added per-source `thumbnailPath`, parallel WebP preview lookup for grid/album covers, automatic original fallback, and an optional Pillow generator that preserves static-server hosting. Device validation with a large mixed-format library is pending.
 - [ ] **Docker packaging and Unraid templates** — Build a Docker image and an Unraid container template for easy deployment. Include configurable media/config mounts, port mapping, a web server with directory listings, and setup/update instructions. Keep ordinary static-server hosting supported.
+- [x] **Escape returns to gallery** — Escape exits the image viewer and returns to the thumbnail/album grid without adding another on-screen control.
 
 ### Browser and device testing
 
@@ -33,7 +34,7 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ## Completed
 
-- [x] **Configurable Download and Copy Image controls** — Download targets the original served media; Copy Image writes displayed photos as PNG and is disabled for video. Both can be enabled independently under defaults/index/embed or with `download=0/1` and `copy=0/1`, retaining browser clipboard and cross-origin restrictions. The viewer toolbar aligns with the gallery header and defaults to icon-only controls; `showButtonLabels` or `buttonLabels=0/1` controls visible text.
+- [x] **Configurable Download and Copy Image controls** — Download targets the original served media; Copy Image writes displayed photos as PNG and is disabled for video. Both can be enabled independently under defaults/index/embed or with `download=0/1` and `copy=0/1`, retaining browser clipboard and cross-origin restrictions. Interval, Download, and Copy Image are grouped in a right-side options menu; primary viewer controls remain icon-only by default with 44px touch targets.
 - [x] **Persistent sorting-date cache** — 24-hour localStorage cache with 2,000 entries per app/source, oldest-first eviction, storage-failure fallback, and Refresh Folder bypass. Persistence, expiry, eviction, and source isolation tests included.
 - [x] **Refresh README screenshots** — Replaced viewer and grid previews with user-supplied screenshots of the updated interface. Full viewer first; no browser chrome or hosting URL.
 - [x] **README configuration example and settings reference** — Added complete JSON, all settings/defaults, source paths, profile overrides, recursion, autoplay, controls-free mode, and preference/URL precedence. Full details in CONFIGURATION.md.
@@ -60,5 +61,5 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 - User tested and approved the swipe, filename visibility, and grid-return update.
 - User tested and approved the mobile double-tap and pinch-flicker fixes.
-- Current regression suite: 86 automated app/settings/cache and resilience tests. Run both tests/configuration.test.cjs and tests/resilience.test.cjs.
+- Current regression suite: 88 automated app/settings/cache and resilience tests. Run both tests/configuration.test.cjs and tests/resilience.test.cjs.
 - User visually tested and approved the long-filename desktop layout. Node tests do not validate CSS layout.

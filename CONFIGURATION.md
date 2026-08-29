@@ -216,10 +216,11 @@ Copy Image is disabled on ordinary `http://LAN-IP` pages because arbitrary
 clipboard writes require a secure context. Serve FolderFrame through HTTPS or
 use a browser-trusted localhost context.
 
-Viewer toolbar buttons use icons only by default. Set `showButtonLabels: true`
-under `defaults`, `index`, or `embed` to display their text labels. Override it
-with `?buttonLabels=1` or return to icons with `?buttonLabels=0`. Tooltips and
-accessible names remain available when visible labels are off.
+Primary viewer toolbar buttons use icons only by default. Interval, Download,
+and Copy Image stay labeled inside the right-side three-dot options menu. Set
+`showButtonLabels: true` under `defaults`, `index`, or `embed` to display text
+on the primary buttons. Override it with `?buttonLabels=1` or return to icons
+with `?buttonLabels=0`. Tooltips and accessible names remain available.
 
 TV mode is not restored from saved browser preferences. Exiting fullscreen
 turns TV mode off and pauses its slideshow. Explicit config tvMode defaults
