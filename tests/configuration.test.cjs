@@ -63,6 +63,34 @@ test('shortcuts preserve native fields and modifiers, and ignore repeated toggle
     assert.equal(prevented, false);
 });
 
+test('gallery scrolling keys work after a tile control receives focus', async () => {
+    const app = await boot();
+    const container = app.get('grid-view-container');
+    container.clientHeight = 1000;
+    container.scrollHeight = 5000;
+    container.scrollTop = 0;
+    const tileControl = app.get('focused-grid-tile');
+    tileControl.closest = selector => selector.split(',').map(part => part.trim()).includes('button') ? tileControl : null;
+    const press = key => {
+        let prevented = false;
+        app.windowListeners.keydown({ key, target: tileControl, preventDefault() { prevented = true; } });
+        assert.equal(prevented, true);
+    };
+
+    press('PageDown');
+    assert.equal(container.scrollTop, 850);
+    press('PageUp');
+    assert.equal(container.scrollTop, 0);
+    press('ArrowDown');
+    assert.equal(container.scrollTop, 48);
+    press('ArrowUp');
+    assert.equal(container.scrollTop, 0);
+    press('End');
+    assert.equal(container.scrollTop, 5000);
+    press('Home');
+    assert.equal(container.scrollTop, 0);
+});
+
 test('scan errors remain distinguishable from routine mobile timestamps', async () => {
     const app = await boot();
     const classes = new Set();
@@ -868,6 +896,51 @@ test('generated grid thumbnails fall back to originals without failing the tile'
 
 });
 
+test('large grids render incrementally and keep a bounded media-tile DOM window', async () => {
+    const app = await boot();
+    app.context.largeFiles = Array.from({ length: 15633 }, (_, index) =>
+        `https://example.test/frame/photos/image-${String(index).padStart(5, '0')}.jpg`);
+    vm.runInContext('mediaFiles = largeFiles; renderGridView()', app.context);
+    const grid = app.get('thumbnail-grid');
+    const mediaCount = () => grid.querySelectorAll('.media-tile').length;
+    assert.equal(mediaCount(), 100);
+    assert.equal(grid.querySelectorAll('.virtual-spacer').length, 1);
+    const container = app.get('grid-view-container');
+    container.clientHeight = 900;
+    app.get('thumbnail-grid').clientWidth = 1200;
+    container.scrollTop = 20000;
+    container.scrollHeight = 1000000;
+    vm.runInContext('gridVirtualizer.update()', app.context);
+    assert.ok(mediaCount() <= 300);
+    const forwardStart = vm.runInContext('gridVirtualizer.start', app.context);
+    assert.ok(forwardStart > 0);
+    container.scrollTop = 500000;
+    container.listeners.scroll();
+    assert.ok(vm.runInContext('gridVirtualizer.start', app.context) > forwardStart);
+    assert.ok(mediaCount() <= 300);
+    container.scrollTop = 0;
+    container.scrollHeight = 1000000;
+    container.listeners.scroll();
+    assert.ok(vm.runInContext('gridVirtualizer.start', app.context) < forwardStart);
+    assert.ok(mediaCount() <= 300);
+});
+
+test('confirmed empty albums disappear and scrolling reveals Back to Top', async () => {
+    const app = await boot();
+    const item = app.get('empty-album-item');
+    app.context.emptyAlbumItem = item;
+    app.context.DOMParser = class { parseFromString() { return { querySelectorAll: () => [] }; } };
+    await vm.runInContext("loadAlbumPreview(emptyAlbumItem, 'Empty', new AbortController().signal)", app.context);
+    assert.equal(item.hidden, true);
+    assert.equal(item.dataset.emptyAlbum, 'true');
+    const container = app.get('grid-view-container');
+    container.scrollTop = 500;
+    container.listeners.scroll();
+    assert.equal(app.get('btn-back-to-top').hidden, false);
+    app.get('btn-back-to-top').listeners.click();
+    assert.equal(container.scrollTop, 0);
+});
+
 test('compact viewer labels remain correct after sizing and fullscreen changes', async () => {
     const app = await boot();
     assert.equal(app.get('image-mode-text').textContent, 'Fit');
@@ -1014,12 +1087,22 @@ test('slideshow skips errors after a bounded delay and Pause cancels the skip', 
 
 async function boot({ search = '', config = shipped, configFailure = false, storageBlocked = false, empty = false } = {}) {
     class Element {
-        constructor() { this.style = {}; this.children = []; this.listeners = {}; this.dataset = {}; this.hidden = false; this.classList = { add() {}, remove() {}, toggle() {} }; }
+        constructor() { this.style = {}; this.children = []; this.listeners = {}; this.dataset = {}; this.hidden = false; this._innerHTML = ''; this.classList = { add() {}, remove() {}, toggle() {} }; }
         addEventListener(name, fn) { this.listeners[name] = fn; }
         querySelector() { return new Element(); }
+        querySelectorAll(selector) {
+            const classes = selector.split(',').map(part => part.trim().replace(/^\./, ''));
+            return this.children.filter(child => classes.some(name => (child.className || '').split(/\s+/).includes(name)));
+        }
         setAttribute() {}
-        appendChild(child) { this.children.push(child); }
+        appendChild(child) { child.parentNode = this; this.children.push(child); return child; }
         replaceChildren() { this.children = []; }
+        remove() {
+            if (this.parentNode) this.parentNode.children = this.parentNode.children.filter(child => child !== this);
+            this.parentNode = null;
+        }
+        set innerHTML(value) { this._innerHTML = value; if (value === '') this.children = []; }
+        get innerHTML() { return this._innerHTML; }
         pause() {}
         play() { return Promise.resolve(); }
     }

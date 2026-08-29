@@ -20,7 +20,9 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ### Deployment and performance
 
-- [ ] **Large Immich directory support** — Improve scanning, navigation, and rendering for very large media directories exported or mounted from Immich. Define realistic library-size targets, test deeply nested and high-file-count folders, avoid loading every tile or metadata record at once, and preserve FolderFrame's database-free static-server mode.
+- [ ] **Large Immich directory support** — Improve scanning, navigation, and rendering for very large media directories exported or mounted from Immich while preserving database-free static hosting.
+  - [x] **Incremental and windowed grid** — Render 100 media tiles initially, retain at most 300 media tiles in the DOM, preserve full scroll geometry/order, support reverse and keyboard scrolling, show a Back to Top control, and hide only confirmed-empty albums. Automated with a 15,633-file regression case; Immich device validation pending.
+  - [ ] **Progressive directory discovery** — Reduce the remaining cost of downloading/parsing exceptionally large directory listings and recursively discovering deep trees.
 - [x] **Thumbnail generation (optional)** — Added per-source `thumbnailPath`, parallel WebP preview lookup for grid/album covers, automatic original fallback, and an optional Pillow generator that preserves static-server hosting. Device validation with a large mixed-format library is pending.
 - [ ] **Docker packaging and Unraid templates** — Build a Docker image and an Unraid container template for easy deployment. Include configurable media/config mounts, port mapping, a web server with directory listings, and setup/update instructions. Keep ordinary static-server hosting supported.
 
@@ -57,5 +59,5 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 - User tested and approved the swipe, filename visibility, and grid-return update.
 - User tested and approved the mobile double-tap and pinch-flicker fixes.
-- Current regression suite: 72 automated app/settings/cache and resilience tests. Run both tests/configuration.test.cjs and tests/resilience.test.cjs.
+- Current regression suite: 82 automated app/settings/cache and resilience tests. Run both tests/configuration.test.cjs and tests/resilience.test.cjs.
 - User visually tested and approved the long-filename desktop layout. Node tests do not validate CSS layout.

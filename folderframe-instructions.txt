@@ -226,6 +226,13 @@ GALLERY CONTROLS
 
 GRID / ALBUM VIEW
 
+Large grids render 100 media tiles first and keep no more than 300 media tiles
+in the page at once. The full scrollbar and viewer order are preserved as
+distant tiles are removed and recreated. A Back to Top button appears after
+scrolling. Home, End, Page Up/Down, and Arrow Up/Down scroll the gallery even
+after focus changes. Album folders confirmed to contain no direct media or child folders
+are hidden; folders that fail to scan remain visible.
+
 SORTING
 
 The button between By Folder and Auto Refresh shows the current sorting.

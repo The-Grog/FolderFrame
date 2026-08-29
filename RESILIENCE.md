@@ -1,8 +1,9 @@
 # Large-library resilience
 
-FolderFrame remains a static client-side gallery: no PHP, database, or server-side
-thumbnail generator. Deploy `resilience.js` with `app.js`, `settings.js`, and
-the existing assets. No configuration migration is needed.
+FolderFrame remains a static client-side gallery: no PHP, database, or required
+server-side thumbnail service. Optional pre-generated WebP files can be served
+as ordinary static assets. Deploy `resilience.js` with `app.js`, `settings.js`,
+and the existing assets. No configuration migration is needed.
 
 ## Limits and behavior
 
@@ -22,6 +23,19 @@ Directory listings receive a longer budget than config/metadata because large
 listings can have substantial response bodies. Queue waiting time does not count
 as decoding time. Limits are named constants/defaults in app.js and resilience.js,
 not additional JSON settings.
+
+### Large grid rendering
+
+Libraries above 100 media items render incrementally. FolderFrame maintains a
+window of at most 300 media tiles in the DOM and uses top/bottom spacers to keep
+the scrollbar representative of the complete gallery. Scrolling near either
+edge moves the window forward or backward without changing `mediaFiles` or
+viewer indexes. This bounds grid DOM/layout work but does not eliminate the
+cost of downloading and parsing a very large HTML directory listing.
+
+Album folders are hidden only after a successful listing confirms they contain
+neither supported direct media nor child folders. Failed or timed-out listings
+retain their album tile.
 
 ## Cancellation and recovery
 

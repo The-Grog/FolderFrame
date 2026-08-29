@@ -72,6 +72,7 @@ maintained media list.
 - **Configurable startup:** named media sources, separate index/embed defaults, saved preferences, and URL overrides.
 - **Clear feedback:** folder scan progress, thumbnail placeholders, media loading indicators, and recovery guidance.
 - **Optional generated thumbnails:** serve small WebP grid/album previews with automatic original-image fallback; the full viewer always uses originals.
+- **Large-grid windowing:** large galleries render 100 tiles initially and keep at most 300 media tiles in the DOM while preserving the full scrollbar and media order.
 - **Static-server hosting:** no database or build step; works with a web server that supplies HTML directory listings.
 
 ## Browser and mobile support
@@ -450,6 +451,14 @@ thumbnail generation is required. Offscreen HEIC previews release their leases.
 Use Refresh Folder to reselect covers after changing files inside albums;
 unchanged background refreshes keep existing tiles. There is no cover.jpg
 override yet.
+
+Large galleries render incrementally in 100-item batches. Once browsing moves
+through more than 300 items, distant media tiles are replaced by measured grid
+space and recreated when scrolling back. The full media list and viewer order
+remain intact. Confirmed-empty album directories are hidden; unavailable
+directories remain visible so a temporary server problem is not mistaken for
+an empty album. A Back to Top button appears after scrolling. Home, End,
+Page Up/Down, and Arrow Up/Down always scroll the gallery after focus changes.
 
 #### Optional generated thumbnails
 

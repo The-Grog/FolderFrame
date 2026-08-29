@@ -8,6 +8,8 @@ let scanSession = null, gridSession = null, viewerSession = null;
 let failedNavigation = null;
 let warningReturnFolder = null;
 const DIRECTORY_TIMEOUT = 15000, MEDIA_TIMEOUT = 30000;
+const GRID_BATCH_SIZE = 100, GRID_WINDOW_SIZE = 300;
+let gridVirtualizer = null;
 function clearMediaSource(element) {
     if (element.removeAttribute) element.removeAttribute('src');
     else element.src = '';
@@ -27,6 +29,7 @@ function stopGridSession() {
     gridSession.observer?.disconnect();
     gridSession.cleanups.forEach(cleanup => cleanup());
     gridSession = null;
+    gridVirtualizer = null;
 }
 function startGridSession() {
     stopGridSession();
@@ -101,6 +104,11 @@ async function loadAlbumPreview(item, folder, signal) {
     try {
         if (signal.aborted) return;
         const listing = await scanDirectory(folder, { signal: controller.signal });
+        if (!listing.filePaths.length && !listing.folderNames.length) {
+            item.hidden = true;
+            item.dataset.emptyAlbum = 'true';
+            return;
+        }
         // scanDirectory already sorts naturally by filename. Do not crawl descendants.
         const file = listing.filePaths.find(isImageFile);
         if (!file || signal.aborted || controller.signal.aborted) return;
@@ -871,10 +879,11 @@ function renderGridView() {
         else updateThumbnail(el, true);
     };
 
-    mediaFiles.forEach((file, index) => {
+    const appendMediaBatch = (start, end) => mediaFiles.slice(start, end).forEach((file, offset) => {
+        const index = start + offset;
         const filename = decodeURIComponent(file.split('/').pop());
         const item = document.createElement('button');
-        item.className = 'grid-item';
+        item.className = 'grid-item media-tile';
         item.type = 'button';
         item.setAttribute('aria-label', `Open ${filename}`);
         if (returnPosition?.file === file) returnTile = item;
@@ -931,6 +940,74 @@ function renderGridView() {
         item.addEventListener('click', () => enterFullScreenViewer(index));
         thumbnailGrid.appendChild(item);
     });
+
+    const virtualized = mediaFiles.length > GRID_BATCH_SIZE;
+    const gridMetrics = () => {
+        const width = thumbnailGrid.clientWidth || gridViewContainer.clientWidth || 1200;
+        const min = width <= 560 ? Math.max(120, (width - 36) / 2) : width <= 900 ? 140 : 180;
+        const gap = width <= 900 ? 12 : 18;
+        const columns = Math.max(1, Math.floor((width + gap) / (min + gap)));
+        const card = Math.max(min, (width - gap * (columns - 1)) / columns);
+        return { columns, rowHeight: card + gap };
+    };
+    const estimateSpacerHeight = count => {
+        if (!count) return 0;
+        const { columns, rowHeight } = gridMetrics();
+        return Math.ceil(count / columns) * rowHeight;
+    };
+    const renderMediaWindow = (start, end) => {
+        session.cleanups.forEach(cleanup => cleanup());
+        session.cleanups.length = 0;
+        session.observer?.disconnect();
+        observed.forEach(state => state.controller?.abort());
+        observed.clear();
+        thumbnailGrid.querySelectorAll?.('.media-tile, .virtual-spacer').forEach(item => item.remove());
+        if (start) {
+            const spacer = document.createElement('div');
+            spacer.className = 'virtual-spacer';
+            spacer.style.height = estimateSpacerHeight(start) + 'px';
+            spacer.setAttribute('aria-hidden', 'true');
+            thumbnailGrid.appendChild(spacer);
+        }
+        if ('IntersectionObserver' in window) session.observer = new IntersectionObserver(entries => {
+            if (session.controller.signal.aborted) return;
+            entries.forEach(entry => updateThumbnail(entry.target, entry.isIntersecting));
+        }, { root: gridViewContainer, rootMargin: '300px' });
+        appendMediaBatch(start, end);
+        if (end < mediaFiles.length) {
+            const spacer = document.createElement('div');
+            spacer.className = 'virtual-spacer';
+            spacer.style.height = estimateSpacerHeight(mediaFiles.length - end) + 'px';
+            spacer.setAttribute('aria-hidden', 'true');
+            thumbnailGrid.appendChild(spacer);
+        }
+        gridVirtualizer.start = start;
+        gridVirtualizer.end = end;
+    };
+    const targetIndex = returnPosition?.file ? mediaFiles.indexOf(returnPosition.file) : -1;
+    const initialStart = targetIndex >= 0
+        ? Math.max(0, Math.floor(targetIndex / GRID_BATCH_SIZE) * GRID_BATCH_SIZE - GRID_BATCH_SIZE)
+        : 0;
+    gridVirtualizer = {
+        start: initialStart,
+        end: Math.min(mediaFiles.length, initialStart +
+            (virtualized ? (targetIndex >= 0 ? GRID_WINDOW_SIZE : GRID_BATCH_SIZE) : mediaFiles.length)),
+        update() {
+            if (!virtualized || !isGridViewActive || session.controller.signal.aborted) return;
+            const { columns, rowHeight } = gridMetrics();
+            const localTop = Math.max(0, gridViewContainer.scrollTop - (thumbnailGrid.offsetTop || 0));
+            const firstVisible = Math.min(mediaFiles.length - 1,
+                Math.max(0, Math.floor(localTop / rowHeight) * columns));
+            const edgeBuffer = Math.floor(GRID_BATCH_SIZE / 2);
+            if (firstVisible >= this.start + edgeBuffer && firstVisible < this.end - edgeBuffer) return;
+            let start = Math.max(0,
+                Math.floor(firstVisible / GRID_BATCH_SIZE) * GRID_BATCH_SIZE - GRID_BATCH_SIZE);
+            start = Math.min(start, Math.max(0, mediaFiles.length - GRID_WINDOW_SIZE));
+            const end = Math.min(mediaFiles.length, start + GRID_WINDOW_SIZE);
+            if (start !== this.start || end !== this.end) renderMediaWindow(start, end);
+        }
+    };
+    renderMediaWindow(gridVirtualizer.start, gridVirtualizer.end);
 
     gridViewContainer.style.display = 'flex';
     if (returnPosition) {
@@ -1256,9 +1333,23 @@ function setupEventListeners() {
 
     window.addEventListener('keydown', e => {
         if (!controlsEnabled) return;
-        if (isGridViewActive) return;
         if (e.defaultPrevented || e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return;
         if (e.target?.isContentEditable || e.target?.closest?.('a, select, input, textarea, video, [contenteditable]:not([contenteditable="false"])')) return;
+        if (isGridViewActive) {
+            const direction = { ArrowUp: -48, ArrowDown: 48, PageUp: -0.85, PageDown: 0.85 };
+            if (!['Home', 'End', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown'].includes(e.key)) return;
+            e.preventDefault();
+            if (e.key === 'Home') gridViewContainer.scrollTop = 0;
+            else if (e.key === 'End') gridViewContainer.scrollTop = gridViewContainer.scrollHeight;
+            else {
+                const value = direction[e.key];
+                gridViewContainer.scrollTop = Math.max(0, Math.min(gridViewContainer.scrollHeight,
+                    gridViewContainer.scrollTop + (Math.abs(value) < 1 ? value * gridViewContainer.clientHeight : value)));
+            }
+            $('btn-back-to-top').hidden = gridViewContainer.scrollTop < 320;
+            gridVirtualizer?.update();
+            return;
+        }
         const key = e.key.toLowerCase();
         if (!['arrowleft', 'arrowright', ' ', 'enter', 's', 'f', 't', 'g', 'escape'].includes(key)) return;
         // Viewer shortcuts own these keys even after a toolbar/arrow button is
@@ -1280,6 +1371,14 @@ function setupEventListeners() {
     window.addEventListener('mousemove', () => { if (!isGridViewActive) resetIdleTimer(); });
     window.addEventListener('click', () => { if (!isGridViewActive) resetIdleTimer(); });
     window.addEventListener('touchstart', () => { if (!isGridViewActive) resetIdleTimer(); });
+    gridViewContainer.addEventListener('scroll', () => {
+        $('btn-back-to-top').hidden = gridViewContainer.scrollTop < 320;
+        gridVirtualizer?.update();
+    }, { passive: true });
+    $('btn-back-to-top').addEventListener('click', () => {
+        if (gridViewContainer.scrollTo) gridViewContainer.scrollTo({ top: 0, behavior: 'smooth' });
+        else gridViewContainer.scrollTop = 0;
+    });
     document.addEventListener('visibilitychange', () => { if (!document.hidden && autoRefreshEnabled) loadGallery({ preserveView: true, silent: true }); });
 }
 

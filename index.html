@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#050505">
     <title>FolderFrame</title>
-    <link rel="stylesheet" href="styles.css?v=20260828-warning-nav">
+    <link rel="stylesheet" href="styles.css?v=20260828-grid-keyboard">
     <script src="heic2any.min.js"></script>
 <link rel="icon" type="image/png" href="docs/images/folderframe-icon.png?v=20260828-brand">
 </head>
@@ -103,7 +103,6 @@
                     <button id="btn-gallery-home" class="brand-home" type="button" aria-label="Go to top-level gallery" title="Go to top-level gallery">
                         <img class="brand-logo" src="docs/images/folderframe-logo.png?v=20260828-brand" alt="FolderFrame" width="120" height="40">
                     </button>
-                    <span id="grid-count" class="index-text">0 files</span>
                     <div class="gallery-path-bar" aria-label="Current gallery location">
                         <span class="path-icon" aria-hidden="true">
                             <svg viewBox="0 0 24 24" width="16" height="16">
@@ -113,6 +112,7 @@
                         <div id="breadcrumb" class="breadcrumb" aria-label="Album path"></div>
                         <span id="grid-path" class="folder-path">Sorted by folder</span>
                     </div>
+                    <span id="grid-count" class="index-text">0 files</span>
                     <div id="source-control" class="timer-control" hidden>
                         <label for="select-source">Source:</label>
                         <select id="select-source" class="custom-select"></select>
@@ -141,6 +141,7 @@
             <div id="scan-failures" role="status" hidden><span id="scan-failure-text"></span> <button id="btn-retry-scan" class="btn btn-secondary" type="button">Retry scan</button></div>
             <div id="scan-loading" class="scan-loading" role="status" hidden><span class="loading-spinner" aria-hidden="true"></span><span id="scan-loading-text">Scanning folders…</span></div>
             <div id="thumbnail-grid"></div>
+            <button id="btn-back-to-top" class="btn btn-secondary back-to-top" type="button" hidden aria-label="Back to top">↑ Top</button>
         </div>
 
         <div id="help-hint"><span>Scroll to Zoom • Drag to Pan • ←/→ Browse • Space Play/Pause • Enter Fit/Original • F Fullscreen • G Gallery • S Shuffle</span></div>
@@ -168,6 +169,6 @@
     <p id="config-notice" role="status" hidden></p>
     <script src="resilience.js?v=20260828-resilience"></script>
     <script src="settings.js?v=20260828-thumbnails"></script>
-    <script src="app.js?v=20260828-warning-nav"></script>
+    <script src="app.js?v=20260828-grid-keyboard"></script>
 </body>
 </html>
