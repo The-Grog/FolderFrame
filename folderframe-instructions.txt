@@ -357,10 +357,24 @@ and grid media captions. Default: true. URL override: ?showFilenames=0 or 1.
 This setting is not saved in browser preferences; album names, accessible labels,
 and error details remain available. It is not a privacy or access-control feature.
 
+Set showDownloadButton or showCopyButton to false in defaults, index, or embed
+to hide those viewer actions. Both default to true. URL overrides are
+?download=0 or 1 and ?copy=0 or 1. Download targets the original served file.
+Copy Image puts the displayed photo on the clipboard as PNG, including converted
+HEIC, and is disabled for video. Cross-origin downloads may open instead of save;
+image clipboard access can depend on HTTPS, CORS, and iframe/browser permissions.
+Copy Image is disabled on ordinary http://LAN-IP pages. Use HTTPS or a
+browser-trusted localhost context for programmatic image clipboard writes.
+
+Viewer toolbar buttons are icon-only by default. Set showButtonLabels to true
+under defaults, index, or embed to show their text. URL override:
+?buttonLabels=0 or 1. Tooltips and accessible names remain available when text
+is hidden.
+
 At widths up to 560 CSS pixels (including narrow embeds), the gallery uses
 a logo/count row, a separate breadcrumb, and a 2-by-2 button grid. Routine
-timestamps are hidden; scan errors remain visible. The viewer uses three rows:
-Gallery/name/count; Play/Shuffle/interval; Fit/Full/TV Mode. Reset Zoom is hidden
+timestamps are hidden; scan errors remain visible. The viewer uses compact,
+wrapping icon controls by default. Reset Zoom is hidden
 at this width. To reset a magnified photo, switch Fit/Original; switch back to
 Fit if needed. Wider headers keep compact controls and wrap to use available space.
 The sizing button shows an icon with Fit or Original; Full toggles fullscreen.
@@ -556,7 +570,8 @@ Basic iframe:
     </style>
 
 The iframe URL accepts the same source, album, view, sort, interval, shuffle,
-autoplay, autorefresh, tv, imageMode, controls, showFilenames, and remember options. Use
+autoplay, autorefresh, tv, imageMode, controls, showFilenames, download, copy,
+buttonLabels, and remember options. Use
 profile=embed to apply embed defaults from folderframe.config.json; otherwise
 the index defaults apply, even inside an iframe. Keyboard shortcuts work after
 the visitor clicks or focuses the embedded gallery.
@@ -645,14 +660,14 @@ FolderFrame is available under the MIT License. See LICENSE for details.
 ## Refresh frequency and long slideshows
 
 `refreshInterval` sets automatic folder rescanning in **seconds**: index defaults
-to 60 (one minute), embed to 300 (five minutes). Allowed values are integers
+to 120 (two minutes), embed to 300 (five minutes). Allowed values are integers
 from 1 to 86400. It is a config-only setting, not a saved browser preference
 or URL option. `autoRefresh: false` disables automatic rescanning.
 
 Set it under `defaults` for both profiles or under `index`/`embed` separately:
 
 ```json
-"index": { "refreshInterval": 60 },
+"index": { "refreshInterval": 120 },
 "embed": { "refreshInterval": 300 }
 ```
 

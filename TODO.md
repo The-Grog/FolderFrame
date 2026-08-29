@@ -7,7 +7,7 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ### Album recovery
 
-- [ ] **Recover from deleted or renamed albums** — When an album is deleted or renamed while in use, explain that the folder is unavailable and offer navigation to an existing parent or the gallery root. Clear or replace the invalid saved album path so reopening the base URL does not retry it. Do not require cache clearing or URL workarounds, and distinguish missing folders from connection or server-configuration failures. Add regression coverage for active browsing, slideshow playback, and startup with stale saved preferences.
+- [x] **Recover from deleted or renamed albums** — A confirmed HTTP 404/410 for the currently open album stops playback, clears stale media, replaces the saved album with its parent, and offers Parent folder/Gallery root recovery. Transient failures and recursive descendant failures still retain usable content. Automated coverage includes active slideshow recovery, repaired preferences, and descendant 404 isolation; device validation pending.
 
 ### Large-library resilience
 
@@ -33,6 +33,7 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ## Completed
 
+- [x] **Configurable Download and Copy Image controls** — Download targets the original served media; Copy Image writes displayed photos as PNG and is disabled for video. Both can be enabled independently under defaults/index/embed or with `download=0/1` and `copy=0/1`, retaining browser clipboard and cross-origin restrictions. The viewer toolbar aligns with the gallery header and defaults to icon-only controls; `showButtonLabels` or `buttonLabels=0/1` controls visible text.
 - [x] **Persistent sorting-date cache** — 24-hour localStorage cache with 2,000 entries per app/source, oldest-first eviction, storage-failure fallback, and Refresh Folder bypass. Persistence, expiry, eviction, and source isolation tests included.
 - [x] **Refresh README screenshots** — Replaced viewer and grid previews with user-supplied screenshots of the updated interface. Full viewer first; no browser chrome or hosting URL.
 - [x] **README configuration example and settings reference** — Added complete JSON, all settings/defaults, source paths, profile overrides, recursion, autoplay, controls-free mode, and preference/URL precedence. Full details in CONFIGURATION.md.
@@ -53,11 +54,11 @@ manual checks; automated tests do not verify browser layout or codecs.
 - [x] **Optional filename display in configuration** — Added showFilenames (default true), shared/index/embed support, and showFilenames=0/1 URL overrides. Hides viewer filenames and media captions, retaining album names, accessible labels, and error details. Published and user-approved.
 - [x] **Remember grid scroll position** — Restores the originally opened tile and saved scroll position, with a brief static highlight. Adjusts for moved tiles; falls back to scroll position if removed, and resets on folder navigation. Published and user-approved.
 - [x] **Sorting: Newest, Oldest, Filename** — Added the cycling gallery button between By Folder and Auto Refresh; Filename is the default. Config defaults/index/embed, saved preferences, and sort URL overrides supported. Uses bounded/cached Last-Modified HEAD lookups with filename ties and missing dates last. Documented and regression-tested; user supplied updated screenshots for publication.
-- [x] **Configurable refresh and long slideshows** — refreshInterval uses seconds, with one-minute index and five-minute embed defaults. Added 5m/15m/60m photo intervals. Documented and tested.
+- [x] **Configurable refresh and long slideshows** — refreshInterval uses seconds, with two-minute index and five-minute embed defaults. Added 5m/15m/60m photo intervals. Documented and tested.
 
 ## Validation notes
 
 - User tested and approved the swipe, filename visibility, and grid-return update.
 - User tested and approved the mobile double-tap and pinch-flicker fixes.
-- Current regression suite: 82 automated app/settings/cache and resilience tests. Run both tests/configuration.test.cjs and tests/resilience.test.cjs.
+- Current regression suite: 86 automated app/settings/cache and resilience tests. Run both tests/configuration.test.cjs and tests/resilience.test.cjs.
 - User visually tested and approved the long-filename desktop layout. Node tests do not validate CSS layout.

@@ -33,7 +33,7 @@ button, select, .media-error-actions a { touch-action:manipulation; }
 #gallery-image.mode-fit { width:100%; height:100%; max-width:100%; max-height:100%; object-fit:contain; }
 #gallery-video { max-width:100%; max-height:100%; object-fit:contain; z-index:2; pointer-events:auto; }
 .overlay { position:absolute; background:rgba(15,15,15,.78); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,.1); border-radius:12px; padding:12px 20px; z-index:10; transition:opacity .35s,transform .35s; }
-#overlay-header { top:20px; left:20px; right:20px; display:flex; justify-content:space-between; align-items:center; min-height:54px; padding:8px 20px; background:rgba(8,8,8,.34); }
+#overlay-header { top:max(10px,env(safe-area-inset-top)); left:max(12px,env(safe-area-inset-left)); right:max(12px,env(safe-area-inset-right)); display:flex; justify-content:space-between; align-items:center; min-height:54px; padding:8px 20px; background:rgba(8,8,8,.34); }
 .header-left,.header-right { display:flex; align-items:center; gap:10px; }
 .header-left { overflow:hidden; min-width:0; }
 .header-right { flex-wrap:wrap; justify-content:flex-end; }
@@ -41,6 +41,7 @@ button, select, .media-error-actions a { touch-action:manipulation; }
 .index-text { font-size:12px; font-weight:700; color:#aaa; background:rgba(255,255,255,.08); padding:4px 10px; border-radius:999px; white-space:nowrap; }
 .btn { display:inline-flex; align-items:center; justify-content:center; gap:7px; font-size:13px; font-weight:600; padding:8px 13px; border-radius:8px; border:1px solid transparent; cursor:pointer; transition:background .2s,border-color .2s,transform .15s,opacity .2s; outline:none; color:#fff; height:38px; white-space:nowrap; }
 .btn:hover:not(:disabled) { transform:translateY(-1px); }
+#btn-show-grid:hover:not(:disabled) { transform:none; }
 .btn:disabled { opacity:.35; cursor:not-allowed; }
 .btn-primary { background:#2563eb; }
 .btn-primary:hover { background:#3b82f6; box-shadow:0 0 12px rgba(37,99,235,.35); }
@@ -48,6 +49,8 @@ button, select, .media-error-actions a { touch-action:manipulation; }
 .btn-secondary:hover:not(:disabled) { background:rgba(255,255,255,.16); border-color:rgba(255,255,255,.24); }
 .btn.is-active { background:rgba(37,99,235,.22); border-color:rgba(96,165,250,.7); color:#bfdbfe; }
 .btn-icon { background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.1); width:38px; padding:0; }
+.hide-viewer-button-labels #overlay-header .button-label { display:none; }
+.hide-viewer-button-labels #overlay-header .btn { width:38px; min-width:38px; padding-left:0; padding-right:0; gap:0; }
 .timer-control { display:flex; align-items:center; gap:7px; }
 .timer-control label { font-size:12px; color:#bbb; font-weight:600; }
 .custom-select { background:rgba(255,255,255,.08); color:#fff; border:1px solid rgba(255,255,255,.1); border-radius:6px; padding:6px 9px; font-size:12px; font-weight:600; height:38px; outline:none; }
@@ -127,7 +130,7 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     font-weight:700;
 }
 .grid-actions { flex-shrink:0; }
-.scan-status { font-size:11px; color:#777; min-width:72px; text-align:right; }
+.scan-status { font-size:11px; color:#777; min-width:72px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }
 #thumbnail-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:18px; padding:116px 20px 40px; }
 .grid-item { position:relative; aspect-ratio:1/1; border-radius:12px; overflow:hidden; background:#111; border:1px solid rgba(255,255,255,.08); cursor:pointer; transition:transform .2s,border-color .2s,box-shadow .2s; color:inherit; padding:0; }
 .grid-item:hover { transform:scale(1.025); border-color:rgba(59,130,246,.55); box-shadow:0 10px 22px rgba(0,0,0,.5); }
@@ -260,9 +263,9 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     .custom-select { font-size:16px; }
     .grid-item-caption { opacity:1; }
     #overlay-header {
-        top:max(8px, env(safe-area-inset-top));
-        left:max(8px, env(safe-area-inset-left));
-        right:max(8px, env(safe-area-inset-right));
+        top:max(10px, env(safe-area-inset-top));
+        left:max(12px, env(safe-area-inset-left));
+        right:max(12px, env(safe-area-inset-right));
         padding:8px; gap:8px; flex-direction:column; align-items:stretch;
     }
     #overlay-header .header-left { gap:8px; }

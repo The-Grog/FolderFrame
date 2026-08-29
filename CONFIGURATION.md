@@ -158,11 +158,14 @@ Omitted settings retain the lower-priority value.
 | `autoplay` | `false` | Boolean: start slideshow and enter viewer |
 | `controls` | `true` | Boolean: false opens a controls-free viewer; pair with autoplay for a slideshow |
 | `showFilenames` | `true` | Boolean: show viewer filename and grid media captions |
+| `showDownloadButton` | `true` | Boolean: show Download for the original served media |
+| `showCopyButton` | `true` | Boolean: show Copy Image for displayed photos |
+| `showButtonLabels` | `false` | Boolean: show text beside viewer toolbar icons |
 | `interval` | `5` | Seconds: 3, 5, 10, 15, 30, 60, 300, 900, or 3600 |
 | `imageMode` | `"fit"` | `"fit"` or `"original"` |
 | `shuffle` | `false` | Boolean |
 | `autoRefresh` | `true` | Boolean: enable automatic rescanning |
-| `refreshInterval` | Index: `60`; embed: `300` | Integer seconds, 1–86400; config only |
+| `refreshInterval` | Index: `120`; embed: `300` | Integer seconds, 1–86400; config only |
 | `tvMode` | `false` | Boolean: TV controls and photo-frame preset |
 | `rememberPreferences` | `true` for index; `false` for embed | Boolean: read/write saved settings |
 
@@ -200,6 +203,24 @@ error details remain available. This is a display preference, not a privacy
 or access-control feature. It is not saved in browser preferences.
 Override it with `?showFilenames=0` or `?showFilenames=1`.
 
+Set `showDownloadButton` or `showCopyButton` to `false` under `defaults`,
+`index`, or `embed` to remove either viewer action. Override them with
+`?download=0/1` and `?copy=0/1`. These settings control presentation, not
+access: anyone who can view a media file can still request its URL directly.
+Download targets the original served file, including HEIC and video. Copy Image
+places the displayed photo on the clipboard as PNG, including HEIC after browser
+conversion, and is disabled for video. Browsers may open rather than save
+cross-origin downloads. Image clipboard writes can require HTTPS, permission,
+and CORS access when media comes from another origin.
+Copy Image is disabled on ordinary `http://LAN-IP` pages because arbitrary
+clipboard writes require a secure context. Serve FolderFrame through HTTPS or
+use a browser-trusted localhost context.
+
+Viewer toolbar buttons use icons only by default. Set `showButtonLabels: true`
+under `defaults`, `index`, or `embed` to display their text labels. Override it
+with `?buttonLabels=1` or return to icons with `?buttonLabels=0`. Tooltips and
+accessible names remain available when visible labels are off.
+
 TV mode is not restored from saved browser preferences. Exiting fullscreen
 turns TV mode off and pauses its slideshow. Explicit config tvMode defaults
 or tv=1 URLs still apply on reload; use tv=0 to override them.
@@ -214,6 +235,9 @@ or tv=1 URLs still apply on reload; use tv=0 to override them.
 | `autoplay=1` or `autoplay=0` | Start playing or paused |
 | `controls=1` or `controls=0` | Show controls or use the controls-free viewer |
 | `showFilenames=1` or `showFilenames=0` | Show or hide viewer filenames and media captions |
+| `download=1` or `download=0` | Show or hide the original-media Download button |
+| `copy=1` or `copy=0` | Show or hide the Copy Image button |
+| `buttonLabels=1` or `buttonLabels=0` | Show text labels or use icon-only viewer buttons |
 | `interval=10` | Slideshow interval in seconds |
 | `imageMode=fit` or `imageMode=original` | Initial image sizing |
 | `shuffle=1` or `shuffle=0` | Enable or disable Shuffle |
@@ -299,14 +323,14 @@ defaults; the existing controls still change the current session normally.
 ## Refresh frequency and long slideshows
 
 `refreshInterval` sets automatic folder rescanning in **seconds**: index defaults
-to 60 (one minute), embed to 300 (five minutes). Allowed values are integers
+to 120 (two minutes), embed to 300 (five minutes). Allowed values are integers
 from 1 to 86400. It is a config-only setting, not a saved browser preference
 or URL option. `autoRefresh: false` disables automatic rescanning.
 
 Set it under `defaults` for both profiles or under `index`/`embed` separately:
 
 ```json
-"index": { "refreshInterval": 60 },
+"index": { "refreshInterval": 120 },
 "embed": { "refreshInterval": 300 }
 ```
 

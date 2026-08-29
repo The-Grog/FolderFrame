@@ -3,6 +3,10 @@
     'use strict';
     const abortError = () => Object.assign(new Error('Cancelled'), { name: 'AbortError' });
     const timeoutError = message => Object.assign(new Error(message), { name: 'TimeoutError' });
+    const httpError = (response, url) => Object.assign(
+        new Error('HTTP ' + response.status),
+        { name: 'HTTPError', status: response.status, url }
+    );
 
     // Deadline includes response body consumption; cancellation also rejects mocks/
     // servers that fail to honor the fetch signal. Late completions are ignored.
@@ -23,7 +27,7 @@
                 (async () => {
                     if (signal?.aborted) throw abortError();
                     const response = await fetch(url, { ...options, signal: controller.signal });
-                    if (!response.ok) throw new Error('HTTP ' + response.status);
+                    if (!response.ok) throw httpError(response, url);
                     return await response[body]();
                 })()
             ]);
@@ -189,7 +193,7 @@
         return { acquire, invalidate, stats: () => ({ active, jobs: jobs.size,
             viewer: caches.viewer.size, thumbnail: caches.thumbnail.size }) };
     }
-    const api = { request, createImagePool, abortError, timeoutError };
+    const api = { request, createImagePool, abortError, timeoutError, httpError };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     else root.FolderFrameResilience = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -15,9 +15,12 @@
     "autoplay": false,
     "controls": true,
     "showFilenames": true,
+    "showDownloadButton": true,
+    "showCopyButton": true,
+    "showButtonLabels": false,
     "rememberPreferences": true
   },
-  "index": { "refreshInterval": 60 },
+  "index": { "refreshInterval": 120 },
   "embed": {
     "refreshInterval": 300,
     "rememberPreferences": false

@@ -44,6 +44,16 @@ test('request deadline covers a stalled body and cancellation rejects without se
     controller.abort(); await cancelled;
     assert.equal(f.timers.size, 0);
 });
+test('request exposes structured HTTP status and request URL', async () => {
+    const f = fixture();
+    f.context.fetch = async () => ({ ok: false, status: 404 });
+    await assert.rejects(f.api.request('/gone'), error => {
+        assert.equal(error.name, 'HTTPError');
+        assert.equal(error.status, 404);
+        assert.equal(error.url, '/gone');
+        return true;
+    });
+});
 test('shared in-flight decode serves thumbnail then viewer and viewer then thumbnail', async () => {
     for (const first of ['thumbnail', 'viewer']) {
         const work = deferred(); let decodes = 0;

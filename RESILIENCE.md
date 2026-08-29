@@ -59,7 +59,16 @@ successful folders remain available and old files below failed folders are retai
 not treated as deleted. A persistent grid warning identifies failed folders and
 offers Retry scan. A partial scan is not reported as an empty library.
 
+Exception: when the currently open album itself returns HTTP 404 or 410, it is
+confirmed removed or renamed rather than treated as a transient/descendant failure.
+FolderFrame stops playback, clears the stale view, replaces the saved album with
+its parent, and offers navigation to the parent or gallery root. Timeouts, network
+errors, server errors, and recursive descendant failures retain usable content.
+
 Warnings appear in the interactive grid; controls-free embeds keep their UI hidden.
+A successfully scanned album with no remaining supported media is reported as an
+empty album with Previous location and Gallery root actions; it does not show
+web-server troubleshooting intended for an unavailable source.
 
 ## HEIC sharing and memory
 
@@ -97,6 +106,10 @@ browser layout, or memory usage. Before declaring device validation complete:
 - Switch folders during slow loading; the latest destination must win.
 - Let a slideshow run while adding files; the current image must not reset.
 - Test a missing/inaccessible subfolder in All Pics; good files should remain.
+- Delete or rename the currently open album; confirm Parent folder and Gallery
+  root recoveries work and reloading the base URL does not retry the dead path.
+- Repeat removal during an active slideshow; playback must stop without advancing
+  through repeated missing-media errors.
 - Test a stalled/broken image and video, both paused and during a slideshow.
 - Pause a video for more than 30 seconds; it should not report a stall.
 - Repeat navigation on a phone and watch for flicker, stale images, or steadily

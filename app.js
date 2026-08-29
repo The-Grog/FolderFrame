@@ -7,6 +7,8 @@ const resilience = window.FolderFrameResilience;
 let scanSession = null, gridSession = null, viewerSession = null;
 let failedNavigation = null;
 let warningReturnFolder = null;
+let missingFolderRecovery = null;
+let emptyFolderNotice = false;
 const DIRECTORY_TIMEOUT = 15000, MEDIA_TIMEOUT = 30000;
 const GRID_BATCH_SIZE = 100, GRID_WINDOW_SIZE = 300;
 let gridVirtualizer = null;
@@ -42,6 +44,8 @@ let activeSource;
 let preferenceKey;
 let rememberPreferences = true;
 let controlsEnabled = true;
+let showDownloadButton = true;
+let showCopyButton = true;
 let swipeStart = null;
 let gridReturn = null;
 let albumPreviewSession = null;
@@ -232,6 +236,8 @@ const mediaTitle = $('media-title');
 const mediaIndex = $('media-index');
 const btnResetZoom = $('btn-reset-zoom');
 const btnImageMode = $('btn-image-mode');
+const btnDownload = $('btn-download');
+const btnCopyLink = $('btn-copy-link');
 const imageModeText = $('image-mode-text');
 const btnPlayPause = $('btn-play-pause');
 const playIcon = btnPlayPause.querySelector('.play-icon');
@@ -330,7 +336,12 @@ async function loadConfiguration() {
     preferenceKey = resolved.preferenceKey;
     rememberPreferences = startupSettings.rememberPreferences;
     controlsEnabled = startupSettings.controls;
+    showDownloadButton = startupSettings.showDownloadButton;
+    showCopyButton = startupSettings.showCopyButton;
+    btnDownload.hidden = !showDownloadButton;
+    btnCopyLink.hidden = !showCopyButton;
     document.body.classList.toggle('hide-filenames', !startupSettings.showFilenames);
+    document.body.classList.toggle('hide-viewer-button-labels', !startupSettings.showButtonLabels);
     document.body.classList.toggle('controls-free', !controlsEnabled);
     currentFolder = startupSettings.album;
     galleryViewMode = startupSettings.view;
@@ -371,6 +382,8 @@ function updateControlStates() {
     imageModeText.textContent = imageMode === 'fit' ? 'Fit' : 'Original';
     btnShuffle.classList.remove('is-active');
     btnShuffle.setAttribute('aria-pressed', String(shuffleEnabled));
+    btnShuffle.querySelector('.shuffle-on-icon').hidden = !shuffleEnabled;
+    btnShuffle.querySelector('.shuffle-off-icon').hidden = shuffleEnabled;
     btnShuffle.querySelector('.button-label').textContent = shuffleEnabled ? 'Shuffle' : 'Shuffle Off';
     btnAutoRefresh.title = `Automatically rescan every ${refreshInterval} seconds`;
     btnAutoRefresh.classList.remove('is-active');
@@ -387,6 +400,53 @@ function updateControlStates() {
     btnTvMode.setAttribute('aria-pressed', String(tvModeEnabled));
     btnTvMode.querySelector('.button-label').textContent = tvModeEnabled ? 'TV Mode On' : 'TV Mode';
     syncPlayButton();
+}
+
+function updateMediaActions(filepath, filename) {
+    btnDownload.href = filepath;
+    btnDownload.download = filename;
+    btnDownload.setAttribute('aria-label', `Download ${filename}`);
+    const copyable = isImageFile(filepath);
+    btnCopyLink.disabled = true;
+    const clipboardAvailable = window.isSecureContext && navigator.clipboard?.write && typeof ClipboardItem !== 'undefined';
+    btnCopyLink.setAttribute('aria-label', copyable ? `Copy image ${filename}` : 'Copy Image is unavailable for video');
+    btnCopyLink.title = !copyable ? 'Copy Image is unavailable for video'
+        : !clipboardAvailable ? 'Copy Image requires HTTPS or a trusted local context'
+        : 'Copy displayed image after it loads';
+}
+
+function imageClipboardBlob() {
+    return new Promise((resolve, reject) => {
+        if (!imageReady || !img.naturalWidth || !img.naturalHeight) return reject(new Error('Image is not ready'));
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+        const context = canvas.getContext?.('2d');
+        if (!context) return reject(new Error('Canvas is unavailable'));
+        try { context.drawImage(img, 0, 0); }
+        catch (error) { return reject(error); }
+        canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not create clipboard image')), 'image/png');
+    });
+}
+
+async function copyCurrentImage() {
+    if (!isPhotoActive() || btnCopyLink.disabled) return;
+    const label = btnCopyLink.querySelector('.button-label');
+    try {
+        if (!window.isSecureContext || !navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+            throw new Error('Image clipboard requires a secure context');
+        }
+        // Start the clipboard write during the click's transient user activation.
+        // Supplying the PNG as a promise prevents Firefox/Safari from losing that
+        // activation while the canvas finishes encoding.
+        const png = imageClipboardBlob();
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+        label.textContent = 'Copied';
+        btnCopyLink.title = 'Image copied';
+    } catch (error) {
+        label.textContent = 'Copy Failed';
+        btnCopyLink.title = 'Could not copy image; clipboard access may require HTTPS or permission';
+    }
+    setTimeout(() => { label.textContent = 'Copy Image'; btnCopyLink.title = 'Copy displayed image'; }, 1800);
 }
 
 function syncPlayButton() {
@@ -503,7 +563,7 @@ async function scanDirectoryRecursive(folder = currentFolder, visited = new Set(
     const { filePaths, folderNames } = listing || await scanDirectory(normalized, { signal });
     const result = { files: [...filePaths], failedFolders: [] };
     scannedFolders++; scannedFiles += filePaths.length;
-    setScanStatus(`Scanning… ${scannedFolders} folders checked · ${scannedFiles} files found`);
+    setScanProgress(`Scanning… ${scannedFolders} folders checked · ${scannedFiles} files found`);
     for (const child of folderNames) {
         if (signal?.aborted) throw resilience.abortError();
         const path = normalized ? normalized + '/' + child : child;
@@ -591,6 +651,40 @@ function showScanFailures(folders) {
         : '';
 }
 
+function parentFolder(folder) {
+    const parts = folder.split('/').filter(Boolean);
+    parts.pop();
+    return parts.join('/');
+}
+
+function isMissingFolderError(error) {
+    return error?.name === 'HTTPError' && (error.status === 404 || error.status === 410);
+}
+
+function handleMissingFolder(folder) {
+    const parent = parentFolder(folder);
+    scanSession?.abort();
+    stopViewerSession(); stopGridSession(); stopSlideshow();
+    mediaLoadId++;
+    video.pause();
+    clearMediaSource(video); clearMediaSource(img);
+    mediaFiles = []; subfolders = []; currentIndex = 0;
+    failedNavigation = null; warningReturnFolder = null;
+    currentFolder = parent;
+    missingFolderRecovery = { folder, parent };
+    isGridViewActive = true;
+    viewport.style.display = 'none';
+    gridViewContainer.style.display = controlsEnabled ? 'flex' : 'none';
+    thumbnailGrid.innerHTML = '';
+    showScanFailures([]);
+    $('warning-title').textContent = 'Album No Longer Available';
+    $('warning-message').textContent = `The album “${folder}” was removed, renamed, or is no longer available.`;
+    setScanStatus('Album no longer available', true);
+    renderBreadcrumb();
+    showWarning(true);
+    savePreferences();
+}
+
 async function loadGallery({ preserveView = true, forceCacheClear = false, silent = false } = {}) {
     if (isScanning && silent) return;
     scanSession?.abort();
@@ -627,9 +721,15 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
         if (forceCacheClear) clearImageBlobCache();
         showScanFailures(result.failedFolders);
         failedNavigation = null;
-        $('warning-title').textContent = 'No Media Detected';
-        $('warning-message').textContent = 'No supported media found in the selected folder/view.';
-        showWarning(!result.failedFolders.length && mediaFiles.length === 0 && (subfolders.length === 0 || !controlsEnabled));
+        missingFolderRecovery = null;
+        const empty = !result.failedFolders.length && mediaFiles.length === 0 &&
+            (subfolders.length === 0 || !controlsEnabled);
+        emptyFolderNotice = Boolean(empty && folder);
+        $('warning-title').textContent = emptyFolderNotice ? 'Album Is Empty' : 'No Media Detected';
+        $('warning-message').textContent = emptyFolderNotice
+            ? 'No supported photos or videos remain in this album.'
+            : 'No supported media found in the selected folder/view.';
+        showWarning(empty);
         renderBreadcrumb();
         setScanStatus(result.failedFolders.length ? 'Scan incomplete — some folders unavailable' :
             `Updated ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`, Boolean(result.failedFolders.length));
@@ -645,6 +745,12 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
     } catch (error) {
         if (!current() || error.name === 'AbortError') return;
         console.error('Directory scanning error:', error);
+        // Recursive descendant failures are absorbed into failedFolders above.
+        // Only a confirmed missing top-level/current album reaches this branch.
+        if (folder && isMissingFolderError(error)) {
+            handleMissingFolder(folder);
+            return false;
+        }
         setScanStatus('Scan failed — check connection and retry', true);
         showScanFailures([folder || activeSource.label]);
         $('warning-title').textContent = 'Could not scan this folder';
@@ -666,6 +772,10 @@ function setScanStatus(text, isError = false) {
         scanStatus.textContent = text;
         scanStatus.classList.toggle('is-error', isError);
     }
+    $('scan-loading-text').textContent = text;
+}
+
+function setScanProgress(text) {
     $('scan-loading-text').textContent = text;
 }
 
@@ -727,8 +837,17 @@ function showWarning(show) {
     warningOverlay.style.display = show ? 'flex' : 'none';
     if (!show) return;
     const previous = $('btn-warning-previous');
-    previous.hidden = warningReturnFolder === null || warningReturnFolder === currentFolder;
-    $('btn-warning-root').hidden = !currentFolder;
+    const root = $('btn-warning-root');
+    const recovery = missingFolderRecovery;
+    const confirmedAlbumState = Boolean(recovery || emptyFolderNotice);
+    previous.textContent = recovery ? 'Parent folder' : 'Previous location';
+    previous.hidden = recovery ? !recovery.parent : warningReturnFolder === null || warningReturnFolder === currentFolder;
+    root.hidden = recovery ? false : !currentFolder;
+    btnRetryWarning.hidden = Boolean(recovery);
+    $('warning-source-summary').hidden = confirmedAlbumState;
+    $('warning-server-help').hidden = confirmedAlbumState;
+    $('warning-offline-note').hidden = confirmedAlbumState;
+    $('warning-open-source').hidden = confirmedAlbumState;
     $('warning-open-source').href = activeSource.url;
 }
 function isPhotoActive() { return mediaFiles[currentIndex] ? isImageFile(mediaFiles[currentIndex]) : false; }
@@ -770,6 +889,9 @@ function renderBreadcrumb() {
 async function navigateToFolder(folder) {
     scanSession?.abort();
     stopViewerSession(); stopGridSession();
+    missingFolderRecovery = null;
+    emptyFolderNotice = false;
+    btnRetryWarning.hidden = false;
     const previousFolder = currentFolder;
     warningReturnFolder = previousFolder;
     gridReturn = null;
@@ -1089,6 +1211,7 @@ function showMedia(index) {
     mediaTitle.textContent = displayName;
     img.alt = filename;
     mediaIndex.textContent = `${currentIndex + 1} / ${mediaFiles.length}`;
+    updateMediaActions(filepath, filename);
 
     if (isImageFile(filepath)) {
         if (!isHeicFile(filepath)) watch();
@@ -1099,6 +1222,9 @@ function showMedia(index) {
             if (!isCurrent() || mediaFailed) return;
             clearWatchdog();
             imageReady = true;
+            const clipboardAvailable = window.isSecureContext && navigator.clipboard?.write && typeof ClipboardItem !== 'undefined';
+            btnCopyLink.disabled = !showCopyButton || !clipboardAvailable;
+            btnCopyLink.title = clipboardAvailable ? 'Copy displayed image' : 'Copy Image requires HTTPS or a trusted local context';
             setMediaLoading();
             img.style.display = 'block'; mediaTitle.textContent = displayName;
             if (slideshowPlaying) startSlideshowTimer();
@@ -1300,6 +1426,7 @@ function setupEventListeners() {
     navRight.addEventListener('click', nextMedia);
     btnResetZoom.addEventListener('click', resetZoomAndPan);
     btnImageMode.addEventListener('click', toggleImageMode);
+    btnCopyLink.addEventListener('click', copyCurrentImage);
     viewport.addEventListener('wheel', handleWheel, { passive: false });
     viewport.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('mousemove', handleMouseMove);
@@ -1320,7 +1447,7 @@ function setupEventListeners() {
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     btnRetryWarning.addEventListener('click', () => loadGallery({ preserveView: false, forceCacheClear: true }));
     $('btn-warning-previous').addEventListener('click', () => {
-        const target = warningReturnFolder;
+        const target = missingFolderRecovery ? missingFolderRecovery.parent : warningReturnFolder;
         if (target !== null) return navigateToFolder(target);
     });
     $('btn-warning-root').addEventListener('click', () => navigateToFolder(''));

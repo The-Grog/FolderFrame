@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#050505">
     <title>FolderFrame</title>
-    <link rel="stylesheet" href="styles.css?v=20260828-grid-keyboard">
+    <link rel="stylesheet" href="styles.css?v=20260829-copy-image-secure">
     <script src="heic2any.min.js"></script>
 <link rel="icon" type="image/png" href="docs/images/folderframe-icon.png?v=20260828-brand">
 </head>
@@ -41,7 +41,7 @@
             <div class="header-left">
                 <button id="btn-show-grid" class="btn btn-secondary" title="Back to Gallery">
                     <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 11h5V5H4v6zm0 7h5v-6H4v6zm6 0h5v-6h-5v6zm6 0h5v-6h-5v6zm-6-7h5V5h-5v6zm6-6v6h5V5h-5z"/></svg>
-                    Gallery
+                    <span class="button-label">Gallery</span>
                 </button>
                 <span id="media-title" class="title-text">Loading…</span>
                 <span id="media-index" class="index-text"></span>
@@ -51,11 +51,12 @@
                 <button id="btn-play-pause" class="btn btn-secondary" title="Play/Pause slideshow">
                     <span class="play-icon"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M8 5v14l11-7z"/></svg></span>
                     <span class="pause-icon" style="display:none;"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg></span>
-                    <span id="slideshow-text">Play</span>
+                    <span id="slideshow-text" class="button-label">Play</span>
                 </button>
 
                 <button id="btn-shuffle" class="btn btn-secondary" aria-pressed="false" title="Shuffle slideshow order">
-                    <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M10.59 9.17 5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg>
+                    <span class="shuffle-on-icon" hidden><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M10.59 9.17 5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg></span>
+                    <span class="shuffle-off-icon"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 5h11V2l5 4-5 4V7H4V5zm0 12h11v-3l5 4-5 4v-3H4v-2z"/></svg></span>
                     <span class="button-label">Shuffle Off</span>
                 </button>
 
@@ -74,10 +75,24 @@
                     </select>
                 </div>
 
-                <button id="btn-reset-zoom" class="btn btn-secondary" title="Reset zoom and pan" disabled>Reset Zoom</button>
+                <button id="btn-reset-zoom" class="btn btn-secondary" title="Reset zoom and pan" aria-label="Reset zoom and pan" disabled>
+                    <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 5a7 7 0 1 1-6.32 4H3l3.5-3.5L10 9H7.69A5 5 0 1 0 12 7V5z"/></svg>
+                    <span class="button-label">Reset Zoom</span>
+                </button>
+
+                <a id="btn-download" class="btn btn-secondary" download rel="noopener" title="Download original media">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M11 3h2v10.17l3.59-3.58L18 11l-6 6-6-6 1.41-1.41L11 13.17V3zM5 19h14v2H5v-2z"/></svg>
+                    <span class="button-label">Download</span>
+                </a>
+
+                <button id="btn-copy-link" class="btn btn-secondary" type="button" title="Copy displayed image" disabled>
+                    <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+                    <span class="button-label">Copy Image</span>
+                </button>
+
                 <button id="btn-image-mode" class="btn btn-secondary" title="Toggle Original Size / Fit Screen">
                     <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 9h8v6H8z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-                    <span id="image-mode-text">Fit</span>
+                    <span id="image-mode-text" class="button-label">Fit</span>
                 </button>
 
                 <button id="btn-fullscreen" class="btn btn-secondary" title="Enter fullscreen" aria-label="Toggle Fullscreen" aria-pressed="false">
@@ -150,12 +165,12 @@
             <div class="warning-card">
                 <h2 id="warning-title">No Media Detected</h2>
                 <p id="warning-message"></p>
-                <p>Configured source: <code class="configured-source-path">photos/</code>.</p>
-                <div class="instructions">
+                <p id="warning-source-summary">Configured source: <code class="configured-source-path">photos/</code>.</p>
+                <div id="warning-server-help" class="instructions">
                     <h3>Web Server Required</h3>
                     <p>This gallery requires directory listing to be enabled for <code class="configured-source-path">photos/</code> and any album subfolders.</p>
                 </div>
-                <p class="offline-note">Opening the HTML directly with <code>file://</code> will not work because browsers cannot scan local directories.</p>
+                <p id="warning-offline-note" class="offline-note">Opening the HTML directly with <code>file://</code> will not work because browsers cannot scan local directories.</p>
                 <div class="warning-actions">
                     <button id="btn-retry-warning" class="btn btn-primary">Scan Again</button>
                     <button id="btn-warning-previous" class="btn btn-secondary" hidden>Previous location</button>
@@ -167,8 +182,8 @@
     </div>
 
     <p id="config-notice" role="status" hidden></p>
-    <script src="resilience.js?v=20260828-resilience"></script>
-    <script src="settings.js?v=20260828-thumbnails"></script>
-    <script src="app.js?v=20260828-grid-keyboard"></script>
+    <script src="resilience.js?v=20260829-missing-album"></script>
+    <script src="settings.js?v=20260829-refresh-2m"></script>
+    <script src="app.js?v=20260829-missing-album"></script>
 </body>
 </html>

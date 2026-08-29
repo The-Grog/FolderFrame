@@ -6,7 +6,6 @@
   </picture>
 </h1>
 
-
 FolderFrame works as a standalone, self-hosted photo and video gallery or as
 an embedded gallery or slideshow within your websites. Use it on its own,
 or add it to an existing page with a standard iframe—including an optional
@@ -124,9 +123,12 @@ and starts the embed as a controls-free slideshow including subfolders:
     "autoplay": false,
     "controls": true,
     "showFilenames": true,
+    "showDownloadButton": true,
+    "showCopyButton": true,
+    "showButtonLabels": false,
     "rememberPreferences": true
   },
-  "index": { "refreshInterval": 60 },
+  "index": { "refreshInterval": 120 },
   "embed": {
     "refreshInterval": 300,
     "view": "all",
@@ -155,11 +157,14 @@ Put settings in `defaults` for both profiles or in `index`/`embed` to override t
 | `imageMode` | `"fit"` | `"fit"` or `"original"` |
 | `shuffle` | `false` | Boolean |
 | `autoRefresh` | `true` | Boolean: enable automatic rescanning |
-| `refreshInterval` | Index: `60`; embed: `300` | Integer seconds, 1–86400; config only |
+| `refreshInterval` | Index: `120`; embed: `300` | Integer seconds, 1–86400; config only |
 | `tvMode` | `false` | Boolean: fit/shuffle/auto-refresh/autoplay preset |
 | `autoplay` | `false` | Boolean: enter viewer and start slideshow |
 | `controls` | `true` | Boolean: false opens viewer without controls; videos are muted |
 | `showFilenames` | `true` | Boolean: show viewer filename and grid media captions |
+| `showDownloadButton` | `true` | Boolean: show Download for the original served media |
+| `showCopyButton` | `true` | Boolean: show Copy Image for displayed photos |
+| `showButtonLabels` | `false` | Boolean: show text beside viewer toolbar icons |
 | `rememberPreferences` | Index: `true`; embed: `false` | Boolean: read/write browser preferences |
 
 Precedence: built-in defaults → shared defaults → selected profile → saved
@@ -176,6 +181,19 @@ Hide filenames with `showFilenames: false` in defaults/index/embed, or
 `?showFilenames=0` (use `showFilenames=1` to show them). Album names,
 accessible labels, and error details remain available.
 
+Download targets the original served file, not a generated thumbnail. Copy
+Image places the displayed photo on the clipboard as PNG, including HEIC after
+browser conversion, and is disabled for video. Set `showDownloadButton` or
+`showCopyButton` to `false` under defaults/index/embed, or use `?download=0`
+and `?copy=0`. Use `1` to enable either URL override. Cross-origin download
+behavior and image clipboard access remain subject to browser, CORS, HTTPS,
+and iframe policies.
+Copy Image is disabled on ordinary `http://LAN-IP` pages because browsers allow
+image clipboard writes only in secure contexts. Use HTTPS (such as a Cloudflare
+Tunnel hostname) or a browser-trusted localhost context.
+Viewer toolbar buttons are icon-only by default. Set `showButtonLabels: true`
+or use `?buttonLabels=1` to display text; `?buttonLabels=0` restores icons only.
+
 An iframe uses the embed profile only when its URL includes `?profile=embed`.
 For example, `?profile=embed&controls=0&autoplay=1&view=all`.
 Autoplay uses the selected folder's files; choose `view: "all"` for subfolders.
@@ -186,14 +204,14 @@ examples, all URL aliases, validation rules, and full precedence details.
 ## Refresh frequency and long slideshows
 
 `refreshInterval` sets automatic folder rescanning in **seconds**: index defaults
-to 60 (one minute), embed to 300 (five minutes). Allowed values are integers
+to 120 (two minutes), embed to 300 (five minutes). Allowed values are integers
 from 1 to 86400. It is a config-only setting, not a saved browser preference
 or URL option. `autoRefresh: false` disables automatic rescanning.
 
 Set it under `defaults` for both profiles or under `index`/`embed` separately:
 
 ```json
-"index": { "refreshInterval": 60 },
+"index": { "refreshInterval": 120 },
 "embed": { "refreshInterval": 300 }
 ```
 
@@ -574,6 +592,11 @@ viewer to switch between Fit Screen and Original Size.
 Use the Full button (beside TV Mode), or press F
 in the full viewer, to enter or leave browser fullscreen.
 
+Download requests the original served file. Copy Image puts the displayed photo
+on the clipboard as PNG and is unavailable for video.
+They can be hidden independently in configuration and are convenience controls,
+not access restrictions.
+
 While viewing media, controls and the mouse cursor fade after
 approximately 3 seconds of inactivity. Mouse, touch, or keyboard
 activity brings them back.
@@ -657,6 +680,15 @@ Supported options:
 
     autoplay=1 or autoplay=0
         Enter the viewer and start slideshow playback, or start paused in the grid.
+
+    download=1 or download=0
+        Show or hide the Download button.
+
+    copy=1 or copy=0
+        Show or hide the Copy Image button.
+
+    buttonLabels=1 or buttonLabels=0
+        Show text labels or use icon-only viewer buttons.
 
     tv=1 or tv=0
         Enable TV/photo-frame behavior:
@@ -744,7 +776,8 @@ Basic iframe:
     </style>
 
 The iframe URL accepts the same source, album, view, sort, interval, shuffle,
-autoplay, autorefresh, tv, imageMode, controls, showFilenames, and remember options. Use
+autoplay, autorefresh, tv, imageMode, controls, showFilenames, download, copy,
+buttonLabels, and remember options. Use
 profile=embed to apply embed defaults from folderframe.config.json; otherwise
 the index defaults apply, even inside an iframe. Keyboard shortcuts work after
 the visitor clicks or focuses the embedded gallery.

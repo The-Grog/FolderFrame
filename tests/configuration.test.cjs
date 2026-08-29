@@ -101,6 +101,9 @@ test('scan errors remain distinguishable from routine mobile timestamps', async 
     assert.match(app.get('scan-status').textContent, /Scan failed/);
     vm.runInContext("setScanStatus('Updated 6:00 PM')", app.context);
     assert.equal(classes.has('is-error'), false);
+    vm.runInContext("setScanProgress('Scanning… 2711 folders checked · 13371 files found')", app.context);
+    assert.equal(app.get('scan-status').textContent, 'Updated 6:00 PM');
+    assert.match(app.get('scan-loading-text').textContent, /2711 folders checked/);
 });
 
 test('empty-folder warning offers previous location, gallery root, and source escape', async () => {
@@ -110,8 +113,13 @@ test('empty-folder warning offers previous location, gallery root, and source es
         : { filePaths: ['https://example.test/frame/photos/photo.jpg'], folderNames: ['Empty'] };
     await vm.runInContext("navigateToFolder('Empty')", app.context);
     assert.equal(app.get('warning-overlay').style.display, 'flex');
+    assert.equal(app.get('warning-title').textContent, 'Album Is Empty');
+    assert.match(app.get('warning-message').textContent, /remain in this album/);
     assert.equal(app.get('btn-warning-previous').hidden, false);
     assert.equal(app.get('btn-warning-root').hidden, false);
+    assert.equal(app.get('btn-retry-warning').hidden, false);
+    assert.equal(app.get('warning-server-help').hidden, true);
+    assert.equal(app.get('warning-open-source').hidden, true);
     assert.equal(app.get('warning-open-source').href, 'https://example.test/frame/photos/');
     await app.get('btn-warning-previous').listeners.click();
     assert.equal(app.state().currentFolder, '');
@@ -180,7 +188,7 @@ test('partial recursive scan keeps successful media and previous files below fai
     vm.runInContext("galleryViewMode = 'all'; mediaFiles = ['https://example.test/frame/photos/Bad/old.jpg']; showMedia(0)", app.context);
     const id = vm.runInContext('mediaLoadId', app.context);
     app.context.scanDirectory = async folder => {
-        if (folder === 'Bad') throw new Error('offline');
+        if (folder === 'Bad') throw Object.assign(new Error('HTTP 404'), { name: 'HTTPError', status: 404 });
         return folder === '' ? { filePaths: [], folderNames: ['Bad', 'Good'] }
             : { filePaths: ['https://example.test/frame/photos/Good/new.jpg'], folderNames: [] };
     };
@@ -190,6 +198,39 @@ test('partial recursive scan keeps successful media and previous files below fai
     assert.equal(app.get('scan-failures').hidden, false);
     assert.match(app.get('scan-failure-text').textContent, /Bad/);
     assert.equal(app.get('warning-overlay').style.display, 'none');
+});
+
+test('missing current album stops playback, clears stale media, and repairs the saved album', async () => {
+    const app = await boot({ search: '?album=Family/2026&autoplay=1' });
+    app.context.scanDirectory = async () => {
+        throw Object.assign(new Error('HTTP 404'), { name: 'HTTPError', status: 404 });
+    };
+    await vm.runInContext('loadGallery({silent:true})', app.context);
+    assert.equal(app.state().slideshowPlaying, false);
+    assert.equal(app.state().currentFolder, 'Family');
+    assert.equal(app.state().mediaFiles.length, 0);
+    assert.equal(app.get('warning-overlay').style.display, 'flex');
+    assert.equal(app.get('warning-title').textContent, 'Album No Longer Available');
+    assert.equal(app.get('btn-retry-warning').hidden, true);
+    assert.equal(app.get('btn-warning-previous').textContent, 'Parent folder');
+    assert.equal(app.get('btn-warning-previous').hidden, false);
+    assert.equal(app.get('btn-warning-root').hidden, false);
+    assert.equal(app.get('warning-server-help').hidden, true);
+    assert.equal(app.get('warning-open-source').hidden, true);
+    const saved = JSON.parse(app.saved.get(vm.runInContext('preferenceKey', app.context)));
+    assert.equal(saved.album, 'Family');
+
+    app.context.scanDirectory = async folder => ({
+        filePaths: [`https://example.test/frame/photos/${folder}/parent.jpg`], folderNames: []
+    });
+    await app.get('btn-warning-previous').listeners.click();
+    assert.equal(app.state().currentFolder, 'Family');
+    assert.equal(app.get('warning-overlay').style.display, 'none');
+
+    const reloaded = await boot({ initialStorage: app.saved });
+    assert.equal(reloaded.state().currentFolder, 'Family');
+    assert.ok(reloaded.requests.some(url => /\/photos\/Family\/$/.test(url)));
+    assert.equal(reloaded.requests.some(url => /\/photos\/Family\/2026\/$/.test(url)), false);
 });
 
 test('navigation supersedes a stalled scan and late response cannot overwrite the new folder', async () => {
@@ -208,7 +249,9 @@ test('navigation supersedes a stalled scan and late response cannot overwrite th
 
 test('root navigation failure retains previous gallery and retry targets failed destination', async () => {
     const app = await boot();
-    app.context.scanDirectory = async () => { throw new Error('offline'); };
+    app.context.scanDirectory = async () => {
+        throw Object.assign(new Error('HTTP 500'), { name: 'HTTPError', status: 500 });
+    };
     await vm.runInContext("navigateToFolder('Bad')", app.context);
     assert.equal(app.state().currentFolder, '');
     assert.equal(app.state().mediaFiles.length, 1);
@@ -478,7 +521,7 @@ test('sort button cycles current label and saves choice without changing source 
 test('refresh timing has profile defaults and validated config overrides', () => {
     for (const raw of [{}, shipped]) {
         const config = normalize(raw);
-        assert.equal(api.resolveSettings(config, '').settings.refreshInterval, 60);
+        assert.equal(api.resolveSettings(config, '').settings.refreshInterval, 120);
         assert.equal(api.resolveSettings(config, '?profile=embed').settings.refreshInterval, 300);
     }
     const config = normalize({ defaults: { refreshInterval: 120 }, embed: { refreshInterval: 600 } });
@@ -491,7 +534,7 @@ test('refresh timing has profile defaults and validated config overrides', () =>
 
 test('automatic refresh uses resolved timing and respects disabled refresh', async () => {
     for (const [search, config, seconds] of [
-        ['', {}, 60], ['?profile=embed', {}, 300],
+        ['', {}, 120], ['?profile=embed', {}, 300],
         ['', { index: { refreshInterval: 120 } }, 120]
     ]) {
         const app = await boot({ search, config });
@@ -755,6 +798,57 @@ test('filename setting validates booleans and supports profile and URL precedenc
     assert.throws(() => normalize({ defaults: { showFilenames: 'no' } }), /showFilenames/);
     const app = await boot({ search: '?showFilenames=0&autoplay=1' });
     assert.equal(app.get('gallery-image').alt, 'photo.jpg');
+});
+
+test('download and copy buttons are independently configurable by profile and URL', async () => {
+    const config = normalize({ embed: { showDownloadButton: false, showCopyButton: false, showButtonLabels: true } });
+    assert.equal(api.resolveSettings(config, '').settings.showDownloadButton, true);
+    assert.equal(api.resolveSettings(config, '?profile=embed').settings.showCopyButton, false);
+    const enabled = api.resolveSettings(config, '?profile=embed&download=1&copy=1').settings;
+    assert.equal(enabled.showDownloadButton, true);
+    assert.equal(enabled.showCopyButton, true);
+    assert.equal(api.resolveSettings(config, '?profile=embed').settings.showButtonLabels, true);
+    assert.equal(api.resolveSettings(config, '?profile=embed&buttonLabels=0').settings.showButtonLabels, false);
+    assert.throws(() => normalize({ defaults: { showDownloadButton: 'yes' } }), /showDownloadButton/);
+    assert.throws(() => normalize({ defaults: { showButtonLabels: 'yes' } }), /showButtonLabels/);
+    assert.ok(api.resolveSettings(config, '?download=yes').warnings.length);
+    const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+    assert.ok(html.indexOf('id="btn-copy-link"') < html.indexOf('id="btn-image-mode"'));
+    assert.ok(html.indexOf('id="btn-image-mode"') < html.indexOf('id="btn-fullscreen"'));
+});
+
+test('viewer actions download the original, copy the displayed image, and show the current shuffle icon', async () => {
+    const app = await boot({ search: '?autoplay=1' });
+    const file = app.state().mediaFiles[0];
+    assert.equal(app.get('btn-download').href, file);
+    assert.equal(app.get('btn-download').download, 'photo.jpg');
+    app.get('gallery-image').naturalWidth = 100;
+    app.get('gallery-image').naturalHeight = 80;
+    app.get('gallery-image').onload();
+    const blob = { type: 'image/png' };
+    app.context.imageClipboardBlob = async () => blob;
+    let copied;
+    app.context.navigator.clipboard.write = async value => { copied = value; };
+    await app.get('btn-copy-link').listeners.click();
+    assert.equal(await copied[0].items['image/png'], blob);
+
+    const icons = { '.shuffle-on-icon': { hidden: true }, '.shuffle-off-icon': { hidden: false }, '.button-label': { textContent: '' } };
+    app.get('btn-shuffle').querySelector = selector => icons[selector];
+    vm.runInContext('shuffleEnabled = false; updateControlStates()', app.context);
+    assert.equal(icons['.shuffle-on-icon'].hidden, true);
+    assert.equal(icons['.shuffle-off-icon'].hidden, false);
+    vm.runInContext('shuffleEnabled = true; updateControlStates()', app.context);
+    assert.equal(icons['.shuffle-on-icon'].hidden, false);
+    assert.equal(icons['.shuffle-off-icon'].hidden, true);
+
+    app.context.window.isSecureContext = false;
+    vm.runInContext('showMedia(0)', app.context);
+    assert.equal(app.get('btn-copy-link').disabled, true);
+    assert.match(app.get('btn-copy-link').title, /requires HTTPS/);
+
+    const hidden = await boot({ config: { defaults: { showDownloadButton: false, showCopyButton: false } } });
+    assert.equal(hidden.get('btn-download').hidden, true);
+    assert.equal(hidden.get('btn-copy-link').hidden, true);
 });
 
 test('returning to the grid restores the original tile and scroll position after browsing', async () => {
@@ -1085,7 +1179,8 @@ test('slideshow skips errors after a bounded delay and Pause cancels the skip', 
     assert.equal(vm.runInContext('slideshowTimer', app.context), null);
 });
 
-async function boot({ search = '', config = shipped, configFailure = false, storageBlocked = false, empty = false } = {}) {
+async function boot({ search = '', config = shipped, configFailure = false, storageBlocked = false,
+    empty = false, initialStorage = new Map() } = {}) {
     class Element {
         constructor() { this.style = {}; this.children = []; this.listeners = {}; this.dataset = {}; this.hidden = false; this._innerHTML = ''; this.classList = { add() {}, remove() {}, toggle() {} }; }
         addEventListener(name, fn) { this.listeners[name] = fn; }
@@ -1110,12 +1205,15 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
     const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
     const listeners = {};
     const requests = [];
-    const saved = new Map();
+    const saved = new Map(initialStorage);
     const sourceLabels = [new Element(), new Element()];
     let animationFrames = 0;
     const context = vm.createContext({
-        URL, URLSearchParams, AbortController, console: { warn() {}, log() {}, error() {} },
-        window: { FolderFrameSettings: api, addEventListener(name, fn) { listeners[name] = fn; } },
+        URL, URLSearchParams, AbortController,
+        ClipboardItem: class { constructor(items) { this.items = items; } },
+        navigator: { clipboard: { writeText: async () => {}, write: async () => {} } },
+        console: { warn() {}, log() {}, error() {} },
+        window: { FolderFrameSettings: api, isSecureContext: true, addEventListener(name, fn) { listeners[name] = fn; } },
         document: { getElementById: get, createElement: () => new Element(), querySelectorAll: () => sourceLabels,
             addEventListener() {}, body: new Element(), hidden: false },
         location: { href: base + search, search, assign(url) { this.assigned = url; } },
