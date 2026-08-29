@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#050505">
     <title>FolderFrame</title>
-    <link rel="stylesheet" href="styles.css?v=20260829-viewer-groups">
+    <link rel="stylesheet" href="styles.css?v=20260829-centered-viewer-icons">
     <script src="heic2any.min.js"></script>
 <link rel="icon" type="image/png" href="docs/images/folderframe-icon.png?v=20260828-brand">
 </head>
@@ -66,8 +66,9 @@
                 </button>
 
                 <div class="viewer-display-controls">
-                <button id="btn-image-mode" class="btn btn-secondary" title="Toggle Original Size / Fit Screen">
-                    <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 9h8v6H8z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+                <button id="btn-image-mode" class="btn btn-secondary" title="Toggle Original Size / Fit Screen" aria-label="Image sizing: Fit" aria-pressed="false">
+                    <span class="fit-mode-icon"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 9h8v6H8z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></span>
+                    <span class="original-mode-icon" hidden><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4z"/><rect x="8" y="8" width="8" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></span>
                     <span id="image-mode-text" class="button-label">Fit</span>
                 </button>
 
@@ -191,6 +192,6 @@
     <p id="config-notice" role="status" hidden></p>
     <script src="resilience.js?v=20260829-missing-album"></script>
     <script src="settings.js?v=20260829-refresh-2m"></script>
-    <script src="app.js?v=20260829-viewer-options"></script>
+    <script src="app.js?v=20260829-image-mode-icons"></script>
 </body>
 </html>

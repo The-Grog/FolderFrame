@@ -382,6 +382,11 @@ function updateControlStates() {
     $('btn-sort').setAttribute('aria-label', `Sort: ${sortLabels[sortMode]}. Change sorting`);
     selectInterval.value = String(slideshowInterval);
     imageModeText.textContent = imageMode === 'fit' ? 'Fit' : 'Original';
+    btnImageMode.querySelector('.fit-mode-icon').hidden = imageMode !== 'fit';
+    btnImageMode.querySelector('.original-mode-icon').hidden = imageMode === 'fit';
+    btnImageMode.setAttribute('aria-pressed', String(imageMode === 'original'));
+    btnImageMode.setAttribute('aria-label', `Image sizing: ${imageMode === 'fit' ? 'Fit' : 'Original'}`);
+    btnImageMode.title = imageMode === 'fit' ? 'Fit image to screen. Click for original size.' : 'Show image at original size. Click to fit screen.';
     btnShuffle.classList.remove('is-active');
     btnShuffle.setAttribute('aria-pressed', String(shuffleEnabled));
     btnShuffle.querySelector('.shuffle-on-icon').hidden = !shuffleEnabled;

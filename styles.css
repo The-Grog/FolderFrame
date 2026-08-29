@@ -56,6 +56,14 @@ button, select, .media-error-actions a { touch-action:manipulation; }
 .custom-select { background:rgba(255,255,255,.08); color:#fff; border:1px solid rgba(255,255,255,.1); border-radius:6px; padding:6px 9px; font-size:12px; font-weight:600; height:38px; outline:none; }
 .custom-select option { background:#111; color:#fff; }
 .viewer-display-controls { display:flex; flex:0 0 auto; align-items:center; gap:6px; margin-left:auto; }
+.viewer-display-controls .btn > span[class$="-mode-icon"] {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    line-height:0;
+}
+.viewer-display-controls .btn > svg,
+.viewer-display-controls .btn > span[class$="-mode-icon"] > svg { display:block; }
 .viewer-options { position:relative; flex:0 0 auto; }
 .viewer-options-menu {
     position:absolute; top:calc(100% + 7px); right:0;

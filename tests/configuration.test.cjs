@@ -1092,9 +1092,17 @@ test('confirmed empty albums disappear and scrolling reveals Back to Top', async
 
 test('compact viewer labels remain correct after sizing and fullscreen changes', async () => {
     const app = await boot();
+    const fitIcon = {};
+    const originalIcon = {};
+    app.get('btn-image-mode').querySelector = selector => selector === '.fit-mode-icon' ? fitIcon : originalIcon;
+    vm.runInContext('updateControlStates()', app.context);
     assert.equal(app.get('image-mode-text').textContent, 'Fit');
+    assert.equal(fitIcon.hidden, false);
+    assert.equal(originalIcon.hidden, true);
     vm.runInContext('toggleImageMode()', app.context);
     assert.equal(app.get('image-mode-text').textContent, 'Original');
+    assert.equal(fitIcon.hidden, true);
+    assert.equal(originalIcon.hidden, false);
     const label = {};
     app.get('btn-fullscreen').querySelector = () => label;
     vm.runInContext('updateFullscreenButton()', app.context);
