@@ -6,7 +6,6 @@
   </picture>
 </h1>
 
-[Brand assets and usage](docs/branding/README.md)
 
 FolderFrame works as a standalone, self-hosted photo and video gallery or as
 an embedded gallery or slideshow within your websites. Use it on its own,
@@ -822,6 +821,8 @@ If the server is exposed outside your trusted LAN:
 
 For a local-only family gallery, keeping the service accessible only
 from the trusted LAN is the simplest arrangement.
+
+[Brand assets and usage](docs/branding/README.md)
 
 ## Support FolderFrame
 
