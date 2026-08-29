@@ -70,8 +70,21 @@
                 throw new Error('Source paths must be HTTP(S) directories without credentials, query strings, or fragments');
             }
             if (!url.pathname.endsWith('/')) url.pathname += '/';
+            let thumbnailUrl = null;
+            if (entry.thumbnailPath !== undefined) {
+                if (typeof entry.thumbnailPath !== 'string' || !entry.thumbnailPath.trim() || /[\\\x00-\x1f]/.test(entry.thumbnailPath)) {
+                    throw new Error('thumbnailPath must be a web directory path');
+                }
+                thumbnailUrl = new URL(entry.thumbnailPath, baseUrl);
+                if (!['http:', 'https:'].includes(thumbnailUrl.protocol) || thumbnailUrl.username || thumbnailUrl.password ||
+                    thumbnailUrl.search || thumbnailUrl.hash) {
+                    throw new Error('thumbnailPath must be an HTTP(S) directory without credentials, query strings, or fragments');
+                }
+                if (!thumbnailUrl.pathname.endsWith('/')) thumbnailUrl.pathname += '/';
+            }
             ids.add(entry.id);
-            return { id: entry.id, label: entry.label.trim(), path: entry.path, url: url.href };
+            return { id: entry.id, label: entry.label.trim(), path: entry.path, url: url.href,
+                thumbnailPath: entry.thumbnailPath || null, thumbnailUrl: thumbnailUrl?.href || null };
         });
         return {
             baseUrl, sources,
@@ -181,7 +194,14 @@
         } catch { return null; }
     }
 
-    const api = { normalizeConfig, resolveSettings, directoryUrl, mediaUrl, relativeMediaPath, listingEntry };
+    function thumbnailUrl(source, file) {
+        if (!source?.thumbnailUrl) return null;
+        const relative = relativeMediaPath(source, file);
+        if (!relative || relative.startsWith('../')) return null;
+        return new URL(relative.split('/').map(encodeURIComponent).join('/') + '.webp', source.thumbnailUrl).href;
+    }
+
+    const api = { normalizeConfig, resolveSettings, directoryUrl, mediaUrl, relativeMediaPath, listingEntry, thumbnailUrl };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     else root.FolderFrameSettings = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

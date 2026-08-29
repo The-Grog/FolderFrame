@@ -43,6 +43,7 @@ Keep the files arranged like this:
     ├── settings.js
     ├── folderframe.config.json
     ├── heic2any.min.js
+    ├── generate_thumbnails.py  (optional)
     └── photos/
         ├── photo1.jpg
         ├── photo2.heic
@@ -56,6 +57,24 @@ Keep the files arranged like this:
                 └── beach.jpg
 
 Subfolders under photos/ automatically appear as albums.
+
+OPTIONAL GENERATED THUMBNAILS
+
+Large libraries can use a parallel directory of small WebP grid previews.
+Add thumbnailPath to the matching source in folderframe.config.json:
+
+    { "id": "photos", "label": "Photos", "path": "photos/",
+      "thumbnailPath": "thumbnails/" }
+
+Then install Pillow and generate the tree:
+
+    python -m pip install Pillow
+    python generate_thumbnails.py photos thumbnails
+
+Install pillow-heif too for HEIC/HEIF input. A file at
+photos/Family/image.jpg maps to thumbnails/Family/image.jpg.webp.
+Missing previews fall back to the original automatically. Thumbnails are
+used only in the grid and for album covers; the viewer uses originals.
 
 OPTION 1 — QUICK LOCAL TEST WITH PYTHON
 
@@ -109,6 +128,7 @@ The web root should contain:
     settings.js
     folderframe.config.json
     heic2any.min.js
+    generate_thumbnails.py  (optional)
     photos/
 
 Configure the server to return a browsable directory listing for photos/

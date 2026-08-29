@@ -75,6 +75,34 @@ test('scan errors remain distinguishable from routine mobile timestamps', async 
     assert.equal(classes.has('is-error'), false);
 });
 
+test('empty-folder warning offers previous location, gallery root, and source escape', async () => {
+    const app = await boot();
+    app.context.scanDirectory = async folder => folder === 'Empty'
+        ? { filePaths: [], folderNames: [] }
+        : { filePaths: ['https://example.test/frame/photos/photo.jpg'], folderNames: ['Empty'] };
+    await vm.runInContext("navigateToFolder('Empty')", app.context);
+    assert.equal(app.get('warning-overlay').style.display, 'flex');
+    assert.equal(app.get('btn-warning-previous').hidden, false);
+    assert.equal(app.get('btn-warning-root').hidden, false);
+    assert.equal(app.get('warning-open-source').href, 'https://example.test/frame/photos/');
+    await app.get('btn-warning-previous').listeners.click();
+    assert.equal(app.state().currentFolder, '');
+    assert.equal(app.get('warning-overlay').style.display, 'none');
+
+    await vm.runInContext("navigateToFolder('Empty')", app.context);
+    await app.get('btn-warning-root').listeners.click();
+    await Promise.resolve(); await Promise.resolve();
+    assert.equal(app.state().currentFolder, '');
+});
+
+test('empty source root hides navigation actions that cannot leave the warning', async () => {
+    const app = await boot({ empty: true });
+    assert.equal(app.get('warning-overlay').style.display, 'flex');
+    assert.equal(app.get('btn-warning-previous').hidden, true);
+    assert.equal(app.get('btn-warning-root').hidden, true);
+    assert.equal(app.get('warning-open-source').href, 'https://example.test/frame/photos/');
+});
+
 test('breadcrumb links only ancestors and shows the current folder once as text', async () => {
     const app = await boot({ search: '?album=Family/2026' });
     const labels = app.get('breadcrumb').children.map(child => child.textContent);
@@ -303,6 +331,20 @@ test('source roots, preference keys, and profile selection stay scoped', () => {
     assert.equal(api.resolveSettings(config, '?profile=embed&source=one').source.id, 'one');
     assert.equal(api.resolveSettings(config, '?source=missing').source.id, 'one');
     assert.equal(api.resolveSettings(config, '?source=missing').warnings.length, 1);
+});
+
+test('optional source thumbnail paths preserve nested filenames and reject unsafe URLs', () => {
+    const config = normalize({ sources: [{
+        id: 'photos', label: 'Photos', path: 'photos/', thumbnailPath: 'thumbnails/'
+    }] });
+    const source = config.sources[0];
+    assert.equal(source.thumbnailUrl, 'https://example.test/frame/thumbnails/');
+    assert.equal(api.thumbnailUrl(source, 'https://example.test/frame/photos/Family/My Photo.JPG'),
+        'https://example.test/frame/thumbnails/Family/My%20Photo.JPG.webp');
+    assert.equal(api.thumbnailUrl(normalize({}).sources[0], 'https://example.test/frame/photos/a.jpg'), null);
+    for (const thumbnailPath of ['', 'file:///tmp/thumbs', 'https://user:pass@example.test/thumbs', 'thumbs/?x=1']) {
+        assert.throws(() => normalize({ sources: [{ id: 'p', label: 'P', path: 'photos/', thumbnailPath }] }), /thumbnailPath/);
+    }
 });
 
 test('legacy preferences migrate only into the original index Photos source', () => {
@@ -562,6 +604,23 @@ test('album preview selects the first naturally sorted image, skipping videos', 
     assert.equal(app.requests.some(url => url.endsWith('/Nested/')), false);
 });
 
+test('album covers prefer generated thumbnails and fall back to originals', async () => {
+    const app = await boot({ config: { sources: [{
+        id: 'photos', label: 'Photos', path: 'photos/', thumbnailPath: 'thumbs/'
+    }] } });
+    app.context.DOMParser = class { parseFromString() {
+        return { querySelectorAll: () => [{ getAttribute: () => 'cover.jpg' }] };
+    } };
+    const item = app.get('thumbnail-album');
+    app.context.thumbnailAlbum = item;
+    await vm.runInContext("loadAlbumPreview(thumbnailAlbum, 'Family', new AbortController().signal)", app.context);
+    const cover = item.children[0];
+    assert.equal(cover.src, 'https://example.test/frame/thumbs/Family/cover.jpg.webp');
+    cover.onerror();
+    await Promise.resolve();
+    assert.equal(cover.src, 'https://example.test/frame/photos/Family/cover.jpg');
+});
+
 test('empty, video-only, and failed album listings retain the folder fallback', async () => {
     const app = await boot();
     app.context.albumItem = app.get('test-album');
@@ -794,6 +853,19 @@ test('thumbnail success and failure settle the placeholder without disabling the
     element.onerror();
     assert.equal(classes.has('thumb-loading'), false);
     assert.equal(item.fallback.textContent, 'Preview unavailable');
+});
+
+test('generated grid thumbnails fall back to originals without failing the tile', async () => {
+    const config = { sources: [{ id: 'photos', label: 'Photos', path: 'photos/', thumbnailPath: 'thumbs/' }] };
+    const app = await boot({ config });
+    let tile = app.get('thumbnail-grid').children[0];
+    let image = tile.children[0];
+    assert.equal(image.src, 'https://example.test/frame/thumbs/photo.jpg.webp');
+    image.onerror();
+    assert.equal(image.src, 'https://example.test/frame/photos/photo.jpg');
+    image.onload();
+    assert.equal(tile.failedPreview, undefined);
+
 });
 
 test('compact viewer labels remain correct after sizing and fullscreen changes', async () => {

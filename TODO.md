@@ -20,7 +20,8 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ### Deployment and performance
 
-- [ ] **Thumbnail generation (optional)** — Evaluate pre-generated thumbnails with original-image fallback for larger libraries. Preserve static-server hosting; client-side resizing still incurs original download/decode cost.
+- [ ] **Large Immich directory support** — Improve scanning, navigation, and rendering for very large media directories exported or mounted from Immich. Define realistic library-size targets, test deeply nested and high-file-count folders, avoid loading every tile or metadata record at once, and preserve FolderFrame's database-free static-server mode.
+- [x] **Thumbnail generation (optional)** — Added per-source `thumbnailPath`, parallel WebP preview lookup for grid/album covers, automatic original fallback, and an optional Pillow generator that preserves static-server hosting. Device validation with a large mixed-format library is pending.
 - [ ] **Docker packaging and Unraid templates** — Build a Docker image and an Unraid container template for easy deployment. Include configurable media/config mounts, port mapping, a web server with directory listings, and setup/update instructions. Keep ordinary static-server hosting supported.
 
 ### Browser and device testing

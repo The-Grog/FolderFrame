@@ -71,6 +71,7 @@ maintained media list.
 - **Embeddable:** iframe example and an optional controls-free, muted-video slideshow.
 - **Configurable startup:** named media sources, separate index/embed defaults, saved preferences, and URL overrides.
 - **Clear feedback:** folder scan progress, thumbnail placeholders, media loading indicators, and recovery guidance.
+- **Optional generated thumbnails:** serve small WebP grid/album previews with automatic original-image fallback; the full viewer always uses originals.
 - **Static-server hosting:** no database or build step; works with a web server that supplies HTML directory listings.
 
 ## Browser and mobile support
@@ -237,6 +238,7 @@ Keep the files arranged like this:
     ├── settings.js
     ├── folderframe.config.json
     ├── heic2any.min.js
+    ├── generate_thumbnails.py  # Optional helper
     └── photos/
         ├── photo1.jpg
         ├── photo2.heic
@@ -448,6 +450,31 @@ thumbnail generation is required. Offscreen HEIC previews release their leases.
 Use Refresh Folder to reselect covers after changing files inside albums;
 unchanged background refreshes keep existing tiles. There is no cover.jpg
 override yet.
+
+#### Optional generated thumbnails
+
+For large libraries, each source may point to a parallel directory of small
+WebP previews:
+
+```json
+{ "id": "photos", "label": "Photos", "path": "photos/", "thumbnailPath": "thumbnails/" }
+```
+
+FolderFrame maps `photos/Family/image.jpg` to
+`thumbnails/Family/image.jpg.webp`. Generated previews are used only in the
+grid and for album covers. Missing or invalid previews automatically fall back
+to the original, and the full viewer always opens the original media.
+
+Generate or refresh the parallel tree locally with Pillow:
+
+```bash
+python -m pip install Pillow
+python generate_thumbnails.py photos thumbnails
+```
+
+Install `pillow-heif` as well to generate previews for HEIC/HEIF files. The
+script preserves subfolders, uses the first GIF frame, skips current outputs,
+and never modifies originals. Run it again after adding or changing media.
 
 -   The site opens in the thumbnail grid by default; configured autoplay opens the viewer.
 -   Click a photo or video to open the full viewer.

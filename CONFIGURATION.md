@@ -99,6 +99,33 @@ source root and retains the profile and other explicit URL options.
 - `path`: an HTTP(S) web directory. Relative paths such as `photos/` resolve
   beside index.html; `/family-media/` resolves from the server root. Paths with
   spaces are supported. A trailing slash is added when omitted.
+- `thumbnailPath` (optional): a parallel HTTP(S) directory containing WebP
+  previews. It follows the same URL and CORS rules as `path`.
+
+### Optional generated thumbnails
+
+For a large library, configure a parallel preview directory:
+
+```json
+{ "id": "photos", "label": "Photos", "path": "photos/", "thumbnailPath": "thumbnails/" }
+```
+
+`photos/Trips/a.jpg` maps to `thumbnails/Trips/a.jpg.webp`. FolderFrame uses
+these files only for grid tiles and album covers. If a preview is absent or
+fails, the original image (or normal HEIC conversion) loads automatically. The
+full viewer always uses original media.
+
+Install Pillow and run the optional helper whenever media changes:
+
+```bash
+python -m pip install Pillow
+python generate_thumbnails.py photos thumbnails
+```
+
+Install `pillow-heif` too for HEIC/HEIF input. The helper preserves nested
+folders, uses the first GIF frame, skips current outputs, and never modifies
+originals. The output directory must be served at the configured
+`thumbnailPath`; it does not need directory listings.
 
 A disk or network path such as `C:\Photos` or a UNC share cannot be scanned
 directly by the browser. Map it to a web-server directory first. Each source

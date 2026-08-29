@@ -6,6 +6,7 @@ const settingsApi = window.FolderFrameSettings;
 const resilience = window.FolderFrameResilience;
 let scanSession = null, gridSession = null, viewerSession = null;
 let failedNavigation = null;
+let warningReturnFolder = null;
 const DIRECTORY_TIMEOUT = 15000, MEDIA_TIMEOUT = 30000;
 function clearMediaSource(element) {
     if (element.removeAttribute) element.removeAttribute('src');
@@ -103,7 +104,8 @@ async function loadAlbumPreview(item, folder, signal) {
         // scanDirectory already sorts naturally by filename. Do not crawl descendants.
         const file = listing.filePaths.find(isImageFile);
         if (!file || signal.aborted || controller.signal.aborted) return;
-        const url = isHeicFile(file) ? await getSpecialImageURL(file, signal, 'thumbnail') : file;
+        const generatedUrl = settingsApi.thumbnailUrl(activeSource, file);
+        let url = generatedUrl || (isHeicFile(file) ? await getSpecialImageURL(file, signal, 'thumbnail') : file);
         if (signal.aborted || controller.signal.aborted) return;
         preview = item.coverImage || document.createElement('img');
         item.coverImage = preview;
@@ -117,7 +119,20 @@ async function loadAlbumPreview(item, folder, signal) {
             preview.hidden = false;
             item.classList.add('has-album-cover');
         };
-        preview.onerror = () => { clearTimeout(timeout); fallback(); };
+        preview.onerror = async () => {
+            clearTimeout(timeout);
+            if (generatedUrl && preview.src === generatedUrl && !signal.aborted) {
+                try {
+                    url = isHeicFile(file) ? await getSpecialImageURL(file, signal, 'thumbnail') : file;
+                    if (!signal.aborted) {
+                        timeout = setTimeout(() => { fallback(); preview.src = ''; }, MEDIA_TIMEOUT);
+                        preview.src = url;
+                    }
+                    return;
+                } catch {}
+            }
+            fallback();
+        };
         timeout = setTimeout(() => { fallback(); preview.src = ''; }, MEDIA_TIMEOUT);
         signal.addEventListener('abort', () => { clearTimeout(timeout); preview.src = ''; }, { once: true });
         if (!preview.parentNode) item.appendChild(preview);
@@ -664,6 +679,19 @@ function watchThumbnail(element, item, videoThumbnail = false) {
     element.onload = finish;
     if (videoThumbnail) element.onloadeddata = element.onloadedmetadata = finish;
     element.onerror = () => {
+        if (element.generatedFallback) {
+            const generatedFallback = element.generatedFallback;
+            element.generatedFallback = null;
+            generatedFallback().catch(() => element.onerror?.());
+            return;
+        }
+        if (element.fallbackSrc) {
+            const fallbackSrc = element.fallbackSrc;
+            element.fallbackSrc = null;
+            element.startDeadline();
+            element.src = fallbackSrc;
+            return;
+        }
         finish();
         if (session?.controller.signal.aborted || element.resourceActive === false) return;
         item.classList.add('thumb-error');
@@ -687,7 +715,14 @@ function watchThumbnail(element, item, videoThumbnail = false) {
     });
 }
 
-function showWarning(show) { warningOverlay.style.display = show ? 'flex' : 'none'; }
+function showWarning(show) {
+    warningOverlay.style.display = show ? 'flex' : 'none';
+    if (!show) return;
+    const previous = $('btn-warning-previous');
+    previous.hidden = warningReturnFolder === null || warningReturnFolder === currentFolder;
+    $('btn-warning-root').hidden = !currentFolder;
+    $('warning-open-source').href = activeSource.url;
+}
 function isPhotoActive() { return mediaFiles[currentIndex] ? isImageFile(mediaFiles[currentIndex]) : false; }
 
 function renderBreadcrumb() {
@@ -728,6 +763,7 @@ async function navigateToFolder(folder) {
     scanSession?.abort();
     stopViewerSession(); stopGridSession();
     const previousFolder = currentFolder;
+    warningReturnFolder = previousFolder;
     gridReturn = null;
     currentFolder = folder;
     gridViewContainer.scrollTop = 0;
@@ -809,11 +845,19 @@ function renderGridView() {
         const owner = new AbortController();
         state.controller = owner;
         if (state.heic) {
-            getSpecialImageURL(state.file, owner.signal, 'thumbnail').then(url => {
+            const generated = settingsApi.thumbnailUrl(activeSource, state.file);
+            if (generated) {
+                el.generatedFallback = () => getSpecialImageURL(state.file, owner.signal, 'thumbnail').then(url => {
+                    if (!owner.signal.aborted) { el.startDeadline(); el.src = url; }
+                });
+                el.startDeadline(); el.src = generated;
+            } else getSpecialImageURL(state.file, owner.signal, 'thumbnail').then(url => {
                 if (!owner.signal.aborted) { el.startDeadline(); el.src = url; }
             }).catch(error => { if (!owner.signal.aborted && error.name !== 'AbortError') el.onerror?.(); });
         } else {
-            el.startDeadline(); el.src = state.file;
+            const generated = settingsApi.thumbnailUrl(activeSource, state.file);
+            el.fallbackSrc = generated ? state.file : null;
+            el.startDeadline(); el.src = generated || state.file;
         }
     };
     if ('IntersectionObserver' in window) session.observer = new IntersectionObserver(entries => {
@@ -1198,6 +1242,11 @@ function setupEventListeners() {
     btnFullscreen.addEventListener('click', toggleFullscreen);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     btnRetryWarning.addEventListener('click', () => loadGallery({ preserveView: false, forceCacheClear: true }));
+    $('btn-warning-previous').addEventListener('click', () => {
+        const target = warningReturnFolder;
+        if (target !== null) return navigateToFolder(target);
+    });
+    $('btn-warning-root').addEventListener('click', () => navigateToFolder(''));
     btnCloseVideoError.addEventListener('click', renderGridView);
     $('btn-retry-media-error').addEventListener('click', () => {
         removeCacheEntry(mediaFiles[currentIndex]);

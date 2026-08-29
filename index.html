@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#050505">
     <title>FolderFrame</title>
-    <link rel="stylesheet" href="styles.css?v=20260828-header-wrap">
+    <link rel="stylesheet" href="styles.css?v=20260828-warning-nav">
     <script src="heic2any.min.js"></script>
 <link rel="icon" type="image/png" href="docs/images/folderframe-icon.png?v=20260828-brand">
 </head>
@@ -155,14 +155,19 @@
                     <p>This gallery requires directory listing to be enabled for <code class="configured-source-path">photos/</code> and any album subfolders.</p>
                 </div>
                 <p class="offline-note">Opening the HTML directly with <code>file://</code> will not work because browsers cannot scan local directories.</p>
-                <button id="btn-retry-warning" class="btn btn-primary">Scan Again</button>
+                <div class="warning-actions">
+                    <button id="btn-retry-warning" class="btn btn-primary">Scan Again</button>
+                    <button id="btn-warning-previous" class="btn btn-secondary" hidden>Previous location</button>
+                    <button id="btn-warning-root" class="btn btn-secondary" hidden>Gallery root</button>
+                    <a id="warning-open-source" class="btn btn-secondary" target="_blank" rel="noopener noreferrer">Open source</a>
+                </div>
             </div>
         </div>
     </div>
 
     <p id="config-notice" role="status" hidden></p>
     <script src="resilience.js?v=20260828-resilience"></script>
-    <script src="settings.js?v=20260827-timing"></script>
-    <script src="app.js?v=20260828-keyboard"></script>
+    <script src="settings.js?v=20260828-thumbnails"></script>
+    <script src="app.js?v=20260828-warning-nav"></script>
 </body>
 </html>
