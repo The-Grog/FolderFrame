@@ -1124,6 +1124,20 @@ test('compact viewer labels remain correct after sizing and fullscreen changes',
     assert.equal(label.textContent, 'Exit Full');
 });
 
+test('native image context menus remain available without enabling native dragging', async () => {
+    const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+    const css = fs.readFileSync(path.join(__dirname, '../styles.css'), 'utf8');
+    assert.match(html, /id="gallery-image"[^>]*draggable="false"/);
+    assert.ok(css.includes('#gallery-image { pointer-events:auto'));
+    assert.ok(css.includes('.grid-item img { pointer-events:auto'));
+    assert.ok(!css.includes('.grid-item img,.grid-item video { width:100%; height:100%; object-fit:cover; pointer-events:none'));
+
+    const app = await boot();
+    vm.runInContext("imageMode = 'original'; isDragging = false", app.context);
+    vm.runInContext('handleMouseDown({ button: 2, clientX: 10, clientY: 10 })', app.context);
+    assert.equal(vm.runInContext('isDragging', app.context), false);
+});
+
 test('controls config is boolean, profile-scoped, and explicitly overridable', () => {
     const config = normalize({ embed: { controls: false, autoplay: true } });
     assert.equal(api.resolveSettings(config, '').settings.controls, true);

@@ -61,5 +61,5 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 - User tested and approved the swipe, filename visibility, and grid-return update.
 - User tested and approved the mobile double-tap and pinch-flicker fixes.
-- Current regression suite: 88 automated app/settings/cache and resilience tests. Run both tests/configuration.test.cjs and tests/resilience.test.cjs.
+- Current regression suite: 90 automated app/settings/cache and resilience tests. Run both tests/configuration.test.cjs and tests/resilience.test.cjs.
 - User visually tested and approved the long-filename desktop layout. Node tests do not validate CSS layout.

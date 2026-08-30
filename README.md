@@ -6,14 +6,14 @@
   </picture>
 </h1>
 
-FolderFrame works as a standalone, self-hosted photo and video gallery or as
-an embedded gallery or slideshow within your websites. Use it on its own,
-or add it to an existing page with a standard iframe—including an optional
-controls-free slideshow mode. No database or PHP required.
+**FolderFrame** is a self-hosted photo and video gallery that works standalone
+or embedded. Drop it into any page with a standard iframe, including a
+controls-free slideshow mode for kiosks and displays. No database, no PHP, no
+build step.
 
-Manage one gallery on your host and open it on multiple devices—digital photo
-frames, tablets, wall displays, or desktop browsers. Each display can use its
-own album and slideshow settings while sharing the same media library.
+Manage one media library on your host, then open it anywhere — digital photo
+frames, tablets, wall displays, desktop browsers. Each display can use its own
+album and slideshow settings while sharing the same library.
 
 Make it your own: FolderFrame is MIT-licensed, so you can edit the site and its
 files, customize the branding, and adapt it to your needs. Keep the required
@@ -45,6 +45,7 @@ Browse albums with cover previews and cycle between Newest, Oldest, and Filename
 
 <p>
   <img src="docs/images/folderframe-mobile-viewer.png" alt="FolderFrame mobile viewer with compact touch controls and a lunar photograph" width="320">
+  &nbsp;&nbsp;
   <img src="docs/images/folderframe-mobile-gallery.png" alt="FolderFrame mobile gallery with album cover previews and a two-column photo grid" width="320">
 </p>
 
@@ -78,6 +79,12 @@ maintained media list.
 Large libraries use bounded loading, cancelled stale requests, partial-scan
 recovery, and separate HEIC viewer/thumbnail caches. See [resilience and testing
 notes](RESILIENCE.md) for limits, the stuck-decoder caveat, and device checks.
+
+FolderFrame has no fixed library-size limit. Performance depends heavily on
+folder count, storage speed, server directory listings, media formats, and
+browser resources. For very large libraries, individual album views may perform
+better than All Pics. Numeric recommendations will be added after broader
+desktop, mobile, SSD, HDD, flat-folder, and deeply nested library testing.
 
 FolderFrame is designed for modern desktop and mobile browsers, including
 Chrome/Edge/Firefox and Safari. Desktop and phone layouts have been manually

@@ -123,6 +123,7 @@ async function loadAlbumPreview(item, folder, signal) {
         item.coverImage = preview;
         preview.className = 'album-cover';
         preview.alt = '';
+        preview.draggable = false;
         preview.hidden = true;
         preview.decoding = 'async';
         preview.onload = () => {
@@ -1062,6 +1063,7 @@ function renderGridView() {
             const imgEl = document.createElement('img');
             watchThumbnail(imgEl, item);
             imgEl.alt = filename;
+            imgEl.draggable = false;
             imgEl.decoding = 'async';
             imgEl.dataset.heicSrc = file;
             imgEl.className = 'heic-thumb';
@@ -1076,6 +1078,7 @@ function renderGridView() {
             watchThumbnail(imgEl, item);
             observeImage(imgEl, file);
             imgEl.alt = filename;
+            imgEl.draggable = false;
             imgEl.loading = 'lazy';
             imgEl.decoding = 'async';
             item.appendChild(imgEl);
@@ -1611,6 +1614,7 @@ function handleMouseDown(e) {
     if (!controlsEnabled) return;
     if (mediaFailed) return;
     if (!isPhotoActive()) return;
+    if (e.button !== 0) return;
     if (zoom !== 1.0 || imageMode === 'original' || panX !== 0 || panY !== 0) {
         isDragging = true; startX = e.clientX; startY = e.clientY; startPanX = panX; startPanY = panY;
     }
