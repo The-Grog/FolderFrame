@@ -1,0 +1,57 @@
+name: Bug report
+description: Report a reproducible problem in the FolderFrame web app.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve FolderFrame. Remove private paths, credentials, personal media, and other sensitive information before submitting.
+        Docker, Unraid, Caddy, mount, and container problems belong in [FolderFrame-Deployment](https://github.com/The-Grog/FolderFrame-Deployment/issues/new/choose).
+  - type: textarea
+    id: summary
+    attributes:
+      label: Problem
+      description: What went wrong?
+      placeholder: Describe the problem clearly and concisely.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open...
+        2. Select...
+        3. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include FolderFrame version or commit, browser and version, operating system, device, web server, and whether this is index or embed mode.
+      placeholder: FolderFrame commit; browser/version; OS/device; web server; index or embed
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Console output or screenshots
+      description: Add relevant errors or screenshots using non-private sample media. Do not upload media you cannot publish.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I reproduced this with the current FolderFrame release or main branch.
+          required: true
+        - label: This is an app problem, not a Docker, Unraid, mount, proxy, or container problem.
+          required: true

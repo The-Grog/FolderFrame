@@ -4,6 +4,18 @@ Bug reports, documentation fixes, and focused pull requests are welcome.
 Check the [roadmap](TODO.md) first. For larger features or changes to the
 index/embed design, open an issue to discuss the approach before building it.
 
+## Project principles and repository ownership
+
+FolderFrame is a folder-first, database-free static web app. Folders remain the
+organization model; avoid persistent catalog state, mandatory server-side
+services, PHP, databases, or a build step. New dependencies and optional helper
+tools must preserve ordinary static-server hosting and original-media fallback.
+
+App behavior, browser compatibility, configuration, documentation, and the
+static index/embed experience belong in this repository. Docker, Unraid, Caddy,
+container image, mount, and release-image problems belong in
+[FolderFrame-Deployment](https://github.com/The-Grog/FolderFrame-Deployment).
+
 ## Report a bug
 
 Include steps to reproduce, what you expected, what happened, and your browser,
@@ -11,6 +23,11 @@ operating system, and device type. For media problems, include the file format
 and video codec if known. Share relevant console errors or screenshots, but
 remove private paths, credentials, personal media, and other sensitive details.
 Only share sample files you have permission to publish.
+
+Treat public assets as an explicit allowlist: do not add screenshots, photos,
+videos, logos, fixtures, or generated files unless they are necessary for the
+change and safe and approved for public redistribution. Never add private
+planning files, secrets, local exports, or personal media.
 
 ## Run locally
 
@@ -73,5 +90,18 @@ Avoid editing the bundled heic2any.min.js for unrelated changes.
 Review your diff and run `git diff --check`. In the pull request, explain what
 changed, why, how it was tested, and any limitations. Do not bundle unrelated
 formatting changes or personal media with the fix.
+
+## Release to container flow
+
+FolderFrame releases and container publishing are separate:
+
+1. Update and test the main FolderFrame app in this repository.
+2. Publish a stable GitHub release here.
+3. FolderFrame-Deployment builds the release image through its scheduled check
+   or its manual **Publish release image** workflow.
+4. Deployment owners update their container when ready.
+
+Do not copy uncommitted app files directly into deployment releases or mix
+container-only changes into an app pull request.
 
 FolderFrame uses the [MIT License](LICENSE).

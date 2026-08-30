@@ -1,0 +1,49 @@
+name: Browser or codec compatibility
+description: Report media behavior that differs by browser, device, format, or codec.
+title: "[Compatibility]: "
+labels:
+  - browser-compatibility
+  - codec
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Browser media support varies. Test with a non-private sample when possible and never upload personal media or files you cannot redistribute.
+  - type: input
+    id: media
+    attributes:
+      label: Media format and codec
+      description: Examples: HEIC/MiPr, JPEG, MP4/H.264, MOV/HEVC. Include container and codec when known.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Browser and device matrix
+      description: List exact browser versions, OS versions, devices, and which combinations work or fail.
+      placeholder: |
+        Fails: Firefox 000 on Windows 00
+        Works: Edge 000 on Windows 00
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Observed and expected behavior
+      description: Include the exact FolderFrame message and what the browser did.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Add console/network errors, file size, and sanitized metadata. Do not include private paths or personal media.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: The media URL returns successfully from the web server.
+          required: true
+        - label: I tested the original media directly in the same browser when the format permits it.
+          required: true

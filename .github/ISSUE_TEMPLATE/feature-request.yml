@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a focused improvement that preserves FolderFrame's folder-first design.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        FolderFrame is intentionally a folder-first, database-free static web app. Explain the browsing problem before proposing an implementation.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What workflow is difficult or unavailable today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the user-visible result, including index and embed behavior where relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Could configuration, folder organization, or an existing control solve this?
+  - type: checkboxes
+    id: principles
+    attributes:
+      label: Project fit
+      options:
+        - label: This can preserve static-server hosting without requiring a database or PHP.
+          required: true
+        - label: I checked the public roadmap and existing issues or discussions.
+          required: true

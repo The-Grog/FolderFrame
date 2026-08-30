@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Deployment or container problem
+    url: https://github.com/The-Grog/FolderFrame-Deployment/issues/new/choose
+    about: Report Docker, Unraid, Caddy, image-build, mount, or container update problems in the deployment repository.
+  - name: Questions and setup help
+    url: https://github.com/The-Grog/FolderFrame/discussions/categories/q-a
+    about: Ask usage and configuration questions in GitHub Discussions.
