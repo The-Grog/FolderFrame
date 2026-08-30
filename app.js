@@ -277,7 +277,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     setupEventListeners();
     updateControlStates();
     updateFullscreenButton();
-    await loadGallery({ preserveView: false });
+    const loaded = await loadGallery({ preserveView: false });
+    if (loaded !== false) updateFolderHistory(currentFolder, 'replace');
     startAutoRefreshTimer();
 
     if (slideshowPlaying && mediaFiles.length > 0 && isGridViewActive) {
@@ -285,6 +286,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     } else if (!mediaFiles.length) {
         stopSlideshow();
     }
+});
+
+window.addEventListener('popstate', async () => {
+    const folder = new URL(location.href).searchParams.get('album') || '';
+    if (folder !== currentFolder) await navigateToFolder(folder, { historyMode: 'none' });
 });
 
 window.addEventListener('beforeunload', () => {
@@ -302,6 +308,15 @@ function currentDirectoryUrl(folder = currentFolder) {
 
 function mediaUrlFor(filename, folder = currentFolder) {
     return settingsApi.mediaUrl(activeSource, folder, filename);
+}
+
+function updateFolderHistory(folder, mode = 'push') {
+    if (!window.history?.pushState) return;
+    const url = new URL(location.href);
+    if (folder) url.searchParams.set('album', folder);
+    else url.searchParams.delete('album');
+    const state = { ...(window.history.state || {}), folderFrameAlbum: folder };
+    window.history[mode === 'replace' ? 'replaceState' : 'pushState'](state, '', url);
 }
 
 function savePreferences() {
@@ -899,7 +914,7 @@ function renderBreadcrumb() {
     gridPath.setAttribute('aria-current', currentFolder ? 'location' : 'false');
 }
 
-async function navigateToFolder(folder) {
+async function navigateToFolder(folder, { historyMode = 'push' } = {}) {
     scanSession?.abort();
     stopViewerSession(); stopGridSession();
     missingFolderRecovery = null;
@@ -918,7 +933,13 @@ async function navigateToFolder(folder) {
         failedNavigation = folder;
         currentFolder = previousFolder;
         renderBreadcrumb(); renderGridView();
+        if (historyMode === 'none') updateFolderHistory(previousFolder, 'replace');
+        return false;
     }
+    if (succeeded !== false && historyMode !== 'none' && folder !== previousFolder) {
+        updateFolderHistory(folder, historyMode);
+    }
+    return succeeded !== false;
 }
 
 function renderGridView() {

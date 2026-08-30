@@ -191,6 +191,18 @@ test('breadcrumb links only ancestors and shows the current folder once as text'
     assert.equal(app.get('grid-path').title, 'Family/2026');
 });
 
+test('album navigation uses browser history for mouse back and forward buttons', async () => {
+    const app = await boot();
+    assert.equal(app.historyCalls.replace.at(-1), 'https://example.test/frame/index.html');
+    await vm.runInContext("navigateToFolder('Family')", app.context);
+    assert.equal(app.historyCalls.push.at(-1), 'https://example.test/frame/index.html?album=Family');
+    app.context.location.href = 'https://example.test/frame/';
+    app.context.location.search = '';
+    await app.windowListeners.popstate();
+    assert.equal(app.state().currentFolder, '');
+    assert.equal(app.historyCalls.push.length, 1);
+});
+
 test('silent refresh preserves viewer state when files are added or reordered', async () => {
     const app = await boot({ search: '?autoplay=1' });
     vm.runInContext("zoom = 2; panX = 31; panY = 12; uiVisible = false; imageReady = true", app.context);
@@ -1270,13 +1282,16 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
     const requests = [];
     const saved = new Map(initialStorage);
     const sourceLabels = [new Element(), new Element()];
+    const historyCalls = { push: [], replace: [] };
     let animationFrames = 0;
     const context = vm.createContext({
         URL, URLSearchParams, AbortController,
         ClipboardItem: class { constructor(items) { this.items = items; } },
         navigator: { clipboard: { writeText: async () => {}, write: async () => {} } },
         console: { warn() {}, log() {}, error() {} },
-        window: { FolderFrameSettings: api, isSecureContext: true, addEventListener(name, fn) { listeners[name] = fn; } },
+        window: { FolderFrameSettings: api, isSecureContext: true, addEventListener(name, fn) { listeners[name] = fn; },
+            history: { state: null, pushState(state, title, url) { this.state = state; historyCalls.push.push(String(url)); },
+                replaceState(state, title, url) { this.state = state; historyCalls.replace.push(String(url)); } } },
         document: { getElementById: get, createElement: () => new Element(), querySelectorAll: () => sourceLabels,
             addEventListener() {}, body: new Element(), hidden: false },
         location: { href: base + search, search, assign(url) { this.assigned = url; } },
@@ -1296,7 +1311,7 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8'), context);
     await listeners.DOMContentLoaded();
     const state = () => JSON.parse(vm.runInContext('JSON.stringify({ currentFolder, galleryViewMode, imageMode, slideshowInterval, slideshowPlaying, isGridViewActive, mediaFiles, activeSource, rememberPreferences })', context));
-    return { context, get, state, requests, saved, sourceLabels, windowListeners: listeners, get animationFrames() { return animationFrames; } };
+    return { context, get, state, requests, saved, sourceLabels, historyCalls, windowListeners: listeners, get animationFrames() { return animationFrames; } };
 }
 
 test('pinch zoom transitions smoothly to one-finger pan and cancellation clears gestures', async () => {
