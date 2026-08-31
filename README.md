@@ -1,12 +1,14 @@
 <h1>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/folderframe-logo.png">
-    <source media="(prefers-color-scheme: light)" srcset="docs/images/folderframe-logo-light.png">
-    <img src="docs/images/folderframe-logo-light.png" alt="FolderFrame" width="360">
-  </picture>
+  <a href="https://www.folderframe.com/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/images/folderframe-logo.png">
+      <source media="(prefers-color-scheme: light)" srcset="docs/images/folderframe-logo-light.png">
+      <img src="docs/images/folderframe-logo-light.png" alt="FolderFrame" width="360">
+    </picture>
+  </a>
 </h1>
 
-**FolderFrame** is a self-hosted photo and video gallery that works standalone
+[**FolderFrame**](https://www.folderframe.com/) is a self-hosted photo and video gallery that works standalone
 or embedded. Drop it into any page with a standard iframe, including a
 controls-free slideshow mode for kiosks and displays. No database, no PHP, no
 build step.
