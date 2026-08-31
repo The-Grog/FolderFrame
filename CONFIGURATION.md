@@ -101,6 +101,10 @@ source root and retains the profile and other explicit URL options.
   spaces are supported. A trailing slash is added when omitted.
 - `thumbnailPath` (optional): a parallel HTTP(S) directory containing WebP
   previews. It follows the same URL and CORS rules as `path`.
+- `scanCache` (optional, default `false`): stores a lean parsed-directory manifest
+  in browser localStorage. FolderFrame validates cached directories with an HTTP
+  `Last-Modified` HEAD request and downloads/parses only changed listings. Missing
+  timestamps or unavailable/invalid storage automatically fall back to full scans.
 
 ### Optional generated thumbnails
 
@@ -131,6 +135,13 @@ A disk or network path such as `C:\Photos` or a UNC share cannot be scanned
 directly by the browser. Map it to a web-server directory first. Each source
 and its album folders must provide HTML directory listings with child links.
 FolderFrame ignores parent links and links outside the directory being scanned.
+
+The optional scan manifest is browser-local, capped at 5,000 recently checked
+directories per source, and remains database-free. Entries include directory path
+and timestamp, child folders, and media path plus available modification time,
+size, and generated-thumbnail path. Clearing site storage removes it. It is most
+useful when the static server returns reliable directory `Last-Modified` values;
+otherwise FolderFrame deliberately performs its normal full scan.
 
 Absolute HTTP(S) URLs are supported, but a different origin must permit CORS
 for directory requests and fetched media such as HEIC files. Cross-origin

@@ -37,6 +37,15 @@ Album folders are hidden only after a successful listing confirms they contain
 neither supported direct media nor child folders. Failed or timed-out listings
 retain their album tile.
 
+### Optional scan manifest
+
+Sources configured with `"scanCache": true` retain a lean browser-local manifest.
+Each visited directory is validated with the same 15-second request budget using
+HTTP `Last-Modified`; unchanged parsed listings can be reused while changed or
+unverifiable directories take the full-scan path. Invalid, unavailable, or full
+localStorage never prevents scanning. New navigation still aborts validation and
+listing requests, so cached work cannot supersede the active folder.
+
 ## Cancellation and recovery
 
 New navigation cancels superseded scans. Grid teardown disconnects observers,

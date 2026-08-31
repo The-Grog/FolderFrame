@@ -117,7 +117,7 @@ and starts the embed as a controls-free slideshow including subfolders:
 ```json
 {
   "sources": [
-    { "id": "photos", "label": "Photos", "path": "photos/" }
+    { "id": "photos", "label": "Photos", "path": "photos/", "scanCache": true }
   ],
   "defaults": {
     "source": "photos",
@@ -153,6 +153,12 @@ with controls visible. Each source requires a unique `id`, a display `label`,
 and a served web-directory `path`. Use relative paths, server-root paths,
 or HTTP(S) directories—not disk/UNC paths. Cross-origin sources require
 appropriate CORS headers. This file is publicly readable: never put secrets in it.
+
+`scanCache` is an optional per-source browser manifest for large recursive trees.
+When enabled, FolderFrame stores lean directory entries in localStorage and uses
+directory `Last-Modified` HEAD responses to reuse unchanged listings. Servers that
+do not expose a usable directory timestamp automatically receive normal full scans.
+Missing, corrupt, blocked, or quota-limited browser storage also falls back safely.
 
 Put settings in `defaults` for both profiles or in `index`/`embed` to override them.
 
@@ -459,6 +465,18 @@ Cached media URLs and dates remain on the device until replaced, evicted, or
 site storage is cleared; expired entries are discarded when date sorting runs.
 Refresh Folder reloads dates; Filename skips date lookups entirely.
 See CONFIGURATION.md for examples and server requirements.
+
+### Optional scan manifest
+
+Add `"scanCache": true` to a source to cache its parsed directory listings in the
+current browser. Each lean manifest entry records the directory path and timestamp,
+child folders, and media path plus available modification-time, size, and generated-
+thumbnail-path fields. FolderFrame still performs a lightweight HEAD validation for
+each visited directory; only changed listings need to be downloaded and parsed again.
+This remains database-free and requires no PHP, worker, or writable server directory.
+If directory `Last-Modified` is absent or unreliable, leave the option off or allow
+FolderFrame to fall back to its normal full scan automatically. Clearing site data
+removes the browser manifest; FolderFrame rebuilds it on the next scan.
 
 The compact header places the album/file count beside the directory breadcrumb.
 Parent folders remain clickable; the current folder appears once as plain text,

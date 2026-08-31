@@ -176,6 +176,58 @@ const modifiedDateCache = new Map();
 const DATE_CACHE_TTL = 24 * 60 * 60 * 1000;
 const DATE_CACHE_LIMIT = 2000;
 let dateCacheKey = null;
+let scanManifest = null, scanManifestKey = null;
+const SCAN_MANIFEST_VERSION = 1;
+const SCAN_MANIFEST_DIRECTORY_LIMIT = 5000;
+
+function getScanManifest() {
+    const key = `folderframe.scan-manifest:v${SCAN_MANIFEST_VERSION}:${galleryConfig.baseUrl}:${activeSource.id}:${activeSource.url}`;
+    if (scanManifestKey === key && scanManifest) return scanManifest;
+    scanManifestKey = key;
+    scanManifest = { version: SCAN_MANIFEST_VERSION, directories: {} };
+    try {
+        const stored = JSON.parse(localStorage.getItem(key) || 'null');
+        if (stored?.version === SCAN_MANIFEST_VERSION && stored.directories && typeof stored.directories === 'object') {
+            scanManifest = stored;
+        }
+    } catch (error) {
+        // Invalid or unavailable browser storage falls back to normal full scans.
+    }
+    return scanManifest;
+}
+
+function saveScanManifest() {
+    if (!activeSource.scanCache || !scanManifestKey || !scanManifest) return;
+    try {
+        const entries = Object.entries(scanManifest.directories)
+            .sort((a, b) => (b[1].checked || 0) - (a[1].checked || 0))
+            .slice(0, SCAN_MANIFEST_DIRECTORY_LIMIT);
+        scanManifest.directories = Object.fromEntries(entries);
+        localStorage.setItem(scanManifestKey, JSON.stringify(scanManifest));
+    } catch (error) {
+        // Storage quotas are optional optimization failures, never gallery failures.
+    }
+}
+
+async function directoryModifiedTime(url, signal) {
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    signal?.addEventListener('abort', cancel, { once: true });
+    const timer = setTimeout(() => controller.abort(), DIRECTORY_TIMEOUT);
+    try {
+        const response = await fetch(url, { method: 'HEAD', cache: 'no-store', signal: controller.signal });
+        if (!response.ok) return null;
+        const value = response.headers?.get('Last-Modified');
+        const parsed = value ? Date.parse(value) : NaN;
+        return Number.isFinite(parsed) ? parsed : null;
+    } catch (error) {
+        if (signal?.aborted) throw resilience.abortError();
+        return null;
+    } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', cancel);
+    }
+}
 
 function trimDateCache(now = Date.now()) {
     for (const [file, entry] of modifiedDateCache) {
@@ -534,6 +586,27 @@ async function makeThumbnail(blob) {
             result => result ? resolve(result) : reject(new Error('Thumbnail resize failed')), 'image/jpeg', 0.8));
     } finally { URL.revokeObjectURL(temporary); }
 }
+let heicDecoderPromise = null;
+function loadHeicDecoder() {
+    if (typeof globalThis.heic2any === 'function') return Promise.resolve(globalThis.heic2any);
+    if (heicDecoderPromise) return heicDecoderPromise;
+
+    heicDecoderPromise = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'heic2any.min.js';
+        script.async = true;
+        script.onload = () => typeof globalThis.heic2any === 'function'
+            ? resolve(globalThis.heic2any)
+            : reject(new Error('HEIC decoder library did not initialize'));
+        script.onerror = () => reject(new Error('HEIC decoder library did not load'));
+        document.head.appendChild(script);
+    }).catch(error => {
+        // A transient load failure may be retried by the next HEIC request.
+        heicDecoderPromise = null;
+        throw error;
+    });
+    return heicDecoderPromise;
+}
 function getImagePool() {
     if (!specialImagePool) specialImagePool = resilience.createImagePool({
         download: (file, signal) => resilience.request(file, { signal, timeout: MEDIA_TIMEOUT, body: 'arrayBuffer', cache: 'no-store' }),
@@ -541,8 +614,8 @@ function getImagePool() {
             const format = detectImageFormat(data);
             if (['jpeg', 'png', 'webp', 'gif'].includes(format)) return new Blob([data], { type: mimeForFormat(format) });
             if (format !== 'heic') throw new Error('Unknown or corrupt image format');
-            if (typeof heic2any !== 'function') throw new Error('HEIC decoder library did not load');
-            const result = await heic2any({ blob: new Blob([data], { type: 'image/heic' }), toType: 'image/jpeg', quality: 0.92 });
+            const decodeHeic = await loadHeicDecoder();
+            const result = await decodeHeic({ blob: new Blob([data], { type: 'image/heic' }), toType: 'image/jpeg', quality: 0.92 });
             return Array.isArray(result) ? result[0] : result;
         },
         thumbnail: makeThumbnail,
@@ -560,6 +633,18 @@ async function getSpecialImageURL(filepath, signal, kind = 'viewer') {
 
 async function scanDirectory(folder = currentFolder, options = {}) {
     const url = currentDirectoryUrl(folder);
+    const normalized = folder.split('/').filter(Boolean).join('/');
+    let directoryMtime = null;
+    if (activeSource.scanCache) {
+        const manifest = getScanManifest();
+        const cached = manifest.directories[normalized];
+        directoryMtime = await directoryModifiedTime(url, options.signal);
+        if (directoryMtime != null && cached?.mtime === directoryMtime &&
+            Array.isArray(cached.files) && Array.isArray(cached.folders)) {
+            cached.checked = Date.now();
+            return { filePaths: cached.files.map(file => file.path), folderNames: [...cached.folders] };
+        }
+    }
     const html = await resilience.request(url, { cache: 'no-store', timeout: DIRECTORY_TIMEOUT, ...options });
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const files = new Set();
@@ -581,10 +666,24 @@ async function scanDirectory(folder = currentFolder, options = {}) {
     const folderNames = Array.from(folders)
         .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 
+    if (activeSource.scanCache) {
+        const manifest = getScanManifest();
+        manifest.directories[normalized] = {
+            path: normalized, mtime: directoryMtime, checked: Date.now(),
+            files: filePaths.map(path => {
+                const metadata = modifiedDateCache.get(path);
+                return { path, mtime: metadata?.date ?? null, size: metadata?.size ?? null,
+                    thumbnailPath: settingsApi.thumbnailUrl(activeSource, path) };
+            }),
+            folders: folderNames
+        };
+        saveScanManifest();
+    }
+
     return { filePaths, folderNames };
 }
 
-async function scanDirectoryRecursive(folder = currentFolder, visited = new Set(), listing = null, signal) {
+async function scanDirectoryRecursive(folder = currentFolder, visited = new Set(), listing = null, signal, onBatch = null) {
     const normalized = folder.split('/').filter(Boolean).join('/');
     if (signal?.aborted) throw resilience.abortError();
     if (visited.has(normalized)) return { files: [], failedFolders: [] };
@@ -593,11 +692,12 @@ async function scanDirectoryRecursive(folder = currentFolder, visited = new Set(
     const result = { files: [...filePaths], failedFolders: [] };
     scannedFolders++; scannedFiles += filePaths.length;
     setScanProgress(`Scanning… ${scannedFolders} folders checked · ${scannedFiles} files found`);
+    if (onBatch && filePaths.length) await onBatch(filePaths, normalized);
     for (const child of folderNames) {
         if (signal?.aborted) throw resilience.abortError();
         const path = normalized ? normalized + '/' + child : child;
         try {
-            const nested = await scanDirectoryRecursive(path, visited, null, signal);
+            const nested = await scanDirectoryRecursive(path, visited, null, signal, onBatch);
             result.files.push(...nested.files);
             result.failedFolders.push(...nested.failedFolders);
         } catch (error) {
@@ -729,10 +829,37 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
     setScanStatus(mediaFiles.length || subfolders.length ? 'Refreshing folders…' : 'Scanning folders…');
     try {
         const listing = await scanDirectory(folder, { signal: session.signal });
+        // Publish a bounded first batch as soon as the current directory is known.
+        // Recursive discovery and final sorting continue below; viewer refreshes stay atomic.
+        const progressive = mode === 'all' && isGridViewActive && !silent;
+        const discovered = new Set(listing.filePaths);
+        let unpublished = 0;
+        const publishDiscovered = async force => {
+            if (!progressive || !current() || (!force && unpublished < 100)) return;
+            const preview = Array.from(discovered);
+            mediaFiles = sortMode === 'filename' ? preview.sort(compareFilenames) : preview;
+            subfolders = listing.folderNames;
+            unpublished = 0;
+            showWarning(false);
+            renderBreadcrumb();
+            renderGridView();
+        };
+        if (progressive && listing.filePaths.length) {
+            // The virtual grid remains bounded even if the directory itself is enormous.
+            mediaFiles = listing.filePaths.slice(0, 100);
+            subfolders = listing.folderNames;
+            showWarning(false);
+            renderBreadcrumb();
+            renderGridView();
+        }
         const result = mode === 'all'
-            ? await scanDirectoryRecursive(folder, new Set(), listing, session.signal)
+            ? await scanDirectoryRecursive(folder, new Set(), listing, session.signal, async files => {
+                for (const file of files) if (!discovered.has(file)) { discovered.add(file); unpublished++; }
+                await publishDiscovered(false);
+            })
             : { files: listing.filePaths, failedFolders: [] };
         if (!current()) return;
+        await publishDiscovered(true);
         // A failed descendant is unknown, not deleted. Preserve only its previous files.
         for (const file of mediaFiles) {
             if (result.failedFolders.some(path => file.startsWith(currentDirectoryUrl(path))) && !result.files.includes(file)) result.files.push(file);
@@ -1699,7 +1826,10 @@ function handleTouchStart(e) {
         isDragging = true; isPinching = false;
         startX = e.touches[0].clientX; startY = e.touches[0].clientY; startPanX = panX; startPanY = panY;
     } else if (e.touches.length === 1 && imageMode === 'fit' && zoom === 1 && !panX && !panY) {
-        swipeStart = { x: e.touches[0].clientX, y: e.touches[0].clientY, id: e.touches[0].identifier };
+        swipeStart = {
+            x: e.touches[0].clientX, y: e.touches[0].clientY,
+            id: e.touches[0].identifier, time: performance.now(), axis: null
+        };
     }
 }
 
@@ -1729,23 +1859,63 @@ function handleTouchMove(e) {
         panX = startPanX + e.touches[0].clientX - startX;
         panY = startPanY + e.touches[0].clientY - startY;
         applyTransform();
+    } else if (swipeStart && e.touches.length === 1) {
+        const touch = Array.from(e.touches).find(candidate => candidate.identifier === swipeStart.id);
+        if (!touch) return;
+        const dx = touch.clientX - swipeStart.x, dy = touch.clientY - swipeStart.y;
+        if (!swipeStart.axis && Math.max(Math.abs(dx), Math.abs(dy)) >= 10) {
+            if (dy > 0 && Math.abs(dy) > Math.abs(dx) * 1.15) swipeStart.axis = 'vertical';
+            else if (Math.abs(dx) > Math.abs(dy) * 1.15) swipeStart.axis = 'horizontal';
+            else swipeStart.axis = 'undecided';
+        } else if (swipeStart.axis === 'undecided') {
+            if (dy > 0 && Math.abs(dy) > Math.abs(dx) * 1.15) swipeStart.axis = 'vertical';
+            else if (Math.abs(dx) > Math.abs(dy) * 1.15) swipeStart.axis = 'horizontal';
+        }
+        if (swipeStart.axis === 'vertical') {
+            e.preventDefault();
+            const offset = Math.max(0, dy);
+            const visualOffset = offset * 0.86;
+            container.classList.add('dismiss-drag');
+            container.style.transform = `translateY(${visualOffset}px) scale(${1 - Math.min(0.04, offset / 5000)})`;
+            container.style.opacity = String(Math.max(0.45, 1 - offset / 500));
+        }
     }
 }
-function cancelTouchGesture() { isDragging = false; isPinching = false; swipeStart = null; }
+function clearDismissVisual(snapBack = false) {
+    container.classList.remove('dismiss-drag');
+    container.classList.toggle('dismiss-snapback', snapBack);
+    container.style.opacity = '';
+    applyTransform();
+    if (snapBack) setTimeout(() => container.classList.remove('dismiss-snapback'), 180);
+}
+function cancelTouchGesture(snapBack = false) {
+    const hadDismissDrag = swipeStart?.axis === 'vertical';
+    isDragging = false; isPinching = false; swipeStart = null;
+    if (hadDismissDrag) clearDismissVisual(snapBack);
+}
 function handleTouchEnd(e) {
     if (e.touches.length === 0) {
         const start = swipeStart;
         const end = Array.from(e.changedTouches || []).find(touch => touch.identifier === start?.id);
         const eligible = controlsEnabled && !mediaFailed && !isGridViewActive && isPhotoActive() &&
             imageMode === 'fit' && zoom === 1 && !panX && !panY && !isPinching && !isDragging;
-        cancelTouchGesture();
         if (start && end && eligible) {
             const dx = end.clientX - start.x, dy = end.clientY - start.y;
+            const elapsed = Math.max(16, performance.now() - start.time);
+            const viewportHeight = viewport.clientHeight || 600;
+            const dismissDistance = Math.min(180, Math.max(100, viewportHeight * 0.22));
+            const quickDismiss = elapsed >= 40 && dy >= 60 && dy / elapsed >= 0.75;
+            if (start.axis === 'vertical' && dy > 0 && (dy >= dismissDistance || quickDismiss)) {
+                cancelTouchGesture();
+                renderGridView();
+                return;
+            }
             if (Math.abs(dx) >= 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
                 if (dx < 0) nextMedia(); else prevMedia();
                 resetIdleTimer();
             }
         }
+        cancelTouchGesture(start?.axis === 'vertical');
         return;
     }
     if (e.touches.length === 1 && isPinching) {

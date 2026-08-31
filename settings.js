@@ -84,9 +84,13 @@
                 }
                 if (!thumbnailUrl.pathname.endsWith('/')) thumbnailUrl.pathname += '/';
             }
+            if (entry.scanCache !== undefined && typeof entry.scanCache !== 'boolean') {
+                throw new Error('scanCache must be true or false');
+            }
             ids.add(entry.id);
             return { id: entry.id, label: entry.label.trim(), path: entry.path, url: url.href,
-                thumbnailPath: entry.thumbnailPath || null, thumbnailUrl: thumbnailUrl?.href || null };
+                thumbnailPath: entry.thumbnailPath || null, thumbnailUrl: thumbnailUrl?.href || null,
+                scanCache: entry.scanCache === true };
         });
         return {
             baseUrl, sources,

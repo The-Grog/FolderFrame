@@ -76,6 +76,18 @@ photos/Family/image.jpg maps to thumbnails/Family/image.jpg.webp.
 Missing previews fall back to the original automatically. Thumbnails are
 used only in the grid and for album covers; the viewer uses originals.
 
+OPTIONAL SCAN MANIFEST
+
+For a large recursive source, add "scanCache": true to that source in
+folderframe.config.json. FolderFrame stores a lean manifest in browser localStorage
+and validates each visited directory with an HTTP Last-Modified HEAD response.
+Unchanged listings are reused; changed listings are downloaded and parsed again.
+The manifest records directory/media paths and available timestamp, size, and
+thumbnail-path metadata. It requires no database, PHP, build step, or writable
+server directory. Missing/invalid/full browser storage, or a server without a usable
+directory timestamp, safely falls back to the normal full scan. Clearing site data
+removes the manifest and the next scan rebuilds it.
+
 OPTION 1 — QUICK LOCAL TEST WITH PYTHON
 
 Python’s built-in HTTP server is the easiest way to test or use the

@@ -818,7 +818,7 @@ test('logo returns index and embed to the current source root without restarting
     }
 });
 
-test('fitted-photo swipes navigate, while vertical, short and cancelled gestures do not', async () => {
+test('fitted-photo swipes navigate, while upward, short and cancelled gestures do not', async () => {
     const app = await boot({ search: '?autoplay=1' });
     vm.runInContext("mediaFiles.push('https://example.test/second.jpg')", app.context);
     const viewport = app.get('media-viewport');
@@ -832,7 +832,7 @@ test('fitted-photo swipes navigate, while vertical, short and cancelled gestures
     swipe(300, 205);
     assert.equal(vm.runInContext('currentIndex', app.context), 0);
     swipe(190, 200);
-    swipe(170, 350);
+    swipe(170, 50);
     assert.equal(vm.runInContext('currentIndex', app.context), 0);
     viewport.listeners.touchstart({ touches: [point(200, 200)] });
     viewport.listeners.touchcancel();
@@ -844,6 +844,115 @@ test('fitted-photo swipes navigate, while vertical, short and cancelled gestures
     vm.runInContext("zoom = 1; imageMode = 'original'", app.context);
     swipe(100, 200);
     assert.equal(vm.runInContext('currentIndex', app.context), 0);
+});
+
+test('optional scan manifest validates and reuses an unchanged directory listing', async () => {
+    const config = JSON.parse(JSON.stringify(shipped));
+    config.sources[0].scanCache = true;
+    assert.equal(normalize(config).sources[0].scanCache, true);
+    config.sources[0].scanCache = 'yes';
+    assert.throws(() => normalize(config), /scanCache must be true or false/);
+    config.sources[0].scanCache = true;
+
+    const app = await boot({ config });
+    let listings = 0, heads = 0;
+    app.context.fetch = async (_url, options = {}) => {
+        if (options.method === 'HEAD') {
+            heads++;
+            return { ok: true, headers: { get: name => name === 'Last-Modified' ? 'Sun, 31 Aug 2026 12:00:00 GMT' : null } };
+        }
+        listings++;
+        return { ok: true, text: async () => '' };
+    };
+    await vm.runInContext("scanDirectory('Cached')", app.context);
+    await vm.runInContext("scanDirectory('Cached')", app.context);
+    assert.equal(heads, 2);
+    assert.equal(listings, 1);
+    const key = [...app.saved.keys()].find(item => item.includes('scan-manifest'));
+    const manifest = JSON.parse(app.saved.get(key));
+    assert.equal(manifest.directories.Cached.files[0].size, null);
+    assert.ok('thumbnailPath' in manifest.directories.Cached.files[0]);
+});
+
+test('all-files discovery paints the current directory before a deeper folder finishes', async () => {
+    const app = await boot();
+    let releaseChild;
+    let markChildStarted;
+    const child = new Promise(resolve => { releaseChild = resolve; });
+    const childStarted = new Promise(resolve => { markChildStarted = resolve; });
+    app.context.scanDirectory = async folder => {
+        if (!folder) return {
+            filePaths: Array.from({ length: 120 }, (_, index) => `https://example.test/frame/photos/root-${index}.jpg`),
+            folderNames: ['Deep']
+        };
+        markChildStarted();
+        await child;
+        return { filePaths: ['https://example.test/frame/photos/Deep/child.jpg'], folderNames: [] };
+    };
+    vm.runInContext("galleryViewMode = 'all'; sortMode = 'filename'", app.context);
+    const loading = vm.runInContext('loadGallery()', app.context);
+    await childStarted;
+    assert.equal(app.state().mediaFiles.length, 100);
+    assert.equal(app.get('grid-view-container').style.display, 'flex');
+    releaseChild();
+    await loading;
+    assert.equal(app.state().mediaFiles.length, 121);
+    assert.ok(app.state().mediaFiles.some(file => file.endsWith('/Deep/child.jpg')));
+});
+
+test('HEIC decoder loads only when requested and concurrent callers share one script', async () => {
+    const app = await boot();
+    const head = app.context.document.head;
+    assert.equal(head.children.length, 0);
+
+    const first = vm.runInContext('loadHeicDecoder()', app.context);
+    const second = vm.runInContext('loadHeicDecoder()', app.context);
+    assert.equal(head.children.length, 1);
+    assert.equal(head.children[0].src, 'heic2any.min.js');
+
+    const decoder = async () => new Blob();
+    app.context.heic2any = decoder;
+    head.children[0].onload();
+    assert.equal(await first, decoder);
+    assert.equal(await second, decoder);
+    assert.equal(head.children.length, 1);
+});
+
+test('fitted-photo swipe down previews dismissal, snaps back when short, and returns to grid past threshold', async () => {
+    const app = await boot({ search: '?autoplay=1' });
+    const viewport = app.get('media-viewport');
+    viewport.clientHeight = 600;
+    const point = (x, y) => ({ identifier: 7, clientX: x, clientY: y });
+    let prevented = false;
+
+    viewport.listeners.touchstart({ touches: [point(200, 200)] });
+    viewport.listeners.touchmove({
+        touches: [point(205, 260)],
+        preventDefault() { prevented = true; }
+    });
+    assert.equal(prevented, true);
+    assert.match(app.get('media-container').style.transform, /translateY\(51\.6px\)/);
+    assert.ok(Number(app.get('media-container').style.opacity) < 1);
+    viewport.listeners.touchend({ touches: [], changedTouches: [point(205, 260)] });
+    assert.equal(app.state().isGridViewActive, false);
+    assert.equal(app.get('media-container').style.opacity, '');
+
+    viewport.listeners.touchstart({ touches: [point(200, 200)] });
+    viewport.listeners.touchmove({ touches: [point(205, 350)], preventDefault() {} });
+    viewport.listeners.touchend({ touches: [], changedTouches: [point(205, 350)] });
+    assert.equal(app.state().isGridViewActive, true);
+});
+
+test('zoomed-photo vertical swipe remains pan and never dismisses viewer', async () => {
+    const app = await boot({ search: '?autoplay=1' });
+    const viewport = app.get('media-viewport');
+    const point = (x, y) => ({ identifier: 8, clientX: x, clientY: y });
+    vm.runInContext('zoom = 2', app.context);
+    viewport.listeners.touchstart({ touches: [point(200, 200)] });
+    viewport.listeners.touchmove({ touches: [point(205, 360)], preventDefault() {} });
+    viewport.listeners.touchend({ touches: [], changedTouches: [point(205, 360)] });
+    assert.equal(app.state().isGridViewActive, false);
+    assert.equal(vm.runInContext('panY', app.context), 160);
 });
 
 test('filename setting validates booleans and supports profile and URL precedence', async () => {
@@ -1369,7 +1478,7 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
         window: { FolderFrameSettings: api, isSecureContext: true, addEventListener(name, fn) { listeners[name] = fn; },
             history: { state: null, pushState(state, title, url) { this.state = state; historyCalls.push.push(String(url)); },
                 replaceState(state, title, url) { this.state = state; historyCalls.replace.push(String(url)); } } },
-        document: { getElementById: get, createElement: () => new Element(),
+        document: { getElementById: get, createElement: () => new Element(), head: new Element(),
             createDocumentFragment: () => { const fragment = new Element(); fragment.isFragment = true; return fragment; },
             querySelectorAll: () => sourceLabels,
             addEventListener() {}, body: new Element(), hidden: false },
