@@ -35,7 +35,7 @@ function stopGridSession() {
 }
 function startGridSession() {
     stopGridSession();
-    gridSession = { controller: new AbortController(), cleanups: [], observer: null };
+    gridSession = { controller: new AbortController(), cleanups: new Set(), observer: null };
     return gridSession;
 }
 
@@ -855,11 +855,13 @@ function watchThumbnail(element, item, videoThumbnail = false) {
     };
     element.cancelDeadline = () => clearTimeout(timer);
     if (videoThumbnail) element.startDeadline();
-    session?.cleanups.push(() => {
+    const cleanup = () => {
         clearTimeout(timer);
         element.onload = element.onerror = element.onloadeddata = element.onloadedmetadata = null;
         element.pause?.(); clearMediaSource(element);
-    });
+    };
+    element.thumbnailCleanup = cleanup;
+    session?.cleanups.add(cleanup);
 }
 
 function showWarning(show) {
@@ -1031,18 +1033,21 @@ function renderGridView() {
         entries.forEach(entry => updateThumbnail(entry.target, entry.isIntersecting));
     }, { root: gridViewContainer, rootMargin: '300px' });
     const observeImage = (el, file, heic = false) => {
-        observed.set(el, { file, heic, controller: null });
-        session.cleanups.push(() => { observed.get(el)?.controller?.abort(); });
+        const state = { file, heic, controller: null, cleanup: null };
+        state.cleanup = () => state.controller?.abort();
+        observed.set(el, state);
+        session.cleanups.add(state.cleanup);
         if (session.observer) session.observer.observe(el);
         else updateThumbnail(el, true);
     };
 
-    const appendMediaBatch = (start, end, target = thumbnailGrid) => mediaFiles.slice(start, end).forEach((file, offset) => {
-        const index = start + offset;
+    const createMediaTile = index => {
+        const file = mediaFiles[index];
         const filename = decodeURIComponent(file.split('/').pop());
         const item = document.createElement('button');
         item.className = 'grid-item media-tile';
         item.type = 'button';
+        item.dataset.mediaIndex = String(index);
         item.setAttribute('aria-label', `Open ${filename}`);
         if (returnPosition?.file === file) returnTile = item;
 
@@ -1054,6 +1059,7 @@ function renderGridView() {
             vid.disablePictureInPicture = true;
             vid.muted = true;
             vid.playsInline = true;
+            item.mediaElement = vid;
             item.appendChild(vid);
             const badge = document.createElement('div');
             badge.className = 'video-badge';
@@ -1068,6 +1074,7 @@ function renderGridView() {
             imgEl.dataset.heicSrc = file;
             imgEl.className = 'heic-thumb';
             observeImage(imgEl, file, true);
+            item.mediaElement = imgEl;
             item.appendChild(imgEl);
             const fallback = document.createElement('div');
             fallback.className = 'heic-fallback';
@@ -1081,6 +1088,7 @@ function renderGridView() {
             imgEl.draggable = false;
             imgEl.loading = 'lazy';
             imgEl.decoding = 'async';
+            item.mediaElement = imgEl;
             item.appendChild(imgEl);
         }
 
@@ -1098,8 +1106,8 @@ function renderGridView() {
         }
         item.appendChild(caption);
         item.addEventListener('click', () => enterFullScreenViewer(index));
-        target.appendChild(item);
-    });
+        return item;
+    };
 
     const virtualized = mediaFiles.length > GRID_BATCH_SIZE;
     const virtualWindow = document.createElement('div');
@@ -1116,6 +1124,36 @@ function renderGridView() {
     }
     thumbnailGrid.appendChild(virtualWindow);
     if (virtualized) thumbnailGrid.appendChild(bottomSpacer);
+    const renderedTiles = new Map();
+    let renderedStart = 0, renderedEnd = 0;
+    const runCleanup = cleanup => {
+        if (!cleanup) return;
+        session.cleanups.delete(cleanup);
+        cleanup();
+    };
+    const releaseTile = (index, item) => {
+        const element = item.mediaElement;
+        if (element) {
+            const state = observed.get(element);
+            session.observer?.unobserve?.(element);
+            runCleanup(state?.cleanup);
+            runCleanup(element.thumbnailCleanup);
+            observed.delete(element);
+            element.resourceActive = false;
+        }
+        if (document.activeElement?.closest?.('.media-tile') === item) item.blur?.();
+        item.remove();
+        renderedTiles.delete(index);
+    };
+    const createRange = (start, end) => {
+        const fragment = document.createDocumentFragment();
+        for (let index = start; index < end; index++) {
+            const item = createMediaTile(index);
+            renderedTiles.set(index, item);
+            fragment.appendChild(item);
+        }
+        return fragment;
+    };
     const gridMetrics = () => {
         const width = thumbnailGrid.clientWidth || gridViewContainer.clientWidth || 1200;
         const min = width <= 560 ? Math.max(120, (width - 36) / 2) : width <= 900 ? 140 : 180;
@@ -1131,18 +1169,6 @@ function renderGridView() {
     };
     const renderMediaWindow = (start, end) => {
         const preservedScrollTop = gridViewContainer.scrollTop;
-        document.activeElement?.closest?.('.media-tile')?.blur?.();
-        session.cleanups.forEach(cleanup => cleanup());
-        session.cleanups.length = 0;
-        session.observer?.disconnect();
-        observed.forEach(state => state.controller?.abort());
-        observed.clear();
-        if ('IntersectionObserver' in window) session.observer = new IntersectionObserver(entries => {
-            if (session.controller.signal.aborted) return;
-            entries.forEach(entry => updateThumbnail(entry.target, entry.isIntersecting));
-        }, { root: gridViewContainer, rootMargin: '300px' });
-        const fragment = document.createDocumentFragment();
-        appendMediaBatch(start, end, fragment);
         if (virtualized) {
             topSpacer.hidden = !start;
             topSpacer.style.height = start ? estimateSpacerHeight(start) + 'px' : '0px';
@@ -1151,10 +1177,26 @@ function renderGridView() {
                 ? estimateSpacerHeight(mediaFiles.length - end) + 'px'
                 : '0px';
         }
-        // Persistent spacers keep the scroll geometry mounted while one
-        // fragment operation atomically replaces only the live media tiles.
-        virtualWindow.replaceChildren(fragment);
+        const overlaps = renderedTiles.size && start < renderedEnd && end > renderedStart;
+        if (!overlaps) {
+            for (const [index, item] of [...renderedTiles]) releaseTile(index, item);
+            virtualWindow.replaceChildren(createRange(start, end));
+        } else {
+            for (const [index, item] of [...renderedTiles]) {
+                if (index < start || index >= end) releaseTile(index, item);
+            }
+            if (start < renderedStart) {
+                const prependEnd = Math.min(renderedStart, end);
+                virtualWindow.insertBefore(createRange(start, prependEnd), virtualWindow.firstChild);
+            }
+            if (end > renderedEnd) {
+                const appendStart = Math.max(renderedEnd, start);
+                virtualWindow.appendChild(createRange(appendStart, end));
+            }
+        }
         gridViewContainer.scrollTop = preservedScrollTop;
+        renderedStart = start;
+        renderedEnd = end;
         gridVirtualizer.start = start;
         gridVirtualizer.end = end;
     };

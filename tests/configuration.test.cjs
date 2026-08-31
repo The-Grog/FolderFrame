@@ -1057,8 +1057,22 @@ test('large grids render incrementally and keep a bounded media-tile DOM window'
     const container = app.get('grid-view-container');
     container.clientHeight = 900;
     app.get('thumbnail-grid').clientWidth = 1200;
-    container.scrollTop = 20000;
+    container.scrollTop = 4000;
     container.scrollHeight = 1000000;
+    vm.runInContext('gridVirtualizer.update()', app.context);
+    assert.equal(vm.runInContext('gridVirtualizer.start', app.context), 0);
+    assert.equal(mediaCount(), 300);
+    const reusedTile = grid.querySelectorAll('.media-tile')
+        .find(tile => tile.dataset.mediaIndex === '150');
+    container.scrollTop = 9000;
+    vm.runInContext('gridVirtualizer.update()', app.context);
+    assert.equal(vm.runInContext('gridVirtualizer.start', app.context), 100);
+    assert.equal(grid.querySelectorAll('.media-tile')
+        .find(tile => tile.dataset.mediaIndex === '150'), reusedTile);
+    assert.equal(grid.querySelectorAll('.media-tile')
+        .some(tile => tile.dataset.mediaIndex === '0'), false);
+    assert.ok(vm.runInContext('gridSession.cleanups.size', app.context) <= 600);
+    container.scrollTop = 20000;
     vm.runInContext('gridVirtualizer.update()', app.context);
     assert.ok(mediaCount() <= 300);
     const forwardStart = vm.runInContext('gridVirtualizer.start', app.context);
@@ -1299,6 +1313,19 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
             }
             child.parentNode = this; this.children.push(child); return child;
         }
+        insertBefore(child, reference) {
+            if (!reference) return this.appendChild(child);
+            if (child.isFragment) {
+                [...child.children].forEach(node => this.insertBefore(node, reference));
+                child.children = [];
+                return child;
+            }
+            const index = this.children.indexOf(reference);
+            child.parentNode = this;
+            this.children.splice(index < 0 ? this.children.length : index, 0, child);
+            return child;
+        }
+        get firstChild() { return this.children[0] || null; }
         replaceChildren(...nodes) {
             this.children.forEach(child => { child.parentNode = null; });
             this.children = [];

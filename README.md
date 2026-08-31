@@ -480,8 +480,9 @@ override yet.
 
 Large galleries render incrementally in 100-item batches. Once browsing moves
 through more than 300 items, distant media tiles are replaced by measured grid
-space and recreated when scrolling back. The full media list and viewer order
-remain intact. Confirmed-empty album directories are hidden; unavailable
+space. Overlapping tiles are retained across normal window shifts, so loaded
+images and observers are not needlessly recreated while scrolling. The full
+media list and viewer order remain intact. Confirmed-empty album directories are hidden; unavailable
 directories remain visible so a temporary server problem is not mistaken for
 an empty album. A Back to Top button appears after scrolling. Home, End,
 Page Up/Down, and Arrow Up/Down always scroll the gallery after focus changes.
@@ -510,6 +511,13 @@ python generate_thumbnails.py photos thumbnails
 Install `pillow-heif` as well to generate previews for HEIC/HEIF files. The
 script preserves subfolders, uses the first GIF frame, skips current outputs,
 and never modifies originals. Run it again after adding or changing media.
+
+The official Docker and Unraid deployment generates persistent thumbnails in
+the configured appdata directory by default. It processes media in the
+background, skips current previews, safely prunes old cache entries after a
+complete scan, and keeps the mounted originals read-only. Plain Docker and
+Docker Compose controls are documented in the
+[FolderFrame Deployment repository](https://github.com/The-Grog/FolderFrame-Deployment).
 
 -   The site opens in the thumbnail grid by default; configured autoplay opens the viewer.
 -   Click a photo or video to open the full viewer.
