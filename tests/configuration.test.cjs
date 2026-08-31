@@ -7,6 +7,18 @@ const api = require('../settings.js');
 const base = 'https://example.test/frame/index.html';
 const shipped = JSON.parse(fs.readFileSync(path.join(__dirname, '../folderframe.config.json'), 'utf8'));
 const normalize = raw => api.normalizeConfig(raw, base);
+const normalizeConfigCopy = source => {
+    const config = JSON.parse(JSON.stringify(shipped));
+    Object.assign(config.sources[0], source);
+    return config;
+};
+function bmff(major, compatible = []) {
+    const brands = [major, ...compatible];
+    const bytes = Buffer.alloc(16 + compatible.length * 4);
+    bytes.writeUInt32BE(bytes.length, 0); bytes.write('ftyp', 4, 'ascii');
+    brands.forEach((brand, index) => bytes.write(brand, 8 + index * 4, 4, 'ascii'));
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+}
 
 test('viewer shortcuts override focused buttons without native Space/Enter clicks', async () => {
     const app = await boot();
@@ -113,6 +125,7 @@ test('viewer options menu owns secondary controls and closes before Escape exits
     }
     const options = html.indexOf('id="btn-viewer-options"');
     const displayGroup = html.indexOf('class="viewer-display-controls"');
+    assert.ok(html.indexOf('id="btn-rotate"') < html.indexOf('id="btn-reset-zoom"'));
     for (const id of ['btn-image-mode', 'btn-fullscreen', 'btn-tv-mode']) {
         const position = html.indexOf(`id="${id}"`);
         assert.ok(position > displayGroup && position < options);
@@ -731,6 +744,47 @@ test('album preview selects the first naturally sorted image, skipping videos', 
     assert.equal(app.requests.some(url => url.endsWith('/Nested/')), false);
 });
 
+test('optional persistent manifest paths resolve safely and require JSON', () => {
+    const source = normalize({ sources: [{
+        id: 'photos', label: 'Photos', path: 'photos/',
+        thumbnailPath: 'thumbnails/', manifestPath: 'folderframe-data/library.json'
+    }] }).sources[0];
+    assert.equal(source.manifestUrl, 'https://example.test/frame/folderframe-data/library.json');
+    for (const manifestPath of ['', 'file:///tmp/index.json', 'https://user:pass@example.test/index.json',
+        'index.json?old=1', 'index.txt', '..\\index.json']) {
+        assert.throws(() => normalize({ sources: [{ id: 'p', label: 'P', path: 'photos/', manifestPath }] }), /manifestPath/);
+    }
+});
+
+test('folder-only albums flow a bounded descendant image up as their cover', async () => {
+    const app = await boot();
+    const calls = [];
+    app.context.scanDirectory = async folder => {
+        calls.push(folder);
+        if (folder === '2025') return { filePaths: [], folderNames: ['January'] };
+        if (folder === '2025/January') return { filePaths: [], folderNames: ['01'] };
+        return { filePaths: ['https://example.test/frame/photos/2025/January/01/photo.jpg'], folderNames: [] };
+    };
+    app.context.albumItem = app.get('year-album');
+    await vm.runInContext("loadAlbumPreview(albumItem, '2025', new AbortController().signal)", app.context);
+    assert.deepEqual(calls, ['2025', '2025/January', '2025/January/01']);
+    assert.equal(app.context.albumItem.children[0].src, 'https://example.test/frame/photos/2025/January/01/photo.jpg');
+});
+
+test('descendant album-cover lookup stops at its depth bound without hiding an unconfirmed album', async () => {
+    const app = await boot();
+    let calls = 0;
+    app.context.scanDirectory = async folder => {
+        calls++;
+        return { filePaths: [], folderNames: ['Next'] };
+    };
+    app.context.albumItem = app.get('deep-album');
+    await vm.runInContext("loadAlbumPreview(albumItem, 'Deep', new AbortController().signal)", app.context);
+    assert.equal(calls, 5);
+    assert.equal(app.context.albumItem.children.length, 0);
+    assert.equal(app.context.albumItem.hidden, false);
+});
+
 test('album covers prefer generated thumbnails and fall back to originals', async () => {
     const app = await boot({ config: { sources: [{
         id: 'photos', label: 'Photos', path: 'photos/', thumbnailPath: 'thumbs/'
@@ -874,6 +928,63 @@ test('optional scan manifest validates and reuses an unchanged directory listing
     assert.ok('thumbnailPath' in manifest.directories.Cached.files[0]);
 });
 
+test('persistent manifest supplies listings, dates, sizes, and generated thumbnails without directory requests', async () => {
+    const config = normalizeConfigCopy({
+        manifestPath: 'folderframe-data/library.json', thumbnailPath: 'thumbs/'
+    });
+    let directoryRequests = 0;
+    const index = {
+        version: 1, generatedAt: '2026-08-31T12:00:00Z',
+        root: { path: '', mtimeNs: 1, files: [], folders: ['2026'] },
+        chunks: { '2026': { file: 'library.d/year.json', directories: 1 } }, errors: []
+    };
+    const chunk = {
+        version: 1, root: '2026', directories: {
+            '2026': { path: '2026', mtimeNs: 2, folders: [], files: [{
+                path: '2026/photo.jpg', mtime: 1788177600000, size: 12345,
+                thumbnailPath: '2026/photo.jpg.webp'
+            }] }
+        }
+    };
+    const app = await boot({ config, fetchHandler: async (url, options = {}) => {
+        if (url.endsWith('/folderframe-data/library.json')) return { ok: true, json: async () => index };
+        if (url.endsWith('/folderframe-data/library.d/year.json')) return { ok: true, json: async () => chunk };
+        directoryRequests++;
+        return { ok: true, text: async () => '' };
+    } });
+    const listing = await vm.runInContext("scanDirectory('2026')", app.context);
+    assert.deepEqual(JSON.parse(JSON.stringify(listing)), {
+        filePaths: ['https://example.test/frame/photos/2026/photo.jpg'], folderNames: []
+    });
+    assert.equal(directoryRequests, 0);
+    assert.equal(vm.runInContext("modifiedDateCache.get('https://example.test/frame/photos/2026/photo.jpg').size", app.context), 12345);
+    assert.equal(vm.runInContext("persistentThumbnailUrl('https://example.test/frame/photos/2026/photo.jpg')", app.context),
+        'https://example.test/frame/thumbs/2026/photo.jpg.webp');
+});
+
+test('invalid persistent manifest falls back to directory scanning and manual refresh bypasses it', async () => {
+    const config = normalizeConfigCopy({ manifestPath: 'folderframe-data/library.json' });
+    let manifestRequests = 0, directoryRequests = 0;
+    const app = await boot({ config, fetchHandler: async url => {
+        if (url.endsWith('/folderframe-data/library.json')) {
+            manifestRequests++;
+            return { ok: true, json: async () => ({ version: 99 }) };
+        }
+        directoryRequests++;
+        return { ok: true, text: async () => '' };
+    } });
+    assert.ok(manifestRequests >= 1);
+    assert.ok(directoryRequests >= 1);
+    assert.ok(app.warnings.some(message => message.includes('persistent media index unavailable')));
+    const before = manifestRequests;
+    await vm.runInContext("scanDirectory('Nested')", app.context);
+    await vm.runInContext("scanDirectory('Nested/Child')", app.context);
+    assert.equal(manifestRequests, before);
+    await vm.runInContext("scanDirectory('Live', { bypassCache: true })", app.context);
+    assert.equal(manifestRequests, before);
+    assert.ok(directoryRequests >= 2);
+});
+
 test('all-files discovery paints the current directory before a deeper folder finishes', async () => {
     const app = await boot();
     let releaseChild;
@@ -916,6 +1027,142 @@ test('HEIC decoder loads only when requested and concurrent callers share one sc
     assert.equal(await first, decoder);
     assert.equal(await second, decoder);
     assert.equal(head.children.length, 1);
+});
+
+test('native image loads are bounded and a queued viewer outranks grid work', async () => {
+    const app = await boot({ empty: true });
+    app.context.queueElements = Array.from({ length: 6 }, () => app.context.document.createElement('img'));
+    app.context.queueControllers = Array.from({ length: 6 }, () => new AbortController());
+    vm.runInContext(`gridQueueLoads = queueElements.map((element, index) =>
+        queueNativeImageSource(element, 'grid-' + index + '.jpg', queueControllers[index].signal,
+            { priority: NATIVE_IMAGE_PRIORITY.grid }))`, app.context);
+    assert.deepEqual(app.context.queueElements.map(element => element.src || ''), [
+        'grid-0.jpg', 'grid-1.jpg', 'grid-2.jpg', 'grid-3.jpg', '', ''
+    ]);
+    app.context.viewerElement = app.context.document.createElement('img');
+    app.context.viewerController = new AbortController();
+    vm.runInContext(`viewerQueueLoad = queueNativeImageSource(viewerElement, 'viewer.jpg', viewerController.signal,
+        { priority: NATIVE_IMAGE_PRIORITY.viewer })`, app.context);
+    app.context.queueElements[0].onload();
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    assert.equal(app.context.viewerElement.src, 'viewer.jpg');
+    assert.equal(app.context.queueElements[4].src || '', '');
+
+    const cancelled = assert.rejects(app.context.gridQueueLoads[4], { name: 'AbortError' });
+    app.context.queueControllers[4].abort();
+    await cancelled;
+    for (const element of [...app.context.queueElements.slice(1, 4), app.context.viewerElement]) element.onload?.();
+    for (let index = 0; index < 20 && !app.context.queueElements[5].src; index++) await Promise.resolve();
+    assert.equal(app.context.queueElements[5].src, 'grid-5.jpg');
+    app.context.queueElements[5].onload();
+    await Promise.allSettled([...app.context.gridQueueLoads, app.context.viewerQueueLoad]);
+    assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(nativeImageQueue.stats())', app.context)),
+        { active: 0, queued: 0, concurrency: 4 });
+});
+
+test('container detection distinguishes genuine HEIC, QuickTime, ordinary images, and garbage', async () => {
+    const app = await boot();
+    const cases = [
+        [bmff('heic', ['mif1', 'hvc1']), 'heic'],
+        [bmff('qt  ', ['hvc1']), 'quicktime'],
+        [bmff('isom', ['mp42', 'avc1']), 'quicktime'],
+        [Uint8Array.from([0xff, 0xd8, 0xff, 0xe0]).buffer, 'jpeg'],
+        [Uint8Array.from([1, 2, 3, 4, 5]).buffer, 'unknown']
+    ];
+    for (const [data, expected] of cases) {
+        app.context.sampleContainer = data;
+        assert.equal(vm.runInContext('detectContainer(sampleContainer)', app.context), expected);
+    }
+});
+
+test('special-image decode sends genuine HEIC to heic2any and reclassifies QuickTime without decoding', async () => {
+    const app = await boot();
+    vm.runInContext(`window.FolderFrameResilience.createImagePool = options => {
+        globalThis.capturedImagePoolOptions = options;
+        return { acquire() { throw new Error('not used'); }, invalidate() {} };
+    }; specialImagePool = null; getImagePool();`, app.context);
+    let decoderCalls = 0;
+    app.context.heic2any = async () => { decoderCalls++; return new Blob(['jpeg'], { type: 'image/jpeg' }); };
+    app.context.sampleContainer = bmff('heic', ['mif1', 'hvc1']);
+    const still = await vm.runInContext('capturedImagePoolOptions.decode(sampleContainer)', app.context);
+    assert.equal(still.type, 'image/jpeg');
+    assert.equal(decoderCalls, 1);
+
+    app.context.sampleContainer = bmff('qt  ', ['hvc1']);
+    await assert.rejects(vm.runInContext('capturedImagePoolOptions.decode(sampleContainer)', app.context), error => {
+        assert.equal(error.name, 'MediaReclassificationError');
+        assert.equal(error.container, 'quicktime');
+        assert.equal(error.data, app.context.sampleContainer);
+        return true;
+    });
+    assert.equal(decoderCalls, 1);
+});
+
+test('mislabeled HEIC becomes a Live Photo video without a second download and has specific HEVC guidance', async () => {
+    const app = await boot();
+    app.context.motionBytes = bmff('qt  ', ['hvc1']);
+    vm.runInContext(`getSpecialImageURL = async () => {
+        throw reclassifiedContainerError('quicktime', motionBytes);
+    }; mediaFiles = ['https://example.test/IMG_1211.heic']; enterFullScreenViewer(0);`, app.context);
+    await Promise.resolve(); await Promise.resolve();
+    const video = app.get('gallery-video');
+    assert.match(video.src, /^blob:/);
+    assert.equal(vm.runInContext('reclassifiedVideoActive', app.context), true);
+    assert.equal(vm.runInContext('isPhotoActive()', app.context), false);
+    assert.equal(app.get('btn-copy-link').disabled, true);
+    video.error = { code: 4 };
+    video.onerror();
+    assert.match(app.get('media-error-title').textContent, /Apple Live Photo motion clip/);
+    assert.match(app.get('video-error-text').textContent, /HEVC/);
+    assert.match(app.get('video-error-ffmpeg').textContent, /matching still/);
+});
+
+test('failed JPEG lazily sniffs QuickTime and retries the original URL as Live Photo video', async () => {
+    const app = await boot();
+    app.context.sniffContainer = async () => ({ container: 'quicktime', data: bmff('qt  ', ['avc1']) });
+    vm.runInContext("mediaFiles = ['https://example.test/mislabeled.jpg']; enterFullScreenViewer(0)", app.context);
+    await app.get('gallery-image').onerror();
+    assert.equal(app.get('gallery-video').src, 'https://example.test/mislabeled.jpg');
+    assert.equal(vm.runInContext('reclassifiedVideoActive', app.context), true);
+});
+
+test('range sniffer accepts a server that returns the whole body and preserves aborts', async () => {
+    const app = await boot();
+    const fullBody = bmff('qt  ', ['hvc1']);
+    app.context.fetch = async (_url, options) => {
+        app.context.lastSniffOptions = options;
+        return { ok: true, arrayBuffer: async () => fullBody };
+    };
+    const result = await vm.runInContext("sniffContainer('https://example.test/fake.jpg', new AbortController().signal)", app.context);
+    assert.equal(result.container, 'quicktime');
+    assert.equal(app.context.lastSniffOptions.headers.Range, 'bytes=0-63');
+    const controller = new AbortController(); controller.abort(); app.context.abortedSniff = controller;
+    await assert.rejects(vm.runInContext("sniffContainer('https://example.test/fake.jpg', abortedSniff.signal)", app.context), { name: 'AbortError' });
+});
+
+test('HEIC grid tile reclassifies QuickTime bytes into a video preview', async () => {
+    const app = await boot();
+    app.context.motionBytes = bmff('qt  ', ['hvc1']);
+    vm.runInContext(`getSpecialImageURL = async () => {
+        throw reclassifiedContainerError('quicktime', motionBytes);
+    }; mediaFiles = ['https://example.test/IMG_1211.heic']; renderGridView();`, app.context);
+    await Promise.resolve(); await Promise.resolve();
+    const tile = app.get('thumbnail-grid').querySelectorAll('.media-tile')[0];
+    assert.equal(tile.mediaElement.tagName, 'VIDEO');
+    assert.match(tile.mediaElement.src, /^blob:/);
+});
+
+test('ordinary MOV remains on the native video path and Live Photo slideshow errors keep the normal delay', async () => {
+    const app = await boot({ search: '?autoplay=1' });
+    vm.runInContext("mediaFiles = ['https://example.test/clip.mov']; showMedia(0)", app.context);
+    assert.equal(app.get('gallery-video').src, 'https://example.test/clip.mov');
+    assert.equal(vm.runInContext('reclassifiedVideoActive', app.context), false);
+    const timers = new Map(); let id = 200;
+    app.context.setTimeout = (fn, delay) => { timers.set(++id, { fn, delay }); return id; };
+    app.context.clearTimeout = key => timers.delete(key);
+    vm.runInContext("mediaFiles.push('https://example.test/next.jpg'); slideshowPlaying = true; showMediaError('live-photo', mediaFiles[0], { code: 4 })", app.context);
+    const timerId = vm.runInContext('slideshowTimer', app.context);
+    assert.equal(timers.get(timerId).delay, 3000);
 });
 
 test('fitted-photo swipe down previews dismissal, snaps back when short, and returns to grid past threshold', async () => {
@@ -1083,7 +1330,7 @@ test('viewer loading clears on image success, failure, and grid navigation', asy
     app.get('gallery-image').onload();
     assert.equal(app.get('media-loading').hidden, true);
     vm.runInContext('showMedia(0)', app.context);
-    app.get('gallery-image').onerror();
+    await app.get('gallery-image').onerror();
     assert.equal(app.get('media-loading').hidden, true);
     vm.runInContext('showMedia(0); renderGridView()', app.context);
     assert.equal(app.get('media-loading').hidden, true);
@@ -1259,6 +1506,29 @@ test('compact viewer labels remain correct after sizing and fullscreen changes',
     assert.equal(label.textContent, 'Exit Full');
 });
 
+test('Rotate turns only the current photo clockwise and resets on media change', async () => {
+    const app = await boot();
+    const image = app.get('gallery-image');
+    const viewport = app.get('media-viewport');
+    image.clientWidth = 800; image.clientHeight = 1200;
+    viewport.clientWidth = 400; viewport.clientHeight = 700;
+    vm.runInContext('enterFullScreenViewer(0)', app.context);
+    image.onload();
+    const originalSource = image.src;
+    const rotate = app.get('btn-rotate');
+    assert.equal(rotate.disabled, false);
+    for (const expected of [90, 180, 270, 0]) {
+        rotate.listeners.click();
+        assert.equal(vm.runInContext('imageRotation', app.context), expected);
+        assert.match(image.style.transform, new RegExp(`rotate\\(${expected}deg\\)`));
+        assert.equal(image.src, originalSource);
+        assert.equal(vm.runInContext('zoom === 1 && panX === 0 && panY === 0', app.context), true);
+    }
+    vm.runInContext("mediaFiles = ['https://example.test/clip.mp4']; showMedia(0)", app.context);
+    assert.equal(vm.runInContext('imageRotation', app.context), 0);
+    assert.equal(rotate.disabled, true);
+});
+
 test('native image context menus remain available without enabling native dragging', async () => {
     const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
     const css = fs.readFileSync(path.join(__dirname, '../styles.css'), 'utf8');
@@ -1316,7 +1586,7 @@ test('controls-free empty startup stays safe and URL override restores normal gr
 
 test('image errors preserve playback, survive unchanged rescans, and support retry/gallery', async () => {
     const app = await boot({ search: '?autoplay=1' });
-    app.get('gallery-image').onerror();
+    await app.get('gallery-image').onerror();
     assert.equal(app.state().slideshowPlaying, true);
     assert.equal(app.get('video-error-overlay').style.display, 'flex');
     assert.equal(app.get('btn-next-media-error').disabled, true);
@@ -1385,13 +1655,13 @@ test('slideshow skips errors after a bounded delay and Pause cancels the skip', 
     app.context.setTimeout = (fn, delay) => { timers.set(++id, { fn, delay }); return id; };
     app.context.clearTimeout = key => timers.delete(key);
     vm.runInContext("mediaFiles.push('https://example.test/second.jpg')", app.context);
-    app.get('gallery-image').onerror();
+    await app.get('gallery-image').onerror();
     const timerId = vm.runInContext('slideshowTimer', app.context);
     assert.equal(timers.get(timerId).delay, 3000);
     timers.get(timerId).fn();
     assert.equal(app.get('gallery-image').src, 'https://example.test/second.jpg');
     assert.equal(app.state().slideshowPlaying, true);
-    app.get('gallery-image').onerror();
+    await app.get('gallery-image').onerror();
     const pending = vm.runInContext('slideshowTimer', app.context);
     app.get('btn-play-pause').listeners.click();
     assert.equal(timers.has(pending), false);
@@ -1404,7 +1674,7 @@ test('slideshow skips errors after a bounded delay and Pause cancels the skip', 
 });
 
 async function boot({ search = '', config = shipped, configFailure = false, storageBlocked = false,
-    empty = false, initialStorage = new Map() } = {}) {
+    empty = false, initialStorage = new Map(), fetchHandler = null } = {}) {
     class Element {
         constructor() { this.style = {}; this.children = []; this.listeners = {}; this.dataset = {}; this.hidden = false; this._innerHTML = ''; this.classList = { add() {}, remove() {}, toggle() {} }; }
         addEventListener(name, fn) { this.listeners[name] = fn; }
@@ -1468,26 +1738,28 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
     const requests = [];
     const saved = new Map(initialStorage);
     const sourceLabels = [new Element(), new Element()];
+    const warnings = [];
     const historyCalls = { push: [], replace: [] };
     let animationFrames = 0;
     const context = vm.createContext({
-        URL, URLSearchParams, AbortController,
+        URL, URLSearchParams, AbortController, Blob,
         ClipboardItem: class { constructor(items) { this.items = items; } },
         navigator: { clipboard: { writeText: async () => {}, write: async () => {} } },
-        console: { warn() {}, log() {}, error() {} },
+        console: { warn(...items) { warnings.push(items.map(String).join(' ')); }, info() {}, log() {}, error() {} },
         window: { FolderFrameSettings: api, isSecureContext: true, addEventListener(name, fn) { listeners[name] = fn; },
             history: { state: null, pushState(state, title, url) { this.state = state; historyCalls.push.push(String(url)); },
                 replaceState(state, title, url) { this.state = state; historyCalls.replace.push(String(url)); } } },
-        document: { getElementById: get, createElement: () => new Element(), head: new Element(),
+        document: { getElementById: get, createElement: tag => Object.assign(new Element(), { tagName: String(tag).toUpperCase() }), head: new Element(),
             createDocumentFragment: () => { const fragment = new Element(); fragment.isFragment = true; return fragment; },
             querySelectorAll: () => sourceLabels,
             addEventListener() {}, body: new Element(), hidden: false },
         location: { href: base + search, search, assign(url) { this.assigned = url; } },
         localStorage: { getItem(key) { if (storageBlocked) throw new Error('Blocked'); return saved.get(key) || null; },
             setItem(key, value) { if (storageBlocked) throw new Error('Blocked'); saved.set(key, value); } },
-        fetch: async url => {
+        fetch: async (url, options = {}) => {
             requests.push(url);
             if (url === './folderframe.config.json') return { ok: !configFailure, status: configFailure ? 404 : 200, json: async () => config };
+            if (fetchHandler) return fetchHandler(String(url), options);
             return { ok: true, url, text: async () => '' };
         },
         DOMParser: class { parseFromString() { return { querySelectorAll: () => empty ? [] : [{ getAttribute: () => 'photo.jpg' }] }; } },
@@ -1499,7 +1771,7 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8'), context);
     await listeners.DOMContentLoaded();
     const state = () => JSON.parse(vm.runInContext('JSON.stringify({ currentFolder, galleryViewMode, imageMode, slideshowInterval, slideshowPlaying, isGridViewActive, mediaFiles, activeSource, rememberPreferences })', context));
-    return { context, get, state, requests, saved, sourceLabels, historyCalls, windowListeners: listeners, get animationFrames() { return animationFrames; } };
+    return { context, get, state, requests, saved, sourceLabels, warnings, historyCalls, windowListeners: listeners, get animationFrames() { return animationFrames; } };
 }
 
 test('pinch zoom transitions smoothly to one-finger pan and cancellation clears gestures', async () => {

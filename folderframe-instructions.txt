@@ -75,6 +75,9 @@ Install pillow-heif too for HEIC/HEIF input. A file at
 photos/Family/image.jpg maps to thumbnails/Family/image.jpg.webp.
 Missing previews fall back to the original automatically. Thumbnails are
 used only in the grid and for album covers; the viewer uses originals.
+When an album contains only folders, FolderFrame performs a bounded descendant
+search and flows the first usable image up as its cover. It stops after four
+levels or twelve directory listings per visible album card.
 
 OPTIONAL SCAN MANIFEST
 
@@ -87,6 +90,30 @@ thumbnail-path metadata. It requires no database, PHP, build step, or writable
 server directory. Missing/invalid/full browser storage, or a server without a usable
 directory timestamp, safely falls back to the normal full scan. Clearing site data
 removes the manifest and the next scan rebuilds it.
+
+OPTIONAL PERSISTENT MEDIA INDEX
+
+Very large or Immich-mounted trees can use a lean JSON index stored in writable
+appdata and served as an ordinary static file. Add manifestPath to the source:
+
+    { "id": "photos", "label": "Photos", "path": "photos/",
+      "thumbnailPath": "thumbnails/",
+      "manifestPath": "folderframe-data/library.json" }
+
+Generate thumbnails and the index together:
+
+    python generate_thumbnails.py photos thumbnails --manifest folderframe-data/library.json
+
+Or update only the index:
+
+    python generate_thumbnails.py photos --manifest folderframe-data/library.json --manifest-only
+
+The helper creates library.json and an adjacent library.d directory. Serve both.
+Later runs compare directory mtimes and re-list only changed directories while
+reusing unchanged records. Missing or invalid index data logs a fallback and the
+gallery scans normal HTML directory listings. Refresh Folder bypasses all cached
+index data. The browser reads the manifest but cannot write server appdata, so
+run the helper manually or on a schedule.
 
 OPTION 1 — QUICK LOCAL TEST WITH PYTHON
 
@@ -230,6 +257,15 @@ named:
 that actually contains JPEG data can be recognized and displayed as JPEG
 rather than incorrectly being sent through the HEIC decoder.
 
+Some Apple Live Photo motion components are QuickTime/HEVC videos even when
+their files are named .heic (this can occur in exported or mounted Immich
+libraries). FolderFrame detects the real container from downloaded bytes and
+uses the video viewer instead of heic2any. Safari and other HEVC-capable
+environments may play the clip; Chrome, Firefox, and some Windows systems may
+show a specific unsupported Live Photo motion message. Open original or use
+the matching still image in that case. FolderFrame does not automatically pair
+Live Photo stills and motion clips.
+
 HEIC decoding is more CPU- and memory-intensive than displaying normal
 JPEG, PNG, or WebP images. Large collections of genuine HEIC files may
 therefore take longer to populate than JPEG-based galleries.
@@ -335,7 +371,9 @@ BROWSER AND MOBILE SUPPORT
 
 Large-library loading is bounded and cancellable. Failed subfolders retain
 successful results and show a Retry scan warning. HEIC work uses two shared
-slots and separate viewer/480-pixel-preview caches. See RESILIENCE.md for limits,
+slots and separate viewer/480-pixel-preview caches. Ordinary JPEG, PNG, WebP,
+and GIF display uses four native-load slots, prioritizing the viewer over album
+covers and grid tiles. See RESILIENCE.md for limits,
 stuck-decoder recovery, and the device-testing checklist. Deploy resilience.js
 with the other application files.
 
@@ -387,7 +425,8 @@ names remain available when text is hidden.
 At widths up to 560 CSS pixels (including narrow embeds), the gallery uses
 a logo/count row, a separate breadcrumb, and a 2-by-2 button grid. Routine
 timestamps are hidden; scan errors remain visible. The viewer uses compact,
-wrapping icon controls by default. Reset Zoom is hidden
+wrapping icon controls for playback, Rotate, Fit/Original, Full, and TV Mode.
+Reset Zoom is hidden
 at this width. To reset a magnified photo, switch Fit/Original; switch back to
 Fit if needed. Wider headers keep compact controls and wrap to use available space.
 The sizing button shows an icon with Fit or Original; Full toggles fullscreen.
@@ -401,7 +440,8 @@ feedback flicker. On desktop, long filenames truncate to leave room for controls
 controls still wrap when the window is too narrow to fit them.
 
 Photos support: - Mouse wheel zoom - Touch pinch-to-zoom - Mouse/finger
-drag to pan - Reset Zoom button on wider layouts - Escape returns to the gallery
+drag to pan - Rotate clockwise in 90-degree display-only steps - Reset Zoom
+button on wider layouts - Escape returns to the gallery
 
 IMAGE SIZING
 

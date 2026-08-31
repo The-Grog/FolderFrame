@@ -54,6 +54,39 @@ test('request exposes structured HTTP status and request URL', async () => {
         return true;
     });
 });
+test('bounded task queue limits concurrency, prioritizes waiting work, and cancels queued tasks', async () => {
+    const f = fixture();
+    const queue = f.api.createTaskQueue({ concurrency: 2 });
+    const work = [], started = [];
+    const task = name => queue.schedule(() => {
+        started.push(name);
+        const pending = deferred();
+        work.push(pending);
+        return pending.promise;
+    }, { priority: name === 'viewer' ? 10 : name === 'album' ? 5 : 0 });
+    const first = task('grid-1');
+    const second = task('grid-2');
+    const grid = task('grid-3');
+    const album = task('album');
+    const viewer = task('viewer');
+    assert.deepEqual(started, ['grid-1', 'grid-2']);
+    assert.deepEqual(JSON.parse(JSON.stringify(queue.stats())), { active: 2, queued: 3, concurrency: 2 });
+    work[0].resolve('one'); await flush();
+    assert.equal(started[2], 'viewer');
+    work[1].resolve('two'); await flush();
+    assert.equal(started[3], 'album');
+
+    const controller = new AbortController();
+    const cancelled = assert.rejects(queue.schedule(() => 'never', { signal: controller.signal }), { name: 'AbortError' });
+    controller.abort();
+    await cancelled;
+    assert.equal(queue.stats().queued, 1);
+
+    work[2].resolve('viewer'); work[3].resolve('album'); await flush();
+    assert.equal(started[4], 'grid-3');
+    work[4].resolve('three');
+    assert.deepEqual(await Promise.all([first, second, grid, album, viewer]), ['one', 'two', 'three', 'album', 'viewer']);
+});
 test('shared in-flight decode serves thumbnail then viewer and viewer then thumbnail', async () => {
     for (const first of ['thumbnail', 'viewer']) {
         const work = deferred(); let decodes = 0;

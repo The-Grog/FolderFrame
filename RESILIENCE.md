@@ -14,6 +14,7 @@ and the existing assets. No configuration migration is needed.
 | Video stall without progress | 30 seconds; paused video is exempt |
 | HEIC decode/preview processing after download | 30 seconds before reporting failure |
 | Shared HEIC processing | 2 active jobs; queued viewer work has priority |
+| Native JPEG/PNG/WebP/GIF display | 4 active loads; viewer, then album, then grid priority |
 | Orphaned queued job | 250 ms grace for reattachment |
 | Viewer converted-image cache | 32 entries / 64 MiB of Blob data |
 | HEIC thumbnail cache | 128 entries / 16 MiB; maximum 480-pixel edge |
@@ -23,6 +24,14 @@ Directory listings receive a longer budget than config/metadata because large
 listings can have substantial response bodies. Queue waiting time does not count
 as decoding time. Limits are named constants/defaults in app.js and resilience.js,
 not additional JSON settings.
+
+Ordinary browser-decoded images use a separate four-slot queue. The queue gates
+native image source assignment so a newly visible grid cannot ask a phone, Pi,
+or low-power display to decode hundreds of large JPEG/PNG/WebP/GIF files at
+once. Viewer work has first priority, album covers second, and grid tiles third;
+already-running loads finish normally. Leaving a viewer, removing a virtualized
+tile, or moving an unsettled tile outside preload range cancels its queued work.
+The existing 30-second media/thumbnail watchdogs release stalled slots.
 
 ### Large grid rendering
 
@@ -45,6 +54,22 @@ HTTP `Last-Modified`; unchanged parsed listings can be reused while changed or
 unverifiable directories take the full-scan path. Invalid, unavailable, or full
 localStorage never prevents scanning. New navigation still aborts validation and
 listing requests, so cached work cannot supersede the active folder.
+
+### Optional persistent media index
+
+A source with `manifestPath` first requests a companion-generated, chunked JSON
+index. Valid entries supply paths, mtimes, sizes, folder relationships, and
+optional generated-preview locations without downloading directory-listing HTML
+or issuing per-file metadata HEAD requests. The small root index is refreshed
+for each gallery scan; top-level chunks load only when their subtree is needed.
+Navigation cancellation applies to both index and chunk requests.
+
+Missing, invalid, timed-out, or unreadable index data is a visible console
+diagnostic, never an empty gallery: FolderFrame falls back to its normal
+directory scan. A bad chunk falls back only for that subtree. Refresh Folder
+explicitly bypasses persistent and browser-local manifests. The Python helper
+uses atomic writes and reuses records for unchanged directory mtimes; if the
+appdata index is deleted, its next run logs a full rebuild and recreates it.
 
 ## Cancellation and recovery
 
@@ -105,6 +130,15 @@ remains occupied until the actual job settles. If both slots are stuck, pending
 HEIC requests fail promptly with reload guidance. Ordinary images/videos continue.
 Reload to recover permanently stuck decoders; this is not hard worker termination.
 
+FolderFrame sniffs downloaded ISO-BMFF data before HEIC conversion. A QuickTime
+container mislabeled `.heic` is reclassified as an Apple Live Photo motion clip
+and reuses the downloaded bytes in the video viewer, so `heic2any` is never called
+and the viewer does not download the file twice. Browser codec support still
+applies: HEVC may play in Safari but fail in Chrome, Firefox, or Windows setups.
+For an ordinary image extension that fails native decoding, one best-effort
+64-byte Range request performs the same sniff. A server that ignores Range is
+accepted; CORS, timeout, or network failure falls back to the normal image error.
+
 ## Device testing checklist
 
 Automated tests cover logic and simulated timing, not real decoder performance,
@@ -112,6 +146,8 @@ browser layout, or memory usage. Before declaring device validation complete:
 
 - Open a large mixed-format album and scroll away/back through HEIC previews.
 - Open a HEIC from its thumbnail, return to the grid, and repeat quickly.
+- Open a genuine HEIC still and a `.heic`-named QuickTime/HEVC Live Photo motion
+  component; verify only the motion file uses video and codec-specific guidance.
 - Switch folders during slow loading; the latest destination must win.
 - Let a slideshow run while adding files; the current image must not reset.
 - Test a missing/inaccessible subfolder in All Pics; good files should remain.

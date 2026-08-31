@@ -37,6 +37,52 @@
         }
     }
 
+    function createTaskQueue({ concurrency = 4 } = {}) {
+        if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error('concurrency must be a positive integer');
+        let active = 0, serial = 0;
+        const queued = [];
+        function pump() {
+            while (active < concurrency && queued.length) {
+                queued.sort((a, b) => b.priority - a.priority || a.order - b.order);
+                const item = queued.shift();
+                if (item.signal?.aborted) {
+                    item.signal.removeEventListener('abort', item.cancel);
+                    item.reject(abortError());
+                    continue;
+                }
+                item.state = 'active';
+                active++;
+                let result;
+                try { result = item.task(); }
+                catch (error) { result = Promise.reject(error); }
+                Promise.resolve(result).then(item.resolve, item.reject).finally(() => {
+                    item.signal?.removeEventListener('abort', item.cancel);
+                    active--;
+                    pump();
+                });
+            }
+        }
+        function schedule(task, { signal, priority = 0 } = {}) {
+            if (typeof task !== 'function') return Promise.reject(new Error('task must be a function'));
+            if (signal?.aborted) return Promise.reject(abortError());
+            return new Promise((resolve, reject) => {
+                const item = { task, signal, priority, order: serial++, state: 'queued', resolve, reject };
+                item.cancel = () => {
+                    if (item.state !== 'queued') return;
+                    const index = queued.indexOf(item);
+                    if (index >= 0) queued.splice(index, 1);
+                    item.state = 'cancelled';
+                    signal?.removeEventListener('abort', item.cancel);
+                    reject(abortError());
+                };
+                signal?.addEventListener('abort', item.cancel, { once: true });
+                queued.push(item);
+                pump();
+            });
+        }
+        return { schedule, stats: () => ({ active, queued: queued.length, concurrency }) };
+    }
+
     function createImagePool({ download, decode, thumbnail, createURL, revokeURL,
         warn = console.warn, concurrency = 2, decodeTimeout = 30000, grace = 250,
         limits = { viewer: [32, 64 * 1024 * 1024], thumbnail: [128, 16 * 1024 * 1024] } }) {
@@ -193,7 +239,7 @@
         return { acquire, invalidate, stats: () => ({ active, jobs: jobs.size,
             viewer: caches.viewer.size, thumbnail: caches.thumbnail.size }) };
     }
-    const api = { request, createImagePool, abortError, timeoutError, httpError };
+    const api = { request, createTaskQueue, createImagePool, abortError, timeoutError, httpError };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     else root.FolderFrameResilience = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

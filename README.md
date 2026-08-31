@@ -42,6 +42,8 @@ Compact controls put slideshow playback, Shuffle, Fit, fullscreen, and TV Mode w
 ![FolderFrame gallery with album cover previews, Filename sorting, and compact neutral controls](docs/images/folderframe-gallery.png)
 
 Browse albums with cover previews and cycle between Newest, Oldest, and Filename sorting.
+Folders without direct images can borrow the first usable cover found in a bounded
+descendant search, which suits year/month layouts without scanning the whole tree.
 
 ### Mobile viewer and gallery
 
@@ -68,12 +70,14 @@ maintained media list.
 - **Flexible sorting:** Natural Filename order by default, plus Newest and Oldest, with separate index/embed defaults. Date sorting uses server modification dates, not photo capture dates.
 - **Photos and videos:** JPEG, PNG, WebP, GIF, HEIC/HEIF conversion, and MP4/MOV playback (browser codec support applies).
 - **Slideshow and TV mode:** selectable intervals, Shuffle, fullscreen, automatic rescans, and automatic skipping of failed media.
-- **Responsive viewer:** compact mobile controls, pinch zoom, pan, and Fit/Original sizing.
+- **Responsive viewer:** compact mobile controls, pinch zoom, pan, display-only 90° rotation, and Fit/Original sizing.
 - **Embeddable:** iframe example and an optional controls-free, muted-video slideshow.
 - **Configurable startup:** named media sources, separate index/embed defaults, saved preferences, and URL overrides.
 - **Clear feedback:** folder scan progress, thumbnail placeholders, media loading indicators, and recovery guidance.
 - **Optional generated thumbnails:** serve small WebP grid/album previews with automatic original-image fallback; the full viewer always uses originals.
+- **Optional persistent media index:** serve a lean appdata-generated manifest so unchanged large trees open without re-downloading and parsing every directory listing.
 - **Large-grid windowing:** large galleries render 100 tiles initially and keep at most 300 media tiles in the DOM while preserving the full scrollbar and media order.
+- **Bounded native decoding:** JPEG, PNG, WebP, and GIF loads use a four-slot priority queue so viewer images stay responsive while large grids populate.
 - **Static-server hosting:** no database or build step; works with a web server that supplies HTML directory listings.
 
 ## Browser and mobile support
@@ -431,6 +435,15 @@ named:
 that actually contains JPEG data can be recognized and displayed as JPEG
 rather than incorrectly being sent through the HEIC decoder.
 
+Some Apple Live Photo motion components are QuickTime/HEVC videos even when
+their files are named `.heic` (this can occur in exported or mounted Immich
+libraries). FolderFrame detects the container from bytes it already downloads
+and routes that file through the video viewer instead of `heic2any`. Safari and
+other HEVC-capable environments may play it; Chrome, Firefox, and some Windows
+systems may show a specific unsupported Live Photo motion message. Open original
+or use the matching still image in that case. FolderFrame does not automatically
+pair Live Photo stills and motion clips.
+
 HEIC decoding is more CPU- and memory-intensive than displaying normal
 JPEG, PNG, or WebP images. Large collections of genuine HEIC files may
 therefore take longer to populate than JPEG-based galleries.
@@ -477,6 +490,43 @@ This remains database-free and requires no PHP, worker, or writable server direc
 If directory `Last-Modified` is absent or unreliable, leave the option off or allow
 FolderFrame to fall back to its normal full scan automatically. Clearing site data
 removes the browser manifest; FolderFrame rebuilds it on the next scan.
+
+### Optional persistent media index
+
+For very large or Immich-mounted trees, `generate_thumbnails.py` can also write a
+lean, chunked JSON index to a writable appdata directory. The browser reads this
+ordinary static file instead of walking every directory listing:
+
+```json
+{
+  "id": "photos",
+  "label": "Photos",
+  "path": "photos/",
+  "thumbnailPath": "thumbnails/",
+  "manifestPath": "folderframe-data/library.json"
+}
+```
+
+Generate thumbnails and the index together:
+
+```bash
+python generate_thumbnails.py photos thumbnails --manifest folderframe-data/library.json
+```
+
+Or update only the index:
+
+```bash
+python generate_thumbnails.py photos --manifest folderframe-data/library.json --manifest-only
+```
+
+The helper stores path, modification time, size, and optional thumbnail path,
+with one chunk per top-level folder. Later runs stat known directories and only
+re-list subtrees whose directory mtime changed. The manifest and its adjacent
+`library.d/` directory must be served as static files. Missing, stale, invalid,
+or unreadable index data is reported in the browser console and falls back to
+normal directory scanning. **Refresh Folder** deliberately bypasses both the
+persistent index and browser scan cache for an immediate live scan. The browser
+never writes appdata itself; run the helper manually or on a schedule.
 
 The compact header places the album/file count beside the directory breadcrumb.
 Parent folders remain clickable; the current folder appears once as plain text,
@@ -593,8 +643,8 @@ scrolled into view; if removed, the saved scroll position is used instead.
 
 At widths up to 560 CSS pixels (including narrow embeds), the gallery uses
 a logo/count row, a separate breadcrumb, and a 2-by-2 button grid. Routine
-timestamps are hidden; scan errors remain visible. The viewer uses three rows:
-Gallery/name/count; Play/Shuffle/interval; Fit/Full/TV Mode. Reset Zoom is hidden
+timestamps are hidden; scan errors remain visible. The viewer uses compact wrapping
+controls for Gallery, playback, Rotate, Fit/Original, Full, and TV Mode. Reset Zoom is hidden
 at this width. To reset a magnified photo, switch Fit/Original; switch back to
 Fit if needed. Wider headers keep compact controls and wrap to use available space.
 The sizing button shows an icon with Fit or Original; Full toggles fullscreen.
@@ -611,6 +661,7 @@ Photos support:
 
 - Mouse-wheel zoom and touch pinch-to-zoom.
 - Mouse/finger dragging to pan.
+- Rotate advances the displayed photo 90 degrees clockwise without changing the original file.
 - Reset Zoom on wider layouts.
 - Escape returns from the viewer to the thumbnail/album grid.
 

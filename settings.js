@@ -84,12 +84,24 @@
                 }
                 if (!thumbnailUrl.pathname.endsWith('/')) thumbnailUrl.pathname += '/';
             }
+            let manifestUrl = null;
+            if (entry.manifestPath !== undefined) {
+                if (typeof entry.manifestPath !== 'string' || !entry.manifestPath.trim() || /[\\\x00-\x1f]/.test(entry.manifestPath)) {
+                    throw new Error('manifestPath must be a web JSON file path');
+                }
+                manifestUrl = new URL(entry.manifestPath, baseUrl);
+                if (!['http:', 'https:'].includes(manifestUrl.protocol) || manifestUrl.username || manifestUrl.password ||
+                    manifestUrl.search || manifestUrl.hash || !manifestUrl.pathname.toLowerCase().endsWith('.json')) {
+                    throw new Error('manifestPath must be an HTTP(S) JSON file without credentials, query strings, or fragments');
+                }
+            }
             if (entry.scanCache !== undefined && typeof entry.scanCache !== 'boolean') {
                 throw new Error('scanCache must be true or false');
             }
             ids.add(entry.id);
             return { id: entry.id, label: entry.label.trim(), path: entry.path, url: url.href,
                 thumbnailPath: entry.thumbnailPath || null, thumbnailUrl: thumbnailUrl?.href || null,
+                manifestPath: entry.manifestPath || null, manifestUrl: manifestUrl?.href || null,
                 scanCache: entry.scanCache === true };
         });
         return {

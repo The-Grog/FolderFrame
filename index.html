@@ -59,8 +59,13 @@
                     <span class="button-label">Shuffle Off</span>
                 </button>
 
+                <button id="btn-rotate" class="btn btn-secondary" title="Rotate photo 90° clockwise" aria-label="Rotate photo clockwise" disabled>
+                    <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M15.55 5.55A7 7 0 1 0 19 12h-2a5 5 0 1 1-2.87-4.52L11 10.6V3h7.6l-3.05 2.55z"/></svg>
+                    <span class="button-label">Rotate</span>
+                </button>
+
                 <button id="btn-reset-zoom" class="btn btn-secondary" title="Reset zoom and pan" aria-label="Reset zoom and pan" disabled>
-                    <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 5a7 7 0 1 1-6.32 4H3l3.5-3.5L10 9H7.69A5 5 0 1 0 12 7V5z"/></svg>
+                    <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4z"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg>
                     <span class="button-label">Reset Zoom</span>
                 </button>
 
@@ -189,8 +194,8 @@
     </div>
 
     <p id="config-notice" role="status" hidden></p>
-    <script src="resilience.js?v=20260829-missing-album"></script>
-    <script src="settings.js?v=20260829-refresh-2m"></script>
-    <script src="app.js?v=20260831-scan-manifest"></script>
+    <script src="resilience.js?v=20260831-native-decode-queue"></script>
+    <script src="settings.js?v=20260831-persistent-manifest"></script>
+    <script src="app.js?v=20260831-native-decode-queue"></script>
 </body>
 </html>

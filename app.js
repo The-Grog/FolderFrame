@@ -11,6 +11,9 @@ let missingFolderRecovery = null;
 let emptyFolderNotice = false;
 const DIRECTORY_TIMEOUT = 15000, MEDIA_TIMEOUT = 30000;
 const GRID_BATCH_SIZE = 100, GRID_WINDOW_SIZE = 300;
+const NATIVE_IMAGE_CONCURRENCY = 4;
+const NATIVE_IMAGE_PRIORITY = Object.freeze({ grid: 0, album: 5, viewer: 10 });
+const nativeImageQueue = resilience.createTaskQueue({ concurrency: NATIVE_IMAGE_CONCURRENCY });
 let gridVirtualizer = null;
 function clearMediaSource(element) {
     if (element.removeAttribute) element.removeAttribute('src');
@@ -61,7 +64,7 @@ function stopAlbumPreviews() {
 
 function startAlbumPreviews() {
     stopAlbumPreviews();
-    const session = { controller: new AbortController(), observer: null, queue: [], active: 0, items: new Map() };
+    const session = { controller: new AbortController(), observer: null, queue: [], active: 0, items: new Map(), listingCache: new Map() };
     albumPreviewSession = session;
     const pump = () => {
         if (session.controller.signal.aborted) return;
@@ -94,6 +97,87 @@ function startAlbumPreviews() {
     return item => session.observer ? session.observer.observe(item) : enqueue(item);
 }
 
+function queueNativeImageSource(element, source, signal, { priority = 0, onStart = null } = {}) {
+    const operation = nativeImageQueue.schedule(() => new Promise((resolve, reject) => {
+        if (signal?.aborted) { reject(resilience.abortError()); return; }
+        const token = Symbol('native-image-load');
+        const originalLoad = element.onload;
+        const originalError = element.onerror;
+        let settled = false;
+        element.folderFrameDecodeToken = token;
+        const restore = () => {
+            if (element.folderFrameDecodeToken !== token) return;
+            element.folderFrameDecodeToken = null;
+            element.onload = originalLoad;
+            element.onerror = originalError;
+        };
+        const finish = (handler, event) => {
+            if (settled) return;
+            settled = true;
+            signal?.removeEventListener('abort', cancel);
+            restore();
+            let result;
+            try { result = handler?.call(element, event); }
+            catch (error) { console.error('FolderFrame: image load callback failed.', error); }
+            resolve();
+            return result;
+        };
+        const cancel = () => {
+            if (settled) return;
+            settled = true;
+            restore();
+            reject(resilience.abortError());
+        };
+        element.onload = event => finish(originalLoad, event);
+        element.onerror = event => finish(originalError, event);
+        signal?.addEventListener('abort', cancel, { once: true });
+        try {
+            onStart?.();
+            element.src = source;
+        } catch (error) {
+            signal?.removeEventListener('abort', cancel);
+            restore();
+            reject(error);
+        }
+    }), { signal, priority });
+    // Most DOM callers are event-driven rather than awaiting this operation.
+    // Attach a handler here so cancellation never becomes an unhandled rejection.
+    operation.catch(error => {
+        if (error?.name !== 'AbortError') console.warn('FolderFrame: native image load queue failed.', source, error);
+    });
+    return operation;
+}
+
+const ALBUM_COVER_MAX_DEPTH = 4;
+const ALBUM_COVER_MAX_LISTINGS = 12;
+async function findAlbumCover(folder, signal) {
+    const queue = [{ folder, depth: 0 }];
+    const visited = new Set();
+    let listingsChecked = 0, sawMedia = false, searchIncomplete = false;
+    while (queue.length && listingsChecked < ALBUM_COVER_MAX_LISTINGS) {
+        if (signal.aborted) throw resilience.abortError();
+        const candidate = queue.shift();
+        if (visited.has(candidate.folder)) continue;
+        visited.add(candidate.folder); listingsChecked++;
+        let listing = albumPreviewSession?.listingCache.get(candidate.folder);
+        if (!listing) {
+            listing = await scanDirectory(candidate.folder, { signal });
+            if (albumPreviewSession && !signal.aborted) albumPreviewSession.listingCache.set(candidate.folder, listing);
+        }
+        const file = listing.filePaths.find(isImageFile);
+        if (file) return { file, confirmedEmpty: false };
+        if (listing.filePaths.some(isMediaFile)) sawMedia = true;
+        if (candidate.depth < ALBUM_COVER_MAX_DEPTH) {
+            listing.folderNames.forEach(name => queue.push({
+                folder: candidate.folder ? `${candidate.folder}/${name}` : name,
+                depth: candidate.depth + 1
+            }));
+        } else if (listing.folderNames.length) searchIncomplete = true;
+    }
+    if (queue.length) searchIncomplete = true;
+    return { file: null, confirmedEmpty: !sawMedia && !searchIncomplete };
+}
+
 async function loadAlbumPreview(item, folder, signal) {
     const controller = new AbortController();
     const cancel = () => controller.abort();
@@ -107,16 +191,15 @@ async function loadAlbumPreview(item, folder, signal) {
     };
     try {
         if (signal.aborted) return;
-        const listing = await scanDirectory(folder, { signal: controller.signal });
-        if (!listing.filePaths.length && !listing.folderNames.length) {
+        const result = await findAlbumCover(folder, controller.signal);
+        if (!result.file && result.confirmedEmpty) {
             item.hidden = true;
             item.dataset.emptyAlbum = 'true';
             return;
         }
-        // scanDirectory already sorts naturally by filename. Do not crawl descendants.
-        const file = listing.filePaths.find(isImageFile);
+        const file = result.file;
         if (!file || signal.aborted || controller.signal.aborted) return;
-        const generatedUrl = settingsApi.thumbnailUrl(activeSource, file);
+        const generatedUrl = persistentThumbnailUrl(file);
         let url = generatedUrl || (isHeicFile(file) ? await getSpecialImageURL(file, signal, 'thumbnail') : file);
         if (signal.aborted || controller.signal.aborted) return;
         preview = item.coverImage || document.createElement('img');
@@ -126,6 +209,28 @@ async function loadAlbumPreview(item, folder, signal) {
         preview.draggable = false;
         preview.hidden = true;
         preview.decoding = 'async';
+        let previewLoadController = null;
+        const loadPreview = source => {
+            previewLoadController?.abort();
+            previewLoadController = new AbortController();
+            const cancel = () => previewLoadController?.abort();
+            signal.addEventListener('abort', cancel, { once: true });
+            const operation = queueNativeImageSource(preview, source, previewLoadController.signal, {
+                priority: NATIVE_IMAGE_PRIORITY.album,
+                onStart: () => {
+                    clearTimeout(timeout);
+                    timeout = setTimeout(() => {
+                        fallback();
+                        previewLoadController?.abort();
+                    }, MEDIA_TIMEOUT);
+                }
+            });
+            operation.then(
+                () => signal.removeEventListener('abort', cancel),
+                () => signal.removeEventListener('abort', cancel)
+            );
+            return operation;
+        };
         preview.onload = () => {
             if (signal.aborted) return;
             clearTimeout(timeout);
@@ -137,19 +242,15 @@ async function loadAlbumPreview(item, folder, signal) {
             if (generatedUrl && preview.src === generatedUrl && !signal.aborted) {
                 try {
                     url = isHeicFile(file) ? await getSpecialImageURL(file, signal, 'thumbnail') : file;
-                    if (!signal.aborted) {
-                        timeout = setTimeout(() => { fallback(); preview.src = ''; }, MEDIA_TIMEOUT);
-                        preview.src = url;
-                    }
+                    if (!signal.aborted) loadPreview(url);
                     return;
                 } catch {}
             }
             fallback();
         };
-        timeout = setTimeout(() => { fallback(); preview.src = ''; }, MEDIA_TIMEOUT);
-        signal.addEventListener('abort', () => { clearTimeout(timeout); preview.src = ''; }, { once: true });
+        signal.addEventListener('abort', () => clearTimeout(timeout), { once: true });
         if (!preview.parentNode) item.appendChild(preview);
-        preview.src = url;
+        loadPreview(url);
     } catch (error) {
         // An unavailable preview never prevents opening the album.
         fallback();
@@ -163,7 +264,7 @@ let mediaFiles = [];
 let subfolders = [];
 let currentFolder = '';
 let currentIndex = 0;
-let zoom = 1.0, panX = 0, panY = 0;
+let zoom = 1.0, panX = 0, panY = 0, imageRotation = 0;
 let isDragging = false, startX = 0, startY = 0, startPanX = 0, startPanY = 0;
 let isPinching = false, initialDist = 0, initialZoom = 1.0, initialMidX = 0, initialMidY = 0, initialPanX = 0, initialPanY = 0;
 let slideshowPlaying = false, slideshowTimer = null, slideshowInterval = 5, slideProgress = 0;
@@ -179,6 +280,165 @@ let dateCacheKey = null;
 let scanManifest = null, scanManifestKey = null;
 const SCAN_MANIFEST_VERSION = 1;
 const SCAN_MANIFEST_DIRECTORY_LIMIT = 5000;
+const PERSISTENT_MANIFEST_VERSION = 1;
+let persistentManifestState = null;
+const persistentThumbnailUrls = new Map();
+
+function resetPersistentManifest() {
+    persistentManifestState = activeSource?.manifestUrl
+        ? { key: activeSource.manifestUrl, promise: null, index: null, unavailable: false, chunks: new Map() }
+        : null;
+    persistentThumbnailUrls.clear();
+}
+
+function safeManifestPath(value, { allowEmpty = false } = {}) {
+    if (typeof value !== 'string' || /[\\\x00-\x1f]/.test(value)) return null;
+    const parts = value.split('/').filter(Boolean);
+    if ((!allowEmpty && !parts.length) || parts.some(part => part === '.' || part === '..')) return null;
+    return parts.join('/');
+}
+
+function manifestAssetUrl(relative) {
+    if (!activeSource.thumbnailUrl) return null;
+    const path = safeManifestPath(relative);
+    if (!path) return null;
+    try {
+        return new URL(path.split('/').map(encodeURIComponent).join('/'), activeSource.thumbnailUrl).href;
+    } catch { return null; }
+}
+
+function persistentThumbnailUrl(file) {
+    return persistentThumbnailUrls.get(file) || settingsApi.thumbnailUrl(activeSource, file);
+}
+
+function validateManifestRecord(record, expectedPath) {
+    if (!record || typeof record !== 'object' || record.path !== expectedPath ||
+        !Array.isArray(record.files) || !Array.isArray(record.folders)) return null;
+    const folders = [];
+    for (const name of record.folders) {
+        if (typeof name !== 'string' || !name || /[\/\\\x00-\x1f]/.test(name) || ['.', '..'].includes(name)) return null;
+        folders.push(name);
+    }
+    const files = [];
+    for (const entry of record.files) {
+        const path = safeManifestPath(entry?.path);
+        if (!path || parentFolder(path) !== expectedPath || !isMediaFile(path)) return null;
+        files.push({ ...entry, path });
+    }
+    return { files, folders };
+}
+
+function listingFromManifest(record, expectedPath) {
+    const valid = validateManifestRecord(record, expectedPath);
+    if (!valid) return null;
+    loadDateCache();
+    const now = Date.now();
+    const filePaths = valid.files.map(entry => {
+        const name = entry.path.split('/').pop();
+        const folder = parentFolder(entry.path);
+        const file = mediaUrlFor(name, folder);
+        modifiedDateCache.set(file, {
+            date: Number.isFinite(entry.mtime) ? entry.mtime : null,
+            size: Number.isFinite(entry.size) ? entry.size : null,
+            checked: now
+        });
+        const thumbnail = entry.thumbnailPath ? manifestAssetUrl(entry.thumbnailPath) : null;
+        if (thumbnail) persistentThumbnailUrls.set(file, thumbnail);
+        return file;
+    });
+    return { filePaths, folderNames: [...valid.folders] };
+}
+
+async function ensurePersistentManifest(signal) {
+    if (!activeSource.manifestUrl) return null;
+    if (!persistentManifestState || persistentManifestState.key !== activeSource.manifestUrl) resetPersistentManifest();
+    const state = persistentManifestState;
+    if (state.unavailable) return null;
+    if (state.index) return state.index;
+    if (!state.promise) {
+        state.promise = resilience.request(activeSource.manifestUrl, {
+            signal, timeout: DIRECTORY_TIMEOUT, cache: 'no-store', body: 'json'
+        }).then(index => {
+            if (!index || index.version !== PERSISTENT_MANIFEST_VERSION ||
+                !index.root || typeof index.root !== 'object' ||
+                !index.chunks || typeof index.chunks !== 'object' || Array.isArray(index.chunks)) {
+                throw new Error('Unsupported or invalid persistent manifest');
+            }
+            state.index = index;
+            console.info(`FolderFrame: loaded persistent media index${index.generatedAt ? ` from ${index.generatedAt}` : ''}.`);
+            if (Array.isArray(index.errors) && index.errors.length) {
+                console.warn(`FolderFrame: persistent media index reports ${index.errors.length} unreadable paths.`);
+            }
+            return index;
+        }).catch(error => {
+            state.promise = null;
+            if (signal?.aborted || error?.name === 'AbortError') throw error;
+            // Remember the failure for this gallery scan so a missing index is
+            // not requested again for every descendant directory.
+            state.unavailable = true;
+            console.warn('FolderFrame: persistent media index unavailable; scanning directory listings directly.', error);
+            return null;
+        });
+    }
+    return state.promise;
+}
+
+async function loadPersistentChunk(topFolder, signal) {
+    const index = await ensurePersistentManifest(signal);
+    if (!index) return null;
+    const descriptor = index.chunks[topFolder];
+    if (!descriptor || typeof descriptor.file !== 'string') return null;
+    const state = persistentManifestState;
+    if (state.chunks.has(topFolder)) return state.chunks.get(topFolder);
+    const promise = (async () => {
+        try {
+            const base = new URL('.', activeSource.manifestUrl);
+            const chunkUrl = new URL(descriptor.file, base);
+            if (chunkUrl.origin !== base.origin || !chunkUrl.pathname.startsWith(base.pathname) ||
+                chunkUrl.search || chunkUrl.hash) throw new Error('Unsafe persistent manifest chunk path');
+            // Chunk ownership follows the active gallery scan, not an individual
+            // album-cover observer that may scroll offscreen during the request.
+            const ownerSignal = scanSession?.signal || signal;
+            const chunk = await resilience.request(chunkUrl.href, {
+                signal: ownerSignal, timeout: DIRECTORY_TIMEOUT, cache: 'no-store', body: 'json'
+            });
+            if (!chunk || chunk.version !== PERSISTENT_MANIFEST_VERSION || chunk.root !== topFolder ||
+                !chunk.directories || typeof chunk.directories !== 'object' || Array.isArray(chunk.directories)) {
+                throw new Error('Invalid persistent manifest chunk');
+            }
+            return chunk;
+        } catch (error) {
+            if (scanSession?.signal?.aborted || (!scanSession && signal?.aborted) || error?.name === 'AbortError') {
+                state.chunks.delete(topFolder);
+                throw error;
+            }
+            // Keep the resolved null in the chunk cache for this scan so each
+            // descendant falls back directly without redownloading a bad chunk.
+            console.warn(`FolderFrame: media index chunk for “${topFolder}” is unavailable; scanning that subtree directly.`, error);
+            return null;
+        }
+    })();
+    state.chunks.set(topFolder, promise);
+    return promise;
+}
+
+async function persistentDirectoryListing(folder, signal) {
+    const normalized = safeManifestPath(folder, { allowEmpty: true });
+    if (normalized === null) return null;
+    const index = await ensurePersistentManifest(signal);
+    if (!index) return null;
+    if (!normalized) {
+        const listing = listingFromManifest(index.root, '');
+        if (!listing) console.warn('FolderFrame: persistent media index root is invalid; scanning the source directly.');
+        return listing;
+    }
+    const topFolder = normalized.split('/')[0];
+    const chunk = await loadPersistentChunk(topFolder, signal);
+    if (!chunk) return null;
+    const listing = listingFromManifest(chunk.directories[normalized], normalized);
+    if (!listing) console.warn(`FolderFrame: persistent media index has no valid record for “${normalized}”; scanning that directory directly.`);
+    return listing;
+}
 
 function getScanManifest() {
     const key = `folderframe.scan-manifest:v${SCAN_MANIFEST_VERSION}:${galleryConfig.baseUrl}:${activeSource.id}:${activeSource.url}`;
@@ -252,7 +512,7 @@ function loadDateCache() {
             const [file, value] = entry;
             // Cached metadata must never introduce URLs outside the selected source.
             if (!file.startsWith(activeSource.url) || !value || typeof value !== 'object') continue;
-            modifiedDateCache.set(file, { date: value.date, checked: value.checked });
+            modifiedDateCache.set(file, { date: value.date, size: value.size ?? null, checked: value.checked });
         }
         trimDateCache();
     } catch (error) {
@@ -276,6 +536,7 @@ let scannedFolders = 0, scannedFiles = 0;
 let mediaLoadId = 0;
 let mediaFailed = false;
 let imageReady = false;
+let reclassifiedVideoActive = false;
 
 // Cache only object URLs we create ourselves. Normal HTTP URLs are never revoked.
 let specialImagePool = null;
@@ -287,6 +548,7 @@ const img = $('gallery-image');
 const video = $('gallery-video');
 const mediaTitle = $('media-title');
 const mediaIndex = $('media-index');
+const btnRotate = $('btn-rotate');
 const btnResetZoom = $('btn-reset-zoom');
 const btnImageMode = $('btn-image-mode');
 const btnDownload = $('btn-download');
@@ -477,11 +739,12 @@ function updateControlStates() {
     syncPlayButton();
 }
 
-function updateMediaActions(filepath, filename) {
+function updateMediaActions(filepath, filename, forceVideo = false) {
     btnDownload.href = filepath;
     btnDownload.download = filename;
     btnDownload.setAttribute('aria-label', `Download ${filename}`);
-    const copyable = isImageFile(filepath);
+    const copyable = isImageFile(filepath) && !forceVideo;
+    btnRotate.disabled = true;
     btnCopyLink.disabled = true;
     const clipboardAvailable = window.isSecureContext && navigator.clipboard?.write && typeof ClipboardItem !== 'undefined';
     btnCopyLink.setAttribute('aria-label', copyable ? `Copy image ${filename}` : 'Copy Image is unavailable for video');
@@ -538,7 +801,7 @@ function syncPlayButton() {
 
 function clearImageBlobCache() { specialImagePool?.invalidate(); }
 function removeCacheEntry(filepath) { specialImagePool?.invalidate(filepath); }
-function detectImageFormat(arrayBuffer) {
+function detectContainer(arrayBuffer) {
     const b = new Uint8Array(arrayBuffer);
     if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'jpeg';
     if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 && b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a) return 'png';
@@ -555,10 +818,35 @@ function detectImageFormat(arrayBuffer) {
         for (let offset = 16; offset + 4 <= Math.min(b.length, 64); offset += 4) {
             brands.push(ascii(b, offset, offset + 4));
         }
-        const heifBrands = new Set(['heic','heix','hevc','hevx','heim','heis','mif1','msf1']);
+        const heifBrands = new Set(['heic','heix','hevc','hevx','heim','heis','mif1','msf1','avic']);
         if (brands.some(brand => heifBrands.has(brand))) return 'heic';
+        const quickTimeBrands = new Set(['qt  ','isom','iso2','mp41','mp42','m4v ','M4V ','avc1','hvc1','hev1','dash','msdh','M4A ','3gp4','3g2a']);
+        if (brands.some(brand => quickTimeBrands.has(brand))) return 'quicktime';
     }
     return 'unknown';
+}
+
+function reclassifiedContainerError(container, data) {
+    return Object.assign(new Error(`Media container is ${container}, not an image`), {
+        name: 'MediaReclassificationError', container, data
+    });
+}
+
+function isQuickTimeReclassification(error) {
+    return error?.name === 'MediaReclassificationError' && error.container === 'quicktime';
+}
+
+async function sniffContainer(filepath, signal) {
+    try {
+        const data = await resilience.request(filepath, {
+            signal, timeout: MEDIA_TIMEOUT, body: 'arrayBuffer', cache: 'no-store',
+            headers: { Range: 'bytes=0-63' }
+        });
+        return { container: detectContainer(data), data };
+    } catch (error) {
+        if (signal?.aborted || error.name === 'AbortError') throw error;
+        return { container: 'unknown', data: null };
+    }
 }
 
 function ascii(bytes, start, end) {
@@ -611,8 +899,9 @@ function getImagePool() {
     if (!specialImagePool) specialImagePool = resilience.createImagePool({
         download: (file, signal) => resilience.request(file, { signal, timeout: MEDIA_TIMEOUT, body: 'arrayBuffer', cache: 'no-store' }),
         decode: async data => {
-            const format = detectImageFormat(data);
+            const format = detectContainer(data);
             if (['jpeg', 'png', 'webp', 'gif'].includes(format)) return new Blob([data], { type: mimeForFormat(format) });
+            if (format === 'quicktime') throw reclassifiedContainerError('quicktime', data);
             if (format !== 'heic') throw new Error('Unknown or corrupt image format');
             const decodeHeic = await loadHeicDecoder();
             const result = await decodeHeic({ blob: new Blob([data], { type: 'image/heic' }), toType: 'image/jpeg', quality: 0.92 });
@@ -635,7 +924,11 @@ async function scanDirectory(folder = currentFolder, options = {}) {
     const url = currentDirectoryUrl(folder);
     const normalized = folder.split('/').filter(Boolean).join('/');
     let directoryMtime = null;
-    if (activeSource.scanCache) {
+    if (!options.bypassCache && activeSource.manifestUrl) {
+        const indexed = await persistentDirectoryListing(normalized, options.signal);
+        if (indexed) return indexed;
+    }
+    if (!options.bypassCache && activeSource.scanCache) {
         const manifest = getScanManifest();
         const cached = manifest.directories[normalized];
         directoryMtime = await directoryModifiedTime(url, options.signal);
@@ -666,14 +959,14 @@ async function scanDirectory(folder = currentFolder, options = {}) {
     const folderNames = Array.from(folders)
         .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 
-    if (activeSource.scanCache) {
+    if (!options.bypassCache && activeSource.scanCache) {
         const manifest = getScanManifest();
         manifest.directories[normalized] = {
             path: normalized, mtime: directoryMtime, checked: Date.now(),
             files: filePaths.map(path => {
                 const metadata = modifiedDateCache.get(path);
                 return { path, mtime: metadata?.date ?? null, size: metadata?.size ?? null,
-                    thumbnailPath: settingsApi.thumbnailUrl(activeSource, path) };
+                    thumbnailPath: persistentThumbnailUrl(path) };
             }),
             folders: folderNames
         };
@@ -683,12 +976,12 @@ async function scanDirectory(folder = currentFolder, options = {}) {
     return { filePaths, folderNames };
 }
 
-async function scanDirectoryRecursive(folder = currentFolder, visited = new Set(), listing = null, signal, onBatch = null) {
+async function scanDirectoryRecursive(folder = currentFolder, visited = new Set(), listing = null, signal, onBatch = null, options = {}) {
     const normalized = folder.split('/').filter(Boolean).join('/');
     if (signal?.aborted) throw resilience.abortError();
     if (visited.has(normalized)) return { files: [], failedFolders: [] };
     visited.add(normalized);
-    const { filePaths, folderNames } = listing || await scanDirectory(normalized, { signal });
+    const { filePaths, folderNames } = listing || await scanDirectory(normalized, { signal, bypassCache: options.bypassCache });
     const result = { files: [...filePaths], failedFolders: [] };
     scannedFolders++; scannedFiles += filePaths.length;
     setScanProgress(`Scanning… ${scannedFolders} folders checked · ${scannedFiles} files found`);
@@ -697,7 +990,7 @@ async function scanDirectoryRecursive(folder = currentFolder, visited = new Set(
         if (signal?.aborted) throw resilience.abortError();
         const path = normalized ? normalized + '/' + child : child;
         try {
-            const nested = await scanDirectoryRecursive(path, visited, null, signal, onBatch);
+            const nested = await scanDirectoryRecursive(path, visited, null, signal, onBatch, options);
             result.files.push(...nested.files);
             result.failedFolders.push(...nested.failedFolders);
         } catch (error) {
@@ -826,9 +1119,11 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
     thumbnailGrid.setAttribute('aria-busy', 'true');
     btnRefreshGrid.disabled = true; $('btn-sort').disabled = true;
     $('scan-loading').hidden = false;
-    setScanStatus(mediaFiles.length || subfolders.length ? 'Refreshing folders…' : 'Scanning folders…');
+    if (activeSource.manifestUrl && !forceCacheClear) resetPersistentManifest();
+    setScanStatus(activeSource.manifestUrl && !forceCacheClear ? 'Loading media index…' :
+        (mediaFiles.length || subfolders.length ? 'Refreshing folders…' : 'Scanning folders…'));
     try {
-        const listing = await scanDirectory(folder, { signal: session.signal });
+        const listing = await scanDirectory(folder, { signal: session.signal, bypassCache: forceCacheClear });
         // Publish a bounded first batch as soon as the current directory is known.
         // Recursive discovery and final sorting continue below; viewer refreshes stay atomic.
         const progressive = mode === 'all' && isGridViewActive && !silent;
@@ -856,7 +1151,7 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
             ? await scanDirectoryRecursive(folder, new Set(), listing, session.signal, async files => {
                 for (const file of files) if (!discovered.has(file)) { discovered.add(file); unpublished++; }
                 await publishDiscovered(false);
-            })
+            }, { bypassCache: forceCacheClear })
             : { files: listing.filePaths, failedFolders: [] };
         if (!current()) return;
         await publishDiscovered(true);
@@ -948,6 +1243,7 @@ function watchThumbnail(element, item, videoThumbnail = false) {
     const finish = () => {
         clearTimeout(timer);
         if (session?.controller.signal.aborted || element.resourceActive === false) return;
+        element.thumbnailSettled = true;
         item.classList.remove('thumb-loading'); element.classList.add('thumb-loaded');
     };
     element.onload = finish;
@@ -962,8 +1258,8 @@ function watchThumbnail(element, item, videoThumbnail = false) {
         if (element.fallbackSrc) {
             const fallbackSrc = element.fallbackSrc;
             element.fallbackSrc = null;
-            element.startDeadline();
-            element.src = fallbackSrc;
+            if (element.queueImageSource) element.queueImageSource(fallbackSrc);
+            else { element.startDeadline(); element.src = fallbackSrc; }
             return;
         }
         finish();
@@ -984,6 +1280,8 @@ function watchThumbnail(element, item, videoThumbnail = false) {
     if (videoThumbnail) element.startDeadline();
     const cleanup = () => {
         clearTimeout(timer);
+        element.queueImageSource = null;
+        element.thumbnailSettled = false;
         element.onload = element.onerror = element.onloadeddata = element.onloadedmetadata = null;
         element.pause?.(); clearMediaSource(element);
     };
@@ -1008,7 +1306,7 @@ function showWarning(show) {
     $('warning-open-source').hidden = confirmedAlbumState;
     $('warning-open-source').href = activeSource.url;
 }
-function isPhotoActive() { return mediaFiles[currentIndex] ? isImageFile(mediaFiles[currentIndex]) : false; }
+function isPhotoActive() { return mediaFiles[currentIndex] ? isImageFile(mediaFiles[currentIndex]) && !reclassifiedVideoActive : false; }
 
 function renderBreadcrumb() {
     breadcrumb.innerHTML = '';
@@ -1127,11 +1425,23 @@ function renderGridView() {
         const state = observed.get(el);
         if (!state) return;
         if (!visible) {
+            if (!state.heic && !el.thumbnailSettled && state.controller) {
+                el.resourceActive = false;
+                el.cancelDeadline();
+                state.controller.abort(); state.controller = null;
+                clearMediaSource(el);
+                el.classList.remove('thumb-loaded');
+            }
             if (state.heic) {
                 el.resourceActive = false;
                 el.cancelDeadline();
                 clearMediaSource(el); state.controller?.abort(); state.controller = null;
                 el.classList.remove('thumb-loaded');
+                state.video?.thumbnailCleanup?.();
+                if (state.video) session.cleanups.delete(state.video.thumbnailCleanup);
+                state.video?.remove(); state.video = null;
+                if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
+                state.objectUrl = null; el.style.display = '';
             }
             return;
         }
@@ -1139,29 +1449,55 @@ function renderGridView() {
         el.resourceActive = true;
         const owner = new AbortController();
         state.controller = owner;
+        el.thumbnailSettled = false;
+        el.queueImageSource = source => queueNativeImageSource(el, source, owner.signal, {
+            priority: NATIVE_IMAGE_PRIORITY.grid,
+            onStart: el.startDeadline
+        });
         if (state.heic) {
-            const generated = settingsApi.thumbnailUrl(activeSource, state.file);
+            const useSpecialImage = () => getSpecialImageURL(state.file, owner.signal, 'thumbnail').then(url => {
+                if (!owner.signal.aborted) el.queueImageSource(url);
+            }).catch(error => {
+                if (owner.signal.aborted || error.name === 'AbortError') return;
+                if (!isQuickTimeReclassification(error)) throw error;
+                const objectUrl = URL.createObjectURL(new Blob([error.data], { type: 'video/quicktime' }));
+                const vid = document.createElement('video');
+                state.objectUrl = objectUrl; state.video = vid;
+                watchThumbnail(vid, state.item, true);
+                vid.preload = 'metadata'; vid.disablePictureInPicture = true;
+                vid.muted = true; vid.playsInline = true;
+                el.style.display = 'none';
+                state.item.insertBefore(vid, el);
+                state.item.mediaElement = vid;
+                if (!state.item.querySelector('.video-badge')) {
+                    const badge = document.createElement('div');
+                    badge.className = 'video-badge';
+                    badge.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>';
+                    state.item.appendChild(badge);
+                }
+                vid.src = objectUrl;
+            });
+            const generated = persistentThumbnailUrl(state.file);
             if (generated) {
-                el.generatedFallback = () => getSpecialImageURL(state.file, owner.signal, 'thumbnail').then(url => {
-                    if (!owner.signal.aborted) { el.startDeadline(); el.src = url; }
-                });
-                el.startDeadline(); el.src = generated;
-            } else getSpecialImageURL(state.file, owner.signal, 'thumbnail').then(url => {
-                if (!owner.signal.aborted) { el.startDeadline(); el.src = url; }
-            }).catch(error => { if (!owner.signal.aborted && error.name !== 'AbortError') el.onerror?.(); });
+                el.generatedFallback = useSpecialImage;
+                el.queueImageSource(generated);
+            } else useSpecialImage().catch(() => el.onerror?.());
         } else {
-            const generated = settingsApi.thumbnailUrl(activeSource, state.file);
+            const generated = persistentThumbnailUrl(state.file);
             el.fallbackSrc = generated ? state.file : null;
-            el.startDeadline(); el.src = generated || state.file;
+            el.queueImageSource(generated || state.file);
         }
     };
     if ('IntersectionObserver' in window) session.observer = new IntersectionObserver(entries => {
         if (session.controller.signal.aborted) return;
         entries.forEach(entry => updateThumbnail(entry.target, entry.isIntersecting));
     }, { root: gridViewContainer, rootMargin: '300px' });
-    const observeImage = (el, file, heic = false) => {
-        const state = { file, heic, controller: null, cleanup: null };
-        state.cleanup = () => state.controller?.abort();
+    const observeImage = (el, file, heic = false, item = null) => {
+        const state = { file, heic, item, controller: null, video: null, objectUrl: null, cleanup: null };
+        state.cleanup = () => {
+            state.controller?.abort(); state.video?.thumbnailCleanup?.();
+            if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
+        };
         observed.set(el, state);
         session.cleanups.add(state.cleanup);
         if (session.observer) session.observer.observe(el);
@@ -1200,7 +1536,7 @@ function renderGridView() {
             imgEl.decoding = 'async';
             imgEl.dataset.heicSrc = file;
             imgEl.className = 'heic-thumb';
-            observeImage(imgEl, file, true);
+            observeImage(imgEl, file, true, item);
             item.mediaElement = imgEl;
             item.appendChild(imgEl);
             const fallback = document.createElement('div');
@@ -1210,7 +1546,7 @@ function renderGridView() {
         } else {
             const imgEl = document.createElement('img');
             watchThumbnail(imgEl, item);
-            observeImage(imgEl, file);
+            observeImage(imgEl, file, false, item);
             imgEl.alt = filename;
             imgEl.draggable = false;
             imgEl.loading = 'lazy';
@@ -1429,6 +1765,7 @@ function showMedia(index) {
     };
     mediaFailed = false;
     imageReady = false;
+    reclassifiedVideoActive = false;
     cancelSlideshowTimer();
     currentIndex = (index + mediaFiles.length) % mediaFiles.length;
     const filepath = mediaFiles[currentIndex];
@@ -1437,7 +1774,9 @@ function showMedia(index) {
         ? settingsApi.relativeMediaPath(activeSource, filepath)
         : filename;
 
+    imageRotation = 0;
     resetZoomAndPan();
+    applyImageRotation();
     setMediaLoading(isHeicFile(filepath) ? 'Preparing HEIC image…' : isImageFile(filepath) ? 'Loading image…' : 'Loading video…');
     videoErrorOverlay.style.display = 'none';
     img.onload = null; img.onerror = null; img.style.display = 'none'; img.src = '';
@@ -1449,51 +1788,28 @@ function showMedia(index) {
     mediaIndex.textContent = `${currentIndex + 1} / ${mediaFiles.length}`;
     updateMediaActions(filepath, filename);
 
-    if (isImageFile(filepath)) {
-        if (!isHeicFile(filepath)) watch();
-        img.classList.remove('mode-fit', 'mode-original');
-        img.classList.add(imageMode === 'fit' ? 'mode-fit' : 'mode-original');
-        container.classList.add('grab-mode');
-        img.onload = () => {
-            if (!isCurrent() || mediaFailed) return;
-            clearWatchdog();
-            imageReady = true;
-            const clipboardAvailable = window.isSecureContext && navigator.clipboard?.write && typeof ClipboardItem !== 'undefined';
-            btnCopyLink.disabled = !showCopyButton || !clipboardAvailable;
-            btnCopyLink.title = clipboardAvailable ? 'Copy displayed image' : 'Copy Image requires HTTPS or a trusted local context';
-            setMediaLoading();
-            img.style.display = 'block'; mediaTitle.textContent = displayName;
-            if (slideshowPlaying) startSlideshowTimer();
-        };
-        img.onerror = () => { if (isCurrent()) showMediaError('image', filepath); };
-
-        if (isHeicFile(filepath)) {
-            mediaTitle.textContent = `${displayName} (Preparing…)`;
-            getSpecialImageURL(filepath, session.controller.signal)
-                .then(url => { if (isCurrent()) { watch(); img.src = url; } })
-                .catch(err => {
-                    if (!isCurrent() || err.name === 'AbortError') return;
-                    console.error('HEIC/HEIF image handling failed:', err);
-                    if (isCurrent()) showMediaError('heic', filepath, err);
-                });
-        } else {
-            img.src = filepath;
-        }
-    } else {
+    const playVideoSource = (source, livePhoto = false, objectUrl = null) => {
+        if (!isCurrent()) { if (objectUrl) URL.revokeObjectURL(objectUrl); return; }
+        clearWatchdog();
+        img.onload = null; img.onerror = null; img.src = ''; img.style.display = 'none';
         container.classList.remove('grab-mode');
+        reclassifiedVideoActive = livePhoto;
+        if (livePhoto) {
+            mediaTitle.textContent = `${displayName} (Live Photo motion)`;
+            updateMediaActions(filepath, filename, true);
+        }
+        if (objectUrl) session.controller.signal.addEventListener('abort', () => URL.revokeObjectURL(objectUrl), { once: true });
         watch();
-        video.src = filepath;
+        video.src = source;
         video.style.display = 'block';
         video.controls = controlsEnabled && !tvModeEnabled;
         video.muted = !controlsEnabled;
         video.onwaiting = video.onstalled = () => { if (isCurrent() && !mediaFailed && !video.paused) { setMediaLoading('Buffering video…'); watch(); } };
         video.onpause = clearWatchdog;
         video.oncanplay = video.onplaying = () => { if (isCurrent() && !mediaFailed) { clearWatchdog(); setMediaLoading(); } };
-        video.onerror = () => {
-            if (isCurrent()) showMediaError('video', filepath, video.error);
-        };
+        video.onerror = () => { if (isCurrent()) showMediaError(livePhoto ? 'live-photo' : 'video', filepath, video.error); };
         video.play().catch(err => {
-            if (isCurrent() && !mediaFailed && err.name !== 'AbortError') showMediaError('video', filepath, err);
+            if (isCurrent() && !mediaFailed && err.name !== 'AbortError') showMediaError(livePhoto ? 'live-photo' : 'video', filepath, err);
         });
         video.onended = () => { if (isCurrent() && slideshowPlaying) nextSlideshowMedia(); };
         video.ontimeupdate = () => {
@@ -1503,6 +1819,61 @@ function showMedia(index) {
         };
         cancelSlideshowTimer();
         progressBar.style.width = '0%';
+    };
+
+    if (isImageFile(filepath)) {
+        img.classList.remove('mode-fit', 'mode-original');
+        img.classList.add(imageMode === 'fit' ? 'mode-fit' : 'mode-original');
+        container.classList.add('grab-mode');
+        img.onload = () => {
+            if (!isCurrent() || mediaFailed) return;
+            clearWatchdog();
+            imageReady = true;
+            btnRotate.disabled = false;
+            const clipboardAvailable = window.isSecureContext && navigator.clipboard?.write && typeof ClipboardItem !== 'undefined';
+            btnCopyLink.disabled = !showCopyButton || !clipboardAvailable;
+            btnCopyLink.title = clipboardAvailable ? 'Copy displayed image' : 'Copy Image requires HTTPS or a trusted local context';
+            setMediaLoading();
+            img.style.display = 'block'; mediaTitle.textContent = displayName;
+            applyImageRotation();
+            if (slideshowPlaying) startSlideshowTimer();
+        };
+        img.onerror = async () => {
+            if (!isCurrent()) return;
+            const sniffed = await sniffContainer(filepath, session.controller.signal).catch(error => {
+                if (error.name !== 'AbortError') console.warn('FolderFrame: media sniff failed.', filepath, error);
+                return null;
+            });
+            if (!isCurrent()) return;
+            if (sniffed?.container === 'quicktime') playVideoSource(filepath, true);
+            else showMediaError('image', filepath);
+        };
+
+        if (isHeicFile(filepath)) {
+            mediaTitle.textContent = `${displayName} (Preparing…)`;
+            getSpecialImageURL(filepath, session.controller.signal)
+                .then(url => {
+                    if (isCurrent()) queueNativeImageSource(img, url, session.controller.signal, {
+                        priority: NATIVE_IMAGE_PRIORITY.viewer, onStart: watch
+                    });
+                })
+                .catch(err => {
+                    if (!isCurrent() || err.name === 'AbortError') return;
+                    if (isQuickTimeReclassification(err)) {
+                        const objectUrl = URL.createObjectURL(new Blob([err.data], { type: 'video/quicktime' }));
+                        playVideoSource(objectUrl, true, objectUrl);
+                        return;
+                    }
+                    console.error('HEIC/HEIF image handling failed:', err);
+                    if (isCurrent()) showMediaError('heic', filepath, err);
+                });
+        } else {
+            queueNativeImageSource(img, filepath, session.controller.signal, {
+                priority: NATIVE_IMAGE_PRIORITY.viewer, onStart: watch
+            });
+        }
+    } else {
+        playVideoSource(filepath);
     }
     savePreferences();
 }
@@ -1522,7 +1893,11 @@ function showMediaError(kind, filepath, error) {
     let title = 'This image could not be opened';
     let message = 'The file may be unavailable, damaged, or in a format this browser cannot display.';
     let guidance = 'Retry after checking your connection, or open the original file to check it. Exporting a new JPEG or PNG copy may help.';
-    if (kind === 'heic' || isHeicFile(filepath)) {
+    if (kind === 'live-photo') {
+        title = 'This Apple Live Photo motion clip could not be played';
+        message = 'This file is QuickTime / HEVC video even though its filename looks like an image. This browser may not support its HEVC codec.';
+        guidance = 'Open the original in an Apple-compatible player, or view the matching still image if it is present. Your original file is unchanged.';
+    } else if (kind === 'heic' || (isHeicFile(filepath) && kind !== 'video')) {
         title = 'This HEIC / HEIF image could not be opened';
         message = 'FolderFrame could not prepare this image for your browser. The file may use an unsupported HEIC variant or be damaged.';
         guidance = 'Try opening the original in your photo app and exporting a JPEG or PNG copy. Your original file is unchanged.';
@@ -1597,6 +1972,22 @@ function applyTransform() {
     container.classList.toggle('grabbing-mode', changed);
 }
 function resetZoomAndPan() { cancelTouchGesture(); zoom = 1.0; panX = 0; panY = 0; applyTransform(); }
+function applyImageRotation() {
+    let fitScale = 1;
+    if (imageRotation % 180 && imageMode === 'fit' && img.clientWidth && img.clientHeight && viewport.clientWidth && viewport.clientHeight) {
+        fitScale = Math.min(1, viewport.clientWidth / img.clientHeight, viewport.clientHeight / img.clientWidth);
+    }
+    img.style.transform = `rotate(${imageRotation}deg) scale(${fitScale})`;
+    img.style.transformOrigin = 'center center';
+    btnRotate.setAttribute('aria-label', `Rotate photo clockwise. Current rotation: ${imageRotation} degrees`);
+    btnRotate.title = `Rotate photo 90° clockwise (currently ${imageRotation}°)`;
+}
+function rotateImage() {
+    if (!isPhotoActive() || mediaFailed) return;
+    imageRotation = (imageRotation + 90) % 360;
+    resetZoomAndPan();
+    applyImageRotation();
+}
 
 function toggleImageMode() {
     imageMode = imageMode === 'fit' ? 'original' : 'fit';
@@ -1605,6 +1996,7 @@ function toggleImageMode() {
         img.classList.remove('mode-fit', 'mode-original');
         img.classList.add(imageMode === 'fit' ? 'mode-fit' : 'mode-original');
         resetZoomAndPan();
+        applyImageRotation();
     }
     savePreferences();
 }
@@ -1660,6 +2052,7 @@ function setupEventListeners() {
     btnTvMode.addEventListener('click', toggleTvMode);
     navLeft.addEventListener('click', prevMedia);
     navRight.addEventListener('click', nextMedia);
+    btnRotate.addEventListener('click', rotateImage);
     btnResetZoom.addEventListener('click', resetZoomAndPan);
     btnImageMode.addEventListener('click', toggleImageMode);
     btnCopyLink.addEventListener('click', copyCurrentImage);
@@ -1733,6 +2126,7 @@ function setupEventListeners() {
     });
 
     window.addEventListener('mousemove', () => { if (!isGridViewActive) resetIdleTimer(); });
+    window.addEventListener('resize', () => { if (!isGridViewActive && isPhotoActive()) applyImageRotation(); });
     window.addEventListener('click', event => {
         if (!event.target?.closest?.('#viewer-options')) setViewerOptionsOpen(false);
         if (!isGridViewActive) resetIdleTimer();
