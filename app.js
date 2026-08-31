@@ -1037,7 +1037,7 @@ function renderGridView() {
         else updateThumbnail(el, true);
     };
 
-    const appendMediaBatch = (start, end) => mediaFiles.slice(start, end).forEach((file, offset) => {
+    const appendMediaBatch = (start, end, target = thumbnailGrid) => mediaFiles.slice(start, end).forEach((file, offset) => {
         const index = start + offset;
         const filename = decodeURIComponent(file.split('/').pop());
         const item = document.createElement('button');
@@ -1098,10 +1098,24 @@ function renderGridView() {
         }
         item.appendChild(caption);
         item.addEventListener('click', () => enterFullScreenViewer(index));
-        thumbnailGrid.appendChild(item);
+        target.appendChild(item);
     });
 
     const virtualized = mediaFiles.length > GRID_BATCH_SIZE;
+    const virtualWindow = document.createElement('div');
+    virtualWindow.className = 'virtual-window';
+    let topSpacer = null, bottomSpacer = null;
+    if (virtualized) {
+        topSpacer = document.createElement('div');
+        topSpacer.className = 'virtual-spacer';
+        topSpacer.setAttribute('aria-hidden', 'true');
+        bottomSpacer = document.createElement('div');
+        bottomSpacer.className = 'virtual-spacer';
+        bottomSpacer.setAttribute('aria-hidden', 'true');
+        thumbnailGrid.appendChild(topSpacer);
+    }
+    thumbnailGrid.appendChild(virtualWindow);
+    if (virtualized) thumbnailGrid.appendChild(bottomSpacer);
     const gridMetrics = () => {
         const width = thumbnailGrid.clientWidth || gridViewContainer.clientWidth || 1200;
         const min = width <= 560 ? Math.max(120, (width - 36) / 2) : width <= 900 ? 140 : 180;
@@ -1116,31 +1130,31 @@ function renderGridView() {
         return Math.ceil(count / columns) * rowHeight;
     };
     const renderMediaWindow = (start, end) => {
+        const preservedScrollTop = gridViewContainer.scrollTop;
+        document.activeElement?.closest?.('.media-tile')?.blur?.();
         session.cleanups.forEach(cleanup => cleanup());
         session.cleanups.length = 0;
         session.observer?.disconnect();
         observed.forEach(state => state.controller?.abort());
         observed.clear();
-        thumbnailGrid.querySelectorAll?.('.media-tile, .virtual-spacer').forEach(item => item.remove());
-        if (start) {
-            const spacer = document.createElement('div');
-            spacer.className = 'virtual-spacer';
-            spacer.style.height = estimateSpacerHeight(start) + 'px';
-            spacer.setAttribute('aria-hidden', 'true');
-            thumbnailGrid.appendChild(spacer);
-        }
         if ('IntersectionObserver' in window) session.observer = new IntersectionObserver(entries => {
             if (session.controller.signal.aborted) return;
             entries.forEach(entry => updateThumbnail(entry.target, entry.isIntersecting));
         }, { root: gridViewContainer, rootMargin: '300px' });
-        appendMediaBatch(start, end);
-        if (end < mediaFiles.length) {
-            const spacer = document.createElement('div');
-            spacer.className = 'virtual-spacer';
-            spacer.style.height = estimateSpacerHeight(mediaFiles.length - end) + 'px';
-            spacer.setAttribute('aria-hidden', 'true');
-            thumbnailGrid.appendChild(spacer);
+        const fragment = document.createDocumentFragment();
+        appendMediaBatch(start, end, fragment);
+        if (virtualized) {
+            topSpacer.hidden = !start;
+            topSpacer.style.height = start ? estimateSpacerHeight(start) + 'px' : '0px';
+            bottomSpacer.hidden = end >= mediaFiles.length;
+            bottomSpacer.style.height = end < mediaFiles.length
+                ? estimateSpacerHeight(mediaFiles.length - end) + 'px'
+                : '0px';
         }
+        // Persistent spacers keep the scroll geometry mounted while one
+        // fragment operation atomically replaces only the live media tiles.
+        virtualWindow.replaceChildren(fragment);
+        gridViewContainer.scrollTop = preservedScrollTop;
         gridVirtualizer.start = start;
         gridVirtualizer.end = end;
     };

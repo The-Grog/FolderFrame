@@ -1033,7 +1033,7 @@ test('thumbnail success and failure settle the placeholder without disabling the
 test('generated grid thumbnails fall back to originals without failing the tile', async () => {
     const config = { sources: [{ id: 'photos', label: 'Photos', path: 'photos/', thumbnailPath: 'thumbs/' }] };
     const app = await boot({ config });
-    let tile = app.get('thumbnail-grid').children[0];
+    let tile = app.get('thumbnail-grid').querySelectorAll('.media-tile')[0];
     let image = tile.children[0];
     assert.equal(image.src, 'https://example.test/frame/thumbs/photo.jpg.webp');
     image.onerror();
@@ -1051,7 +1051,9 @@ test('large grids render incrementally and keep a bounded media-tile DOM window'
     const grid = app.get('thumbnail-grid');
     const mediaCount = () => grid.querySelectorAll('.media-tile').length;
     assert.equal(mediaCount(), 100);
-    assert.equal(grid.querySelectorAll('.virtual-spacer').length, 1);
+    assert.equal(grid.querySelectorAll('.virtual-spacer').length, 2);
+    const initialSpacers = grid.querySelectorAll('.virtual-spacer');
+    const virtualWindow = grid.querySelectorAll('.virtual-window')[0];
     const container = app.get('grid-view-container');
     container.clientHeight = 900;
     app.get('thumbnail-grid').clientWidth = 1200;
@@ -1062,9 +1064,19 @@ test('large grids render incrementally and keep a bounded media-tile DOM window'
     const forwardStart = vm.runInContext('gridVirtualizer.start', app.context);
     assert.ok(forwardStart > 0);
     container.scrollTop = 500000;
+    const replaceWindow = virtualWindow.replaceChildren.bind(virtualWindow);
+    virtualWindow.replaceChildren = (...nodes) => {
+        // Simulate a browser attempting to clamp scrollTop during a live
+        // window replacement. FolderFrame must preserve the requested offset.
+        container.scrollTop = 0;
+        replaceWindow(...nodes);
+    };
     container.listeners.scroll();
+    assert.equal(container.scrollTop, 500000);
     assert.ok(vm.runInContext('gridVirtualizer.start', app.context) > forwardStart);
     assert.ok(mediaCount() <= 300);
+    assert.equal(grid.querySelectorAll('.virtual-spacer')[0], initialSpacers[0]);
+    assert.equal(grid.querySelectorAll('.virtual-spacer')[1], initialSpacers[1]);
     container.scrollTop = 0;
     container.scrollHeight = 1000000;
     container.listeners.scroll();
@@ -1279,8 +1291,32 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
             return this.children.filter(child => classes.some(name => (child.className || '').split(/\s+/).includes(name)));
         }
         setAttribute() {}
-        appendChild(child) { child.parentNode = this; this.children.push(child); return child; }
-        replaceChildren() { this.children = []; }
+        appendChild(child) {
+            if (child.isFragment) {
+                [...child.children].forEach(node => this.appendChild(node));
+                child.children = [];
+                return child;
+            }
+            child.parentNode = this; this.children.push(child); return child;
+        }
+        replaceChildren(...nodes) {
+            this.children.forEach(child => { child.parentNode = null; });
+            this.children = [];
+            nodes.forEach(node => this.appendChild(node));
+        }
+        querySelectorAll(selector) {
+            const classes = selector.split(',').map(part => {
+                const name = part.trim();
+                return name.startsWith('.') ? name.slice(1) : name;
+            });
+            const matches = [];
+            this.children.forEach(child => {
+                const childClasses = String(child.className || '').split(' ').filter(Boolean);
+                if (classes.some(name => childClasses.includes(name))) matches.push(child);
+                if (child.querySelectorAll) matches.push(...child.querySelectorAll(selector));
+            });
+            return matches;
+        }
         remove() {
             if (this.parentNode) this.parentNode.children = this.parentNode.children.filter(child => child !== this);
             this.parentNode = null;
@@ -1306,7 +1342,9 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
         window: { FolderFrameSettings: api, isSecureContext: true, addEventListener(name, fn) { listeners[name] = fn; },
             history: { state: null, pushState(state, title, url) { this.state = state; historyCalls.push.push(String(url)); },
                 replaceState(state, title, url) { this.state = state; historyCalls.replace.push(String(url)); } } },
-        document: { getElementById: get, createElement: () => new Element(), querySelectorAll: () => sourceLabels,
+        document: { getElementById: get, createElement: () => new Element(),
+            createDocumentFragment: () => { const fragment = new Element(); fragment.isFragment = true; return fragment; },
+            querySelectorAll: () => sourceLabels,
             addEventListener() {}, body: new Element(), hidden: false },
         location: { href: base + search, search, assign(url) { this.assigned = url; } },
         localStorage: { getItem(key) { if (storageBlocked) throw new Error('Blocked'); return saved.get(key) || null; },
