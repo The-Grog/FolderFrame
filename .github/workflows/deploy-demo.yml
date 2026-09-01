@@ -5,7 +5,10 @@ on:
     branches:
       - main
     paths:
+      - ".github/workflows/deploy-demo.yml"
       - "demo-photos/**"
+      - "docs/images/folderframe-icon.png"
+      - "docs/images/folderframe-logo.png"
       - "app.js"
       - "settings.js"
       - "resilience.js"
@@ -52,13 +55,16 @@ jobs:
       - name: Assemble static demo
         shell: bash
         run: |
-          mkdir -p _site
+          mkdir -p _site/docs/images
           cp index.html app.js settings.js resilience.js styles.css heic2any.min.js _site/
+          cp docs/images/folderframe-logo.png docs/images/folderframe-icon.png _site/docs/images/
           cp -R demo-photos demo-thumbnails demo-manifest _site/
           printf '%s\n' 'demo.folderframe.com' > _site/CNAME
           python - <<'PY'
+          import html
           import json
           from pathlib import Path
+          from urllib.parse import quote
 
           source_path = Path("folderframe.config.json")
           config = json.loads(source_path.read_text(encoding="utf-8"))
@@ -78,15 +84,38 @@ jobs:
               json.dumps(config, indent=2) + "\n",
               encoding="utf-8",
           )
+
+          # GitHub Pages does not generate directory indexes. FolderFrame's
+          # explicit refresh/retry path scans HTML links, so provide static
+          # listings in the deployed demo without changing the source tree.
+          media_root = Path("_site/demo-photos")
+          directories = sorted(
+              (path for path in media_root.rglob("*") if path.is_dir()),
+              key=lambda path: path.as_posix(),
+              reverse=True,
+          )
+          for directory in directories + [media_root]:
+              links = []
+              for child in sorted(directory.iterdir(), key=lambda path: path.name.casefold()):
+                  if child.name == "index.html" or child.name.startswith("."):
+                      continue
+                  href = quote(child.name) + ("/" if child.is_dir() else "")
+                  label = child.name + ("/" if child.is_dir() else "")
+                  links.append(f'<li><a href="{href}">{html.escape(label)}</a></li>')
+              listing = "<!doctype html><meta charset=utf-8><ul>" + "".join(links) + "</ul>\n"
+              (directory / "index.html").write_text(listing, encoding="utf-8")
           PY
 
       - name: Verify static demo
         shell: bash
         run: |
           test -s _site/index.html
+          test -s _site/docs/images/folderframe-logo.png
+          test -s _site/docs/images/folderframe-icon.png
           test -s _site/folderframe.config.json
           test -s _site/demo-manifest/index.json
           test -d _site/demo-thumbnails
+          test -s _site/demo-photos/index.html
           python - <<'PY'
           import json
           from pathlib import Path
@@ -99,6 +128,13 @@ jobs:
           assert source["scanCache"] is True
           manifest = json.loads(Path("_site/demo-manifest/index.json").read_text())
           assert manifest["version"] == 1
+          root_listing = Path("_site/demo-photos/index.html").read_text()
+          assert 'href="Architecture/"' in root_listing
+          assert 'href="Landscapes/"' in root_listing
+          assert 'href="Space/"' in root_listing
+          for directory in [Path("_site/demo-photos"), *Path("_site/demo-photos").rglob("*")]:
+              if directory.is_dir():
+                  assert (directory / "index.html").is_file()
           PY
 
       - name: Configure GitHub Pages
