@@ -13,6 +13,8 @@
 .returned-tile { outline:3px solid #93c5fd; outline-offset:-3px; }
 .loading-note { position:absolute; bottom:15%; left:50%; transform:translateX(-50%); z-index:6; display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:20px; background:rgba(15,23,42,.9); color:#cbd5e1; font-size:13px; max-width:90%; pointer-events:none; }
 .scan-loading { display:flex; align-items:center; gap:10px; padding:12px 20px; color:#94a3b8; font-size:13px; flex-shrink:0; }
+.scan-progress-track { flex:1 1 120px; max-width:220px; height:4px; border-radius:2px; background:rgba(255,255,255,.12); overflow:hidden; }
+.scan-progress-fill { height:100%; width:0%; background:#3b82f6; border-radius:2px; transition:width .3s ease; }
 .loading-spinner { display:inline-block; flex:0 0 16px; width:16px; height:16px; border:2px solid #475569; border-top-color:#93c5fd; border-radius:50%; animation:loading-spin 1s linear infinite; }
 @keyframes loading-spin { to { transform:rotate(360deg); } }
 .thumb-loading::after { content:''; position:absolute; inset:0; background:linear-gradient(110deg,#111827 20%,#263449 45%,#111827 70%); background-size:200% 100%; animation:thumbnail-shimmer 1.8s ease-in-out infinite; pointer-events:none; z-index:2; }
@@ -158,7 +160,7 @@ button, select, .media-error-actions a { touch-action:manipulation; }
 }
 .grid-actions { flex-shrink:0; }
 .scan-status { font-size:11px; color:#777; min-width:72px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }
-#thumbnail-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:18px; padding:116px 20px 40px; }
+#thumbnail-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(var(--grid-tile-min,180px),1fr)); gap:18px; padding:116px 20px 40px; }
 .grid-item { position:relative; aspect-ratio:1/1; border-radius:12px; overflow:hidden; background:#111; border:1px solid rgba(255,255,255,.08); cursor:pointer; transition:transform .2s,border-color .2s,box-shadow .2s; color:inherit; padding:0; }
 .grid-item:hover { transform:scale(1.025); border-color:rgba(59,130,246,.55); box-shadow:0 10px 22px rgba(0,0,0,.5); }
 .virtual-spacer { grid-column:1 / -1; width:100%; pointer-events:none; }
@@ -215,14 +217,14 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     .nav-arrow { width:48px; height:48px; }
     #nav-left { left:10px; } #nav-right { right:10px; }
     #help-hint { display:none!important; }
-    #thumbnail-grid { grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:12px; padding:182px 12px 30px; }
+    #thumbnail-grid { grid-template-columns:repeat(auto-fill,minmax(calc(var(--grid-tile-min,180px) * 0.778),1fr)); gap:12px; padding:182px 12px 30px; }
     #grid-header { top:8px; left:8px; right:8px; padding:10px 12px; }
     .grid-actions { gap:7px; }
     .grid-actions .btn { padding:8px 10px; }
     .scan-status { display:none; }
 }
 @media (max-width:560px) {
-    #thumbnail-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    #thumbnail-grid { grid-template-columns:repeat(auto-fill,minmax(calc(var(--grid-tile-min,180px) * 0.667),1fr)); }
     .folder-path { display:none; }
     .btn { padding:8px 10px; }
 }

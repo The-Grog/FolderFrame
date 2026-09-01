@@ -139,6 +139,7 @@ and starts the embed as a controls-free slideshow including subfolders:
     "showDownloadButton": true,
     "showCopyButton": true,
     "showButtonLabels": false,
+    "gridDensity": "comfortable",
     "rememberPreferences": true
   },
   "index": { "refreshInterval": 120 },
@@ -174,6 +175,7 @@ Put settings in `defaults` for both profiles or in `index`/`embed` to override t
 | `sort` | `"filename"` | `"newest"`, `"oldest"`, or `"filename"` |
 | `interval` | `5` | Seconds: 3, 5, 10, 15, 30, 60, 300, 900, 3600 |
 | `imageMode` | `"fit"` | `"fit"` or `"original"` |
+| `gridDensity` | `"comfortable"` | `"compact"`, `"comfortable"`, or `"spacious"` — grid thumbnail size |
 | `shuffle` | `false` | Boolean |
 | `autoRefresh` | `true` | Boolean: enable automatic rescanning |
 | `refreshInterval` | Index: `120`; embed: `300` | Integer seconds, 1–86400; config only |
@@ -744,6 +746,9 @@ Supported options:
     imageMode=fit or imageMode=original
         Override the initial image sizing mode.
 
+    density=compact, density=comfortable, or density=spacious
+        Override the grid thumbnail size.
+
     album=FOLDER
         Open a specific album path.
 
@@ -864,7 +869,7 @@ Basic iframe:
     </style>
 
 The iframe URL accepts the same source, album, view, sort, interval, shuffle,
-autoplay, autorefresh, tv, imageMode, controls, showFilenames, download, copy,
+autoplay, autorefresh, tv, imageMode, density, controls, showFilenames, download, copy,
 buttonLabels, and remember options. Use
 profile=embed to apply embed defaults from folderframe.config.json; otherwise
 the index defaults apply, even inside an iframe. Keyboard shortcuts work after

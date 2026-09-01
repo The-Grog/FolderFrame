@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#050505">
     <title>FolderFrame</title>
-    <link rel="stylesheet" href="styles.css?v=20260831-progressive-scan">
+    <link rel="stylesheet" href="styles.css?v=20260831-density-scan-fix">
 <link rel="icon" type="image/png" href="docs/images/folderframe-icon.png?v=20260828-brand">
 </head>
 <body>
@@ -155,6 +155,10 @@
                         <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M3 5h18v2H3V5zm0 6h12v2H3v-2zm0 6h6v2H3v-2z"/></svg>
                         <span id="sort-label">Filename</span>
                     </button>
+                    <button id="btn-grid-density" class="btn btn-secondary" title="Change thumbnail size">
+                        <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6zm10 0h6v6h-6v-6z"/></svg>
+                        <span id="grid-density-label">Comfortable</span>
+                    </button>
                     <button id="btn-auto-refresh" class="btn btn-secondary" aria-pressed="true" title="Automatically rescan every 60 seconds">
                         <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 6V3l-4 4 4 4V8c2.76 0 5 2.24 5 5 0 .75-.17 1.46-.46 2.1l1.46 1.46A6.96 6.96 0 0 0 19 13c0-3.87-3.13-7-7-7zm-5.54.9L5 5.44A6.96 6.96 0 0 0 4 9c0 3.87 3.13 7 7 7v3l4-4-4-4v3c-2.76 0-5-2.24-5-5 0-.75.17-1.46.46-2.1z"/></svg>
                         <span class="button-label">Auto Refresh On</span>
@@ -166,7 +170,7 @@
                 </div>
             </header>
             <div id="scan-failures" role="status" hidden><span id="scan-failure-text"></span> <button id="btn-retry-scan" class="btn btn-secondary" type="button">Retry scan</button></div>
-            <div id="scan-loading" class="scan-loading" role="status" hidden><span class="loading-spinner" aria-hidden="true"></span><span id="scan-loading-text">Scanning folders…</span></div>
+            <div id="scan-loading" class="scan-loading" role="status" hidden><span class="loading-spinner" aria-hidden="true"></span><span id="scan-loading-text">Scanning folders…</span><div id="scan-progress-track" class="scan-progress-track" role="progressbar" aria-label="Folder scan progress" aria-valuemin="0" aria-valuemax="100" hidden><div id="scan-progress-fill" class="scan-progress-fill"></div></div></div>
             <div id="thumbnail-grid"></div>
             <button id="btn-back-to-top" class="btn btn-secondary back-to-top" type="button" hidden aria-label="Back to top">↑ Top</button>
         </div>
@@ -195,7 +199,7 @@
 
     <p id="config-notice" role="status" hidden></p>
     <script src="resilience.js?v=20260831-native-decode-queue"></script>
-    <script src="settings.js?v=20260831-persistent-manifest"></script>
-    <script src="app.js?v=20260831-native-decode-queue"></script>
+    <script src="settings.js?v=20260831-density-scan-fix"></script>
+    <script src="app.js?v=20260831-density-scan-fix"></script>
 </body>
 </html>

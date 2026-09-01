@@ -1,6 +1,10 @@
 {
   "sources": [
-    { "id": "photos", "label": "Photos", "path": "photos/" }
+    {
+      "id": "photos",
+      "label": "Photos",
+      "path": "photos/"
+    }
   ],
   "defaults": {
     "source": "photos",
@@ -18,9 +22,12 @@
     "showDownloadButton": true,
     "showCopyButton": true,
     "showButtonLabels": false,
-    "rememberPreferences": true
+    "rememberPreferences": true,
+    "gridDensity": "comfortable"
   },
-  "index": { "refreshInterval": 120 },
+  "index": {
+    "refreshInterval": 120
+  },
   "embed": {
     "refreshInterval": 300,
     "rememberPreferences": false

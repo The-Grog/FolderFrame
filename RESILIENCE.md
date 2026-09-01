@@ -33,6 +33,19 @@ already-running loads finish normally. Leaving a viewer, removing a virtualized
 tile, or moving an unsettled tile outside preload range cancels its queued work.
 The existing 30-second media/thumbnail watchdogs release stalled slots.
 
+### Progressive scan rebuild frequency
+
+Progressive publishing (see below) triggers a full `renderGridView()`
+teardown-and-rebuild each time it fires, which currently discards and
+reloads every already-rendered thumbnail — visible as flicker on large
+libraries. The publish threshold (400 newly discovered files) and a 2-second
+minimum gap between rebuilds reduce how often this fires during a big scan,
+but do not eliminate the underlying full-rebuild-per-publish behavior. A
+true incremental update — appending new tiles without touching
+already-rendered ones, hoisting `renderGridView`'s internal virtualizer state onto
+`gridSession` so it survives across calls — remains a follow-up item; see
+TODO.md.
+
 ### Large grid rendering
 
 Libraries above 100 media items render incrementally. FolderFrame maintains a
@@ -41,6 +54,33 @@ the scrollbar representative of the complete gallery. Scrolling near either
 edge moves the window forward or backward without changing `mediaFiles` or
 viewer indexes. This bounds grid DOM/layout work but does not eliminate the
 cost of downloading and parsing a very large HTML directory listing.
+
+Sibling folders discovered during a recursive ("All Pics") scan are scanned by
+a bounded worker pool of size `SCAN_SIBLING_CONCURRENCY` (default 5) over a
+shared frontier list, instead of sequentially one at a time or via naive
+recursive scheduling. A worker handles exactly one directory listing, pushes
+any discovered subfolders back onto the shared frontier, and returns
+immediately — it never blocks awaiting its own descendants, which is what
+makes this deadlock-free: a design where a scheduled task recursively awaits
+`Promise.all` of children scheduled onto the same bounded queue can deadlock
+once enough parent branches occupy every slot while waiting on children that
+can never be dequeued. This applies on manifest-miss/cold-scan paths — where a
+live directory listing has to be fetched — and materially speeds up deep
+trees such as an Immich `year/date/` export. A determinate progress bar
+accompanies the scan status text once the top-level sibling folder count is
+known from the initial listing, filling as each top-level subtree completes
+(success, failure, or already-visited skip); it hides again once the scan
+finishes or falls outside the "All Pics" recursive mode. `onBatch`, called
+once per scanned directory, can fire concurrently across workers; this
+remains safe only because the `publishDiscovered` closure it feeds in
+`loadGallery` performs no `await` inside its own body.
+
+Automated app-level coverage exercises a deep/wide synthetic tree under a
+deadlock timeout, enforces the five-request ceiling, verifies top-level
+completion accounting, isolates a failed branch, and confirms cancellation
+does not start queued folders. Device validation against a large live Immich
+tree remains recommended because browser, server, disk, and network timing are
+outside the Node harness.
 
 Album folders are hidden only after a successful listing confirms they contain
 neither supported direct media nor child folders. Failed or timed-out listings

@@ -212,6 +212,7 @@ Omitted settings retain the lower-priority value.
 | `showButtonLabels` | `false` | Boolean: show text beside viewer toolbar icons |
 | `interval` | `5` | Seconds: 3, 5, 10, 15, 30, 60, 300, 900, or 3600 |
 | `imageMode` | `"fit"` | `"fit"` or `"original"` |
+| `gridDensity` | `"comfortable"` | `"compact"`, `"comfortable"`, or `"spacious"` — grid thumbnail size |
 | `shuffle` | `false` | Boolean |
 | `autoRefresh` | `true` | Boolean: enable automatic rescanning |
 | `refreshInterval` | Index: `120`; embed: `300` | Integer seconds, 1–86400; config only |
@@ -227,7 +228,7 @@ Precedence, from lowest to highest:
 5. Explicit URL options.
 
 Saved preferences include album, sort, interval, image sizing, view mode, shuffle,
-and auto-refresh. They are isolated by app location, profile, source
+auto-refresh, and grid density. They are isolated by app location, profile, source
 ID, and source URL. Slideshow play/pause itself is not saved: `autoplay`
 controls startup. Source selection is represented by the URL, not saved as a
 global preference. Legacy preferences are imported only for the original
@@ -290,6 +291,7 @@ or tv=1 URLs still apply on reload; use tv=0 to override them.
 | `buttonLabels=1` or `buttonLabels=0` | Show text labels or use icon-only viewer buttons |
 | `interval=10` | Slideshow interval in seconds |
 | `imageMode=fit` or `imageMode=original` | Initial image sizing |
+| `density=compact`, `density=comfortable`, or `density=spacious` | Grid thumbnail size |
 | `shuffle=1` or `shuffle=0` | Enable or disable Shuffle |
 | `autorefresh=1` or `autorefresh=0` | Enable or disable rescanning |
 | `tv=1` or `tv=0` | Enable or disable TV mode |

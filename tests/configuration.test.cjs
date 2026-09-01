@@ -553,6 +553,44 @@ test('sort defaults to filename with profile, saved preference, and URL override
     assert.ok(api.resolveSettings(config, '?sort=invalid').warnings.length);
 });
 
+test('grid density supports config, saved preference, and URL precedence', () => {
+    const config = normalize({
+        defaults: { gridDensity: 'spacious' },
+        embed: { gridDensity: 'compact' }
+    });
+    assert.equal(api.resolveSettings(normalize(shipped), '').settings.gridDensity, 'comfortable');
+    assert.equal(api.resolveSettings(config, '').settings.gridDensity, 'spacious');
+    assert.equal(api.resolveSettings(config, '?profile=embed').settings.gridDensity, 'compact');
+    assert.equal(api.resolveSettings(config, '', () => JSON.stringify({ gridDensity: 'comfortable' })).settings.gridDensity, 'comfortable');
+    assert.equal(api.resolveSettings(config, '?density=compact', () => JSON.stringify({ gridDensity: 'spacious' })).settings.gridDensity, 'compact');
+    assert.throws(() => normalize({ defaults: { gridDensity: 'tiny' } }), /gridDensity must/);
+    assert.ok(api.resolveSettings(config, '?density=invalid').warnings.length);
+});
+
+test('grid density cycles, persists, and keeps phone virtualizer math aligned', async () => {
+    const app = await boot();
+    const rootStyle = app.context.document.documentElement.style;
+    assert.equal(rootStyle['--grid-tile-min'], '180px');
+    assert.equal(app.get('grid-density-label').textContent, 'Comfortable');
+
+    await app.get('btn-grid-density').listeners.click();
+    assert.equal(vm.runInContext('gridDensity', app.context), 'spacious');
+    assert.equal(rootStyle['--grid-tile-min'], '240px');
+    assert.equal(JSON.parse(app.saved.get(vm.runInContext('preferenceKey', app.context))).gridDensity, 'spacious');
+
+    vm.runInContext("applyGridDensity('compact'); mediaFiles = Array.from({ length: 1000 }, (_, i) => 'https://example.test/' + i + '.jpg')", app.context);
+    app.get('thumbnail-grid').clientWidth = 500;
+    app.get('grid-view-container').clientWidth = 500;
+    vm.runInContext('renderGridView()', app.context);
+    const grid = app.get('thumbnail-grid');
+    const bottomSpacer = grid.children[grid.children.length - 1];
+    const min = 130 * 0.667, gap = 12;
+    const columns = Math.floor((500 + gap) / (min + gap));
+    const rowHeight = Math.max(min, (500 - gap * (columns - 1)) / columns) + gap;
+    const expected = (Math.ceil(1000 / columns) - Math.ceil(100 / columns)) * rowHeight;
+    assert.equal(bottomSpacer.style.height, expected + 'px');
+});
+
 test('date sorts use Last-Modified, tie by filename, and keep missing dates last', async () => {
     const app = await boot();
     const calls = [];
@@ -727,6 +765,8 @@ test('album preview selects the first naturally sorted image, skipping videos', 
         return { querySelectorAll: () => ['10.jpg', '2.jpg', '1.mp4', 'Nested/'].map(href => ({ getAttribute: () => href })) };
     } };
     const item = app.get('test-album');
+    const subtitle = app.get('test-album-subtitle');
+    item.querySelector = selector => selector === '.album-subtitle' ? subtitle : null;
     const classes = new Set();
     item.classList = { add: name => classes.add(name), remove: name => classes.delete(name) };
     app.context.albumItem = item;
@@ -738,6 +778,10 @@ test('album preview selects the first naturally sorted image, skipping videos', 
     cover.onload();
     assert.equal(cover.hidden, false);
     assert.ok(classes.has('has-album-cover'));
+    assert.equal(subtitle.textContent, '3 items');
+    assert.equal(item.dataset.directFiles, '3');
+    assert.equal(item.dataset.directFolders, '1');
+    assert.equal(app.requests.filter(url => url.endsWith('/Family/')).length, 1, 'count reuses the cover listing');
     cover.onerror();
     assert.equal(cover.hidden, true);
     assert.equal(classes.has('has-album-cover'), false);
@@ -1009,6 +1053,61 @@ test('all-files discovery paints the current directory before a deeper folder fi
     await loading;
     assert.equal(app.state().mediaFiles.length, 121);
     assert.ok(app.state().mediaFiles.some(file => file.endsWith('/Deep/child.jpg')));
+});
+
+test('recursive scan worker pool is bounded, completes deep trees, and isolates a failed branch', async () => {
+    const app = await boot();
+    let active = 0, maxActive = 0;
+    const completed = [];
+    app.context.scanDirectory = async folder => {
+        active++;
+        maxActive = Math.max(maxActive, active);
+        await Promise.resolve();
+        active--;
+        if (folder === 'Year-3/Day-1') throw new Error('unreadable');
+        if (/^Year-\d+$/.test(folder)) return { filePaths: [], folderNames: ['Day-1', 'Day-2', 'Day-3'] };
+        return { filePaths: [`https://example.test/frame/photos/${folder}/photo.jpg`], folderNames: [] };
+    };
+    app.context.rootListing = {
+        filePaths: [],
+        folderNames: Array.from({ length: 8 }, (_, index) => 'Year-' + index)
+    };
+    app.context.scanController = new AbortController();
+    const scan = vm.runInContext(`scanDirectoryRecursive('', new Set(), rootListing, scanController.signal, null, {
+        onTopComplete: path => topCompletions.push(path)
+    })`, app.context);
+    app.context.topCompletions = completed;
+    const result = await Promise.race([
+        scan,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('recursive scan deadlocked')), 1000))
+    ]);
+    assert.equal(maxActive, 5);
+    assert.equal(result.files.length, 23);
+    assert.deepEqual(Array.from(result.failedFolders), ['Year-3/Day-1']);
+    assert.deepEqual(completed.sort(), app.context.rootListing.folderNames.sort());
+});
+
+test('recursive scan cancellation rejects and does not start queued folders', async () => {
+    const app = await boot();
+    const started = [];
+    app.context.scanDirectory = (folder, options) => {
+        started.push(folder);
+        return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => {
+            const error = new Error('Aborted');
+            error.name = 'AbortError';
+            reject(error);
+        }, { once: true }));
+    };
+    app.context.rootListing = {
+        filePaths: [],
+        folderNames: Array.from({ length: 12 }, (_, index) => 'Folder-' + index)
+    };
+    app.context.scanController = new AbortController();
+    const pending = vm.runInContext("scanDirectoryRecursive('', new Set(), rootListing, scanController.signal)", app.context);
+    await Promise.resolve();
+    app.context.scanController.abort();
+    await assert.rejects(pending, error => error?.name === 'AbortError');
+    assert.equal(started.length, 5);
 });
 
 test('HEIC decoder loads only when requested and concurrent callers share one script', async () => {
@@ -1683,7 +1782,8 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
             const classes = selector.split(',').map(part => part.trim().replace(/^\./, ''));
             return this.children.filter(child => classes.some(name => (child.className || '').split(/\s+/).includes(name)));
         }
-        setAttribute() {}
+        setAttribute(name, value) { this.attributes ||= {}; this.attributes[name] = String(value); }
+        removeAttribute(name) { if (this.attributes) delete this.attributes[name]; }
         appendChild(child) {
             if (child.isFragment) {
                 [...child.children].forEach(node => this.appendChild(node));
@@ -1741,6 +1841,8 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
     const warnings = [];
     const historyCalls = { push: [], replace: [] };
     let animationFrames = 0;
+    const documentElement = new Element();
+    documentElement.style.setProperty = (name, value) => { documentElement.style[name] = value; };
     const context = vm.createContext({
         URL, URLSearchParams, AbortController, Blob,
         ClipboardItem: class { constructor(items) { this.items = items; } },
@@ -1752,7 +1854,7 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
         document: { getElementById: get, createElement: tag => Object.assign(new Element(), { tagName: String(tag).toUpperCase() }), head: new Element(),
             createDocumentFragment: () => { const fragment = new Element(); fragment.isFragment = true; return fragment; },
             querySelectorAll: () => sourceLabels,
-            addEventListener() {}, body: new Element(), hidden: false },
+            addEventListener() {}, body: new Element(), documentElement, hidden: false },
         location: { href: base + search, search, assign(url) { this.assigned = url; } },
         localStorage: { getItem(key) { if (storageBlocked) throw new Error('Blocked'); return saved.get(key) || null; },
             setItem(key, value) { if (storageBlocked) throw new Error('Blocked'); saved.set(key, value); } },

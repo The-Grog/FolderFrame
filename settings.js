@@ -5,11 +5,13 @@
         album: '', view: 'folders', sort: 'filename', interval: 5, imageMode: 'fit',
         shuffle: false, autoRefresh: true, refreshInterval: 120, tvMode: false,
         autoplay: false, rememberPreferences: true, controls: true, showFilenames: true,
-        showDownloadButton: true, showCopyButton: true, showButtonLabels: false
+        showDownloadButton: true, showCopyButton: true, showButtonLabels: false,
+        gridDensity: 'comfortable'
     });
+    const GRID_DENSITIES = ['compact', 'comfortable', 'spacious'];
     const BOOLEAN_KEYS = ['shuffle', 'autoRefresh', 'tvMode', 'autoplay', 'rememberPreferences', 'controls', 'showFilenames',
         'showDownloadButton', 'showCopyButton', 'showButtonLabels'];
-    const SAVED_KEYS = ['album', 'view', 'sort', 'interval', 'imageMode', 'shuffle', 'autoRefresh'];
+    const SAVED_KEYS = ['album', 'view', 'sort', 'interval', 'imageMode', 'shuffle', 'autoRefresh', 'gridDensity'];
     const INTERVALS = [3, 5, 10, 15, 30, 60, 300, 900, 3600];
 
     function object(value) {
@@ -40,6 +42,8 @@
                 if (!['newest', 'oldest', 'filename'].includes(item)) throw new Error('sort must be newest, oldest, or filename');
             } else if (key === 'imageMode') {
                 if (!['fit', 'original'].includes(item)) throw new Error('imageMode must be fit or original');
+            } else if (key === 'gridDensity') {
+                if (!GRID_DENSITIES.includes(item)) throw new Error('gridDensity must be compact, comfortable, or spacious');
             } else if (key === 'refreshInterval') {
                 if (!Number.isInteger(item) || item < 1 || item > 86400) throw new Error('refreshInterval must be an integer from 1 to 86400 seconds');
             } else if (key === 'interval') {
@@ -123,7 +127,7 @@
         const aliases = { source: 'source', album: 'album', view: 'view', sort: 'sort', interval: 'interval',
             imageMode: 'imageMode', shuffle: 'shuffle', autorefresh: 'autoRefresh',
             tv: 'tvMode', autoplay: 'autoplay', remember: 'rememberPreferences', controls: 'controls', showFilenames: 'showFilenames',
-            download: 'showDownloadButton', copy: 'showCopyButton', buttonLabels: 'showButtonLabels' };
+            download: 'showDownloadButton', copy: 'showCopyButton', buttonLabels: 'showButtonLabels', density: 'gridDensity' };
         const layer = {};
         for (const [param, key] of Object.entries(aliases)) {
             if (!params.has(param)) continue;

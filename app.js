@@ -11,6 +11,7 @@ let missingFolderRecovery = null;
 let emptyFolderNotice = false;
 const DIRECTORY_TIMEOUT = 15000, MEDIA_TIMEOUT = 30000;
 const GRID_BATCH_SIZE = 100, GRID_WINDOW_SIZE = 300;
+const SCAN_SIBLING_CONCURRENCY = 5; // Bounds simultaneous directory-listing requests during recursive "All Pics" scans.
 const NATIVE_IMAGE_CONCURRENCY = 4;
 const NATIVE_IMAGE_PRIORITY = Object.freeze({ grid: 0, album: 5, viewer: 10 });
 const nativeImageQueue = resilience.createTaskQueue({ concurrency: NATIVE_IMAGE_CONCURRENCY });
@@ -154,6 +155,10 @@ async function findAlbumCover(folder, signal) {
     const queue = [{ folder, depth: 0 }];
     const visited = new Set();
     let listingsChecked = 0, sawMedia = false, searchIncomplete = false;
+    // Captured once, from the album's own top-level listing (depth 0), which the
+    // cover search already fetches as its very first candidate. This reuses that
+    // existing request instead of issuing a new one just to count items.
+    let directCount = null;
     while (queue.length && listingsChecked < ALBUM_COVER_MAX_LISTINGS) {
         if (signal.aborted) throw resilience.abortError();
         const candidate = queue.shift();
@@ -164,8 +169,15 @@ async function findAlbumCover(folder, signal) {
             listing = await scanDirectory(candidate.folder, { signal });
             if (albumPreviewSession && !signal.aborted) albumPreviewSession.listingCache.set(candidate.folder, listing);
         }
+        if (candidate.depth === 0 && directCount === null) {
+            directCount = {
+                files: listing.filePaths.length,
+                folders: listing.folderNames.length,
+                hasVideo: listing.filePaths.some(isVideoFile)
+            };
+        }
         const file = listing.filePaths.find(isImageFile);
-        if (file) return { file, confirmedEmpty: false };
+        if (file) return { file, confirmedEmpty: false, directCount };
         if (listing.filePaths.some(isMediaFile)) sawMedia = true;
         if (candidate.depth < ALBUM_COVER_MAX_DEPTH) {
             listing.folderNames.forEach(name => queue.push({
@@ -175,7 +187,17 @@ async function findAlbumCover(folder, signal) {
         } else if (listing.folderNames.length) searchIncomplete = true;
     }
     if (queue.length) searchIncomplete = true;
-    return { file: null, confirmedEmpty: !sawMedia && !searchIncomplete };
+    return { file: null, confirmedEmpty: !sawMedia && !searchIncomplete, directCount };
+}
+
+function albumSubtitleText(counts) {
+    if (!counts) return 'Open album';
+    if (counts.files > 0) {
+        const noun = counts.hasVideo ? 'item' : 'photo';
+        return `${counts.files} ${noun}${counts.files === 1 ? '' : 's'}`;
+    }
+    if (counts.folders > 0) return `${counts.folders} album${counts.folders === 1 ? '' : 's'}`;
+    return 'Open album';
 }
 
 async function loadAlbumPreview(item, folder, signal) {
@@ -196,6 +218,12 @@ async function loadAlbumPreview(item, folder, signal) {
             item.hidden = true;
             item.dataset.emptyAlbum = 'true';
             return;
+        }
+        if (result.directCount && !signal.aborted) {
+            item.dataset.directFiles = String(result.directCount.files);
+            item.dataset.directFolders = String(result.directCount.folders);
+            const subtitleEl = item.querySelector('.album-subtitle');
+            if (subtitleEl) subtitleEl.textContent = albumSubtitleText(result.directCount);
         }
         const file = result.file;
         if (!file || signal.aborted || controller.signal.aborted) return;
@@ -273,6 +301,14 @@ let uiVisible = true, idleTimer = null, imageMode = 'fit', isGridViewActive = tr
 let shuffleEnabled = false, autoRefreshEnabled = true, tvModeEnabled = false;
 let galleryViewMode = 'folders'; // 'folders' or 'all'
 let sortMode = 'filename';
+const GRID_DENSITY_PX = { compact: 130, comfortable: 180, spacious: 240 };
+let gridDensity = 'comfortable';
+let gridTileMinPx = GRID_DENSITY_PX.comfortable;
+function applyGridDensity(density) {
+    gridDensity = GRID_DENSITY_PX[density] ? density : 'comfortable';
+    gridTileMinPx = GRID_DENSITY_PX[gridDensity];
+    document.documentElement?.style.setProperty('--grid-tile-min', gridTileMinPx + 'px');
+}
 const modifiedDateCache = new Map();
 const DATE_CACHE_TTL = 24 * 60 * 60 * 1000;
 const DATE_CACHE_LIMIT = 2000;
@@ -640,7 +676,7 @@ function savePreferences() {
         localStorage.setItem(preferenceKey, JSON.stringify({
             album: currentFolder, interval: slideshowInterval, imageMode,
             shuffle: shuffleEnabled, autoRefresh: autoRefreshEnabled,
-            view: galleryViewMode, sort: sortMode
+            view: galleryViewMode, sort: sortMode, gridDensity
         }));
     } catch (error) {
         // Storage can be unavailable in privacy modes and embedded contexts.
@@ -685,6 +721,7 @@ async function loadConfiguration() {
     refreshInterval = startupSettings.refreshInterval;
     tvModeEnabled = startupSettings.tvMode;
     slideshowPlaying = startupSettings.autoplay;
+    applyGridDensity(startupSettings.gridDensity);
 
     const selector = $('select-source');
     selector.replaceChildren();
@@ -710,6 +747,13 @@ function updateControlStates() {
     $('sort-label').textContent = sortLabels[sortMode];
     $('btn-sort').title = `Sorting: ${sortLabels[sortMode]}. Click to cycle Newest, Oldest, Filename.`;
     $('btn-sort').setAttribute('aria-label', `Sort: ${sortLabels[sortMode]}. Change sorting`);
+    const densityLabels = { compact: 'Compact', comfortable: 'Comfortable', spacious: 'Spacious' };
+    const densityButton = $('btn-grid-density');
+    if (densityButton) {
+        $('grid-density-label').textContent = densityLabels[gridDensity];
+        densityButton.title = `Thumbnail size: ${densityLabels[gridDensity]}. Click to cycle Compact, Comfortable, Spacious.`;
+        densityButton.setAttribute('aria-label', `Thumbnail size: ${densityLabels[gridDensity]}. Change thumbnail size`);
+    }
     selectInterval.value = String(slideshowInterval);
     imageModeText.textContent = imageMode === 'fit' ? 'Fit' : 'Original';
     btnImageMode.querySelector('.fit-mode-icon').hidden = imageMode !== 'fit';
@@ -977,28 +1021,94 @@ async function scanDirectory(folder = currentFolder, options = {}) {
 }
 
 async function scanDirectoryRecursive(folder = currentFolder, visited = new Set(), listing = null, signal, onBatch = null, options = {}) {
-    const normalized = folder.split('/').filter(Boolean).join('/');
-    if (signal?.aborted) throw resilience.abortError();
-    if (visited.has(normalized)) return { files: [], failedFolders: [] };
-    visited.add(normalized);
-    const { filePaths, folderNames } = listing || await scanDirectory(normalized, { signal, bypassCache: options.bypassCache });
-    const result = { files: [...filePaths], failedFolders: [] };
-    scannedFolders++; scannedFiles += filePaths.length;
-    setScanProgress(`Scanning… ${scannedFolders} folders checked · ${scannedFiles} files found`);
-    if (onBatch && filePaths.length) await onBatch(filePaths, normalized);
-    for (const child of folderNames) {
-        if (signal?.aborted) throw resilience.abortError();
-        const path = normalized ? normalized + '/' + child : child;
+    // Bounded breadth-first worker pool over a shared frontier list. A worker
+    // handles exactly one directory's listing, pushes any discovered
+    // subfolders back onto the shared frontier, then returns and frees its
+    // slot — it never blocks waiting on its own children. That matters:
+    // recursively scheduling a task that itself awaits Promise.all(children)
+    // onto the same bounded queue can deadlock — once SCAN_SIBLING_CONCURRENCY
+    // parent tasks all occupy a slot while waiting on children, no child can
+    // ever be dequeued to unblock them. This flat design has no such wait
+    // chain, so it can't deadlock regardless of tree width or depth.
+    const files = [];
+    const failedFolders = [];
+    const frontier = [];
+    const pendingByTop = new Map();
+    let inFlight = 0, settled = false;
+    let resolveDone, rejectDone;
+    const done = new Promise((resolve, reject) => { resolveDone = resolve; rejectDone = reject; });
+
+    const push = (path, depth, top) => {
+        frontier.push({ path, depth, top });
+        if (top != null) pendingByTop.set(top, (pendingByTop.get(top) || 0) + 1);
+    };
+    // A top-level (depth-1) subtree's onTopComplete fires once every item
+    // pushed under it — itself plus every descendant — has finished, whether
+    // that item succeeded, failed, or was skipped as already-visited.
+    const settleTop = top => {
+        if (top == null) return;
+        const remaining = (pendingByTop.get(top) || 1) - 1;
+        if (remaining <= 0) {
+            pendingByTop.delete(top);
+            try { options.onTopComplete?.(top); }
+            catch (error) { fail(error); }
+        }
+        else pendingByTop.set(top, remaining);
+    };
+    const fail = error => { if (!settled) { settled = true; rejectDone(error); } };
+    const finish = () => { if (!settled && !frontier.length && !inFlight) { settled = true; resolveDone(); } };
+
+    frontier.push({ path: folder.split('/').filter(Boolean).join('/'), depth: 0, top: null, listing });
+
+    async function run(item) {
+        inFlight++;
         try {
-            const nested = await scanDirectoryRecursive(path, visited, null, signal, onBatch, options);
-            result.files.push(...nested.files);
-            result.failedFolders.push(...nested.failedFolders);
+            const normalized = item.path;
+            if (signal?.aborted) throw resilience.abortError();
+            if (visited.has(normalized)) return;
+            visited.add(normalized);
+            let dir;
+            try {
+                dir = item.listing || await scanDirectory(normalized, { signal, bypassCache: options.bypassCache });
+            } catch (error) {
+                if (signal?.aborted || error?.name === 'AbortError') throw error;
+                failedFolders.push(normalized);
+                return;
+            }
+            // Another worker may have failed while this request was settling.
+            // Do not publish late results after the overall scan has rejected.
+            if (settled) return;
+            const { filePaths, folderNames } = dir;
+            files.push(...filePaths);
+            scannedFolders++; scannedFiles += filePaths.length;
+            setScanProgress(`Scanning… ${scannedFolders} folders checked · ${scannedFiles} files found`);
+            // onBatch can fire concurrently across workers (previously always
+            // serial). Safe only because publishDiscovered (loadGallery) does
+            // no `await` inside its own body — adding one there later would
+            // introduce a race condition on the discovered/unpublished state.
+            if (onBatch && filePaths.length) await onBatch(filePaths, normalized);
+            for (const child of folderNames) {
+                const childPath = normalized ? normalized + '/' + child : child;
+                push(childPath, item.depth + 1, item.depth === 0 ? childPath : item.top);
+            }
         } catch (error) {
-            if (signal?.aborted || error.name === 'AbortError') throw error;
-            result.failedFolders.push(path);
+            fail(error);
+        } finally {
+            settleTop(item.top);
+            inFlight--;
+            pump();
         }
     }
-    return result;
+
+    function pump() {
+        if (settled) return;
+        while (inFlight < SCAN_SIBLING_CONCURRENCY && frontier.length) run(frontier.shift());
+        finish();
+    }
+
+    pump();
+    await done;
+    return { files, failedFolders };
 }
 
 function compareFilenames(a, b) {
@@ -1065,6 +1175,16 @@ async function cycleSort() {
     await loadGallery();
 }
 
+function cycleGridDensity() {
+    // Purely a display re-layout of already-loaded mediaFiles/subfolders — no
+    // rescan, no new network requests, safe to call directly on click.
+    const order = ['compact', 'comfortable', 'spacious'];
+    applyGridDensity(order[(order.indexOf(gridDensity) + 1) % order.length]);
+    updateControlStates();
+    savePreferences();
+    if (isGridViewActive) renderGridView();
+}
+
 function showScanFailures(folders) {
     const notice = $('scan-failures');
     notice.hidden = !folders.length;
@@ -1128,9 +1248,18 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
         // Recursive discovery and final sorting continue below; viewer refreshes stay atomic.
         const progressive = mode === 'all' && isGridViewActive && !silent;
         const discovered = new Set(listing.filePaths);
-        let unpublished = 0;
+        let unpublished = 0, lastPublish = 0;
         const publishDiscovered = async force => {
-            if (!progressive || !current() || (!force && unpublished < 100)) return;
+            // A higher batch threshold plus a minimum time gap between rebuilds
+            // cuts how often renderGridView()'s full teardown-and-rebuild fires
+            // during a large scan — each call currently discards and reloads
+            // every already-rendered thumbnail, which is the source of visible
+            // flicker on big libraries. This is a mitigation, not a fix: the
+            // underlying full-rebuild-per-publish architecture is unchanged.
+            // See RESILIENCE.md for the follow-up incremental-update plan.
+            const now = Date.now();
+            if (!progressive || !current() || (!force && (unpublished < 400 || now - lastPublish < 2000))) return;
+            lastPublish = now;
             const preview = Array.from(discovered);
             mediaFiles = sortMode === 'filename' ? preview.sort(compareFilenames) : preview;
             subfolders = listing.folderNames;
@@ -1147,13 +1276,29 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
             renderBreadcrumb();
             renderGridView();
         }
+        // Rough determinate progress: the initial listing already tells us how
+        // many top-level sibling folders exist under this album, so completion
+        // of each one's subtree (success or handled failure) can drive a real
+        // percentage instead of leaving the scan status text-only.
+        const totalTopFolders = listing.folderNames.length;
+        let completedTopFolders = 0;
+        if (mode === 'all' && totalTopFolders) setScanProgressBar(0);
+        else setScanProgressBar(null);
         const result = mode === 'all'
             ? await scanDirectoryRecursive(folder, new Set(), listing, session.signal, async files => {
                 for (const file of files) if (!discovered.has(file)) { discovered.add(file); unpublished++; }
                 await publishDiscovered(false);
-            }, { bypassCache: forceCacheClear })
+            }, {
+                bypassCache: forceCacheClear,
+                onTopComplete: () => {
+                    if (!current() || !totalTopFolders) return;
+                    completedTopFolders++;
+                    setScanProgressBar(Math.round((completedTopFolders / totalTopFolders) * 100));
+                }
+            })
             : { files: listing.filePaths, failedFolders: [] };
         if (!current()) return;
+        setScanProgressBar(null);
         await publishDiscovered(true);
         // A failed descendant is unknown, not deleted. Preserve only its previous files.
         for (const file of mediaFiles) {
@@ -1214,6 +1359,7 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
             thumbnailGrid.setAttribute('aria-busy', 'false');
             btnRefreshGrid.disabled = false; $('btn-sort').disabled = false;
             $('scan-loading').hidden = true;
+            setScanProgressBar(null);
         }
     }
 }
@@ -1228,6 +1374,24 @@ function setScanStatus(text, isError = false) {
 
 function setScanProgress(text) {
     $('scan-loading-text').textContent = text;
+}
+
+// Separate from setScanProgress/setScanStatus (which only ever touch text) so
+// the folder/file-count text updates emitted from inside scanDirectoryRecursive
+// can't accidentally clobber the bar's percentage, or vice versa.
+function setScanProgressBar(percent) {
+    const track = $('scan-progress-track');
+    const fill = $('scan-progress-fill');
+    if (!track || !fill) return;
+    if (percent == null || Number.isNaN(percent)) {
+        track.hidden = true;
+        track.removeAttribute?.('aria-valuenow');
+        return;
+    }
+    track.hidden = false;
+    const value = Math.max(0, Math.min(100, percent));
+    track.setAttribute('aria-valuenow', String(value));
+    fill.style.width = value + '%';
 }
 
 function setMediaLoading(text = '') {
@@ -1617,9 +1781,16 @@ function renderGridView() {
         }
         return fragment;
     };
+    // These two scale factors (0.778, 0.667) are the single source of truth
+    // shared with styles.css's max-width:900px / max-width:560px breakpoints —
+    // change one, change the other, or the CSS grid and this virtualizer's
+    // spacer/row-height math will silently disagree on column count.
     const gridMetrics = () => {
         const width = thumbnailGrid.clientWidth || gridViewContainer.clientWidth || 1200;
-        const min = width <= 560 ? Math.max(120, (width - 36) / 2) : width <= 900 ? 140 : 180;
+        const scale = width <= 560 ? 0.667 : width <= 900 ? 0.778 : 1;
+        // This is the same fractional minimum used by the CSS minmax() rule,
+        // keeping virtual spacer rows aligned with the rendered column count.
+        const min = gridTileMinPx * scale;
         const gap = width <= 900 ? 12 : 18;
         const columns = Math.max(1, Math.floor((width + gap) / (min + gap)));
         const card = Math.max(min, (width - gap * (columns - 1)) / columns);
@@ -2023,6 +2194,7 @@ function handleWheel(e) {
 
 function setupEventListeners() {
     $('btn-sort').addEventListener('click', cycleSort);
+    $('btn-grid-density')?.addEventListener('click', cycleGridDensity);
     $('btn-retry-scan').addEventListener('click', () => {
         if (failedNavigation !== null) { const target = failedNavigation; failedNavigation = null; return navigateToFolder(target); }
         return loadGallery({ forceCacheClear: true });
