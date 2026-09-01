@@ -319,10 +319,39 @@ const SCAN_MANIFEST_DIRECTORY_LIMIT = 5000;
 const PERSISTENT_MANIFEST_VERSION = 1;
 let persistentManifestState = null;
 const persistentThumbnailUrls = new Map();
+let manifestFailureNotice = false;
 
-function resetPersistentManifest() {
-    persistentManifestState = activeSource?.manifestUrl
-        ? { key: activeSource.manifestUrl, promise: null, index: null, unavailable: false, chunks: new Map() }
+function isManifestOnlySource() {
+    return activeSource?.discoveryMode === 'manifest';
+}
+
+function usesPublishedManifest() {
+    return activeSource?.discoveryMode !== 'directory' && Boolean(activeSource?.manifestUrl);
+}
+
+function persistentManifestError(message, cause = null) {
+    const error = new Error(message);
+    error.name = 'PersistentManifestError';
+    error.code = 'PERSISTENT_MANIFEST_INVALID';
+    if (cause) error.cause = cause;
+    return error;
+}
+
+function isPersistentManifestError(error) {
+    return error?.name === 'PersistentManifestError' || error?.code === 'PERSISTENT_MANIFEST_INVALID';
+}
+
+function cacheBustedManifestUrl(url, token) {
+    if (!token) return url;
+    const requestUrl = new URL(url);
+    requestUrl.searchParams.set('ff_refresh', token);
+    return requestUrl.href;
+}
+
+function resetPersistentManifest({ cacheBust = false } = {}) {
+    persistentManifestState = usesPublishedManifest()
+        ? { key: activeSource.manifestUrl, promise: null, index: null, unavailable: false, error: null,
+            cacheBustToken: cacheBust ? `${Date.now()}-${Math.random().toString(36).slice(2)}` : null, chunks: new Map() }
         : null;
     persistentThumbnailUrls.clear();
 }
@@ -386,19 +415,24 @@ function listingFromManifest(record, expectedPath) {
 }
 
 async function ensurePersistentManifest(signal) {
-    if (!activeSource.manifestUrl) return null;
+    if (!usesPublishedManifest()) return null;
     if (!persistentManifestState || persistentManifestState.key !== activeSource.manifestUrl) resetPersistentManifest();
     const state = persistentManifestState;
-    if (state.unavailable) return null;
+    if (state.unavailable) {
+        if (isManifestOnlySource()) throw state.error || persistentManifestError('The published media index is unavailable.');
+        return null;
+    }
     if (state.index) return state.index;
     if (!state.promise) {
-        state.promise = resilience.request(activeSource.manifestUrl, {
+        const requestUrl = cacheBustedManifestUrl(activeSource.manifestUrl, state.cacheBustToken);
+        state.promise = resilience.request(requestUrl, {
             signal, timeout: DIRECTORY_TIMEOUT, cache: 'no-store', body: 'json'
         }).then(index => {
             if (!index || index.version !== PERSISTENT_MANIFEST_VERSION ||
                 !index.root || typeof index.root !== 'object' ||
-                !index.chunks || typeof index.chunks !== 'object' || Array.isArray(index.chunks)) {
-                throw new Error('Unsupported or invalid persistent manifest');
+                !index.chunks || typeof index.chunks !== 'object' || Array.isArray(index.chunks) ||
+                !validateManifestRecord(index.root, '')) {
+                throw persistentManifestError('The published media index has an unsupported or invalid root record.');
             }
             state.index = index;
             console.info(`FolderFrame: loaded persistent media index${index.generatedAt ? ` from ${index.generatedAt}` : ''}.`);
@@ -409,9 +443,17 @@ async function ensurePersistentManifest(signal) {
         }).catch(error => {
             state.promise = null;
             if (signal?.aborted || error?.name === 'AbortError') throw error;
+            const failure = isPersistentManifestError(error)
+                ? error
+                : persistentManifestError('The published media index could not be loaded.', error);
             // Remember the failure for this gallery scan so a missing index is
             // not requested again for every descendant directory.
             state.unavailable = true;
+            state.error = failure;
+            if (isManifestOnlySource()) {
+                console.warn('FolderFrame: required published media index unavailable.', error);
+                throw failure;
+            }
             console.warn('FolderFrame: persistent media index unavailable; scanning directory listings directly.', error);
             return null;
         });
@@ -423,7 +465,10 @@ async function loadPersistentChunk(topFolder, signal) {
     const index = await ensurePersistentManifest(signal);
     if (!index) return null;
     const descriptor = index.chunks[topFolder];
-    if (!descriptor || typeof descriptor.file !== 'string') return null;
+    if (!descriptor || typeof descriptor.file !== 'string') {
+        if (isManifestOnlySource()) throw persistentManifestError(`The published media index has no chunk for “${topFolder}”.`);
+        return null;
+    }
     const state = persistentManifestState;
     if (state.chunks.has(topFolder)) return state.chunks.get(topFolder);
     const promise = (async () => {
@@ -435,7 +480,8 @@ async function loadPersistentChunk(topFolder, signal) {
             // Chunk ownership follows the active gallery scan, not an individual
             // album-cover observer that may scroll offscreen during the request.
             const ownerSignal = scanSession?.signal || signal;
-            const chunk = await resilience.request(chunkUrl.href, {
+            const requestUrl = cacheBustedManifestUrl(chunkUrl.href, state.cacheBustToken);
+            const chunk = await resilience.request(requestUrl, {
                 signal: ownerSignal, timeout: DIRECTORY_TIMEOUT, cache: 'no-store', body: 'json'
             });
             if (!chunk || chunk.version !== PERSISTENT_MANIFEST_VERSION || chunk.root !== topFolder ||
@@ -447,6 +493,12 @@ async function loadPersistentChunk(topFolder, signal) {
             if (scanSession?.signal?.aborted || (!scanSession && signal?.aborted) || error?.name === 'AbortError') {
                 state.chunks.delete(topFolder);
                 throw error;
+            }
+            if (isManifestOnlySource()) {
+                state.chunks.delete(topFolder);
+                throw (isPersistentManifestError(error)
+                    ? error
+                    : persistentManifestError(`The published media index chunk for “${topFolder}” is unavailable or invalid.`, error));
             }
             // Keep the resolved null in the chunk cache for this scan so each
             // descendant falls back directly without redownloading a bad chunk.
@@ -465,6 +517,9 @@ async function persistentDirectoryListing(folder, signal) {
     if (!index) return null;
     if (!normalized) {
         const listing = listingFromManifest(index.root, '');
+        if (!listing && isManifestOnlySource()) {
+            throw persistentManifestError('The published media index root record is invalid.');
+        }
         if (!listing) console.warn('FolderFrame: persistent media index root is invalid; scanning the source directly.');
         return listing;
     }
@@ -472,6 +527,9 @@ async function persistentDirectoryListing(folder, signal) {
     const chunk = await loadPersistentChunk(topFolder, signal);
     if (!chunk) return null;
     const listing = listingFromManifest(chunk.directories[normalized], normalized);
+    if (!listing && isManifestOnlySource()) {
+        throw persistentManifestError(`The published media index has no valid record for “${normalized}”.`);
+    }
     if (!listing) console.warn(`FolderFrame: persistent media index has no valid record for “${normalized}”; scanning that directory directly.`);
     return listing;
 }
@@ -770,6 +828,12 @@ function updateControlStates() {
     btnAutoRefresh.classList.remove('is-active');
     btnAutoRefresh.setAttribute('aria-pressed', String(autoRefreshEnabled));
     btnAutoRefresh.querySelector('.button-label').textContent = autoRefreshEnabled ? 'Auto Refresh On' : 'Auto Refresh Off';
+    const strictManifest = isManifestOnlySource();
+    $('refresh-grid-label').textContent = strictManifest ? 'Reload Library' : 'Refresh Folder';
+    btnRefreshGrid.title = strictManifest
+        ? 'Reload the published media index. New files appear after the index is regenerated and redeployed.'
+        : 'Rescan the current album now';
+    btnRefreshGrid.setAttribute('aria-label', strictManifest ? 'Reload published library index' : 'Refresh current folder');
     btnViewMode.classList.remove('is-active');
     btnViewMode.setAttribute('aria-pressed', String(galleryViewMode === 'all'));
     // Like the other toggle buttons, the label describes the CURRENT state.
@@ -968,9 +1032,12 @@ async function scanDirectory(folder = currentFolder, options = {}) {
     const url = currentDirectoryUrl(folder);
     const normalized = folder.split('/').filter(Boolean).join('/');
     let directoryMtime = null;
-    if (!options.bypassCache && activeSource.manifestUrl) {
+    if (usesPublishedManifest()) {
         const indexed = await persistentDirectoryListing(normalized, options.signal);
         if (indexed) return indexed;
+    }
+    if (isManifestOnlySource()) {
+        throw persistentManifestError('The published media index does not contain this folder.');
     }
     if (!options.bypassCache && activeSource.scanCache) {
         const manifest = getScanManifest();
@@ -1235,12 +1302,13 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
     const folder = currentFolder, mode = galleryViewMode;
     const current = () => scanSession === session && !session.signal.aborted;
     isScanning = true;
+    manifestFailureNotice = false;
     scannedFolders = 0; scannedFiles = 0;
     thumbnailGrid.setAttribute('aria-busy', 'true');
     btnRefreshGrid.disabled = true; $('btn-sort').disabled = true;
     $('scan-loading').hidden = false;
-    if (activeSource.manifestUrl && !forceCacheClear) resetPersistentManifest();
-    setScanStatus(activeSource.manifestUrl && !forceCacheClear ? 'Loading media index…' :
+    if (usesPublishedManifest()) resetPersistentManifest({ cacheBust: forceCacheClear });
+    setScanStatus(usesPublishedManifest() ? 'Loading media index…' :
         (mediaFiles.length || subfolders.length ? 'Refreshing folders…' : 'Scanning folders…'));
     try {
         const listing = await scanDirectory(folder, { signal: session.signal, bypassCache: forceCacheClear });
@@ -1324,7 +1392,9 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
         $('warning-title').textContent = emptyFolderNotice ? 'Album Is Empty' : 'No Media Detected';
         $('warning-message').textContent = emptyFolderNotice
             ? 'No supported photos or videos remain in this album.'
-            : 'No supported media found in the selected folder/view.';
+            : (empty && isManifestOnlySource()
+                ? 'The published media index contains no supported media. Regenerate and redeploy the index after adding files.'
+                : 'No supported media found in the selected folder/view.');
         showWarning(empty);
         renderBreadcrumb();
         setScanStatus(result.failedFolders.length ? 'Scan incomplete — some folders unavailable' :
@@ -1345,6 +1415,15 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
         // Only a confirmed missing top-level/current album reaches this branch.
         if (folder && isMissingFolderError(error)) {
             handleMissingFolder(folder);
+            return false;
+        }
+        if (isManifestOnlySource() && isPersistentManifestError(error)) {
+            manifestFailureNotice = true;
+            setScanStatus('Published library unavailable', true);
+            showScanFailures([]);
+            $('warning-title').textContent = 'Published Library Unavailable';
+            $('warning-message').textContent = 'The published media index is missing, invalid, or incomplete. Regenerate and redeploy it, then choose Reload Library.';
+            showWarning(true);
             return false;
         }
         setScanStatus('Scan failed — check connection and retry', true);
@@ -1459,11 +1538,13 @@ function showWarning(show) {
     const previous = $('btn-warning-previous');
     const root = $('btn-warning-root');
     const recovery = missingFolderRecovery;
-    const confirmedAlbumState = Boolean(recovery || emptyFolderNotice);
+    const manifestState = isManifestOnlySource();
+    const confirmedAlbumState = Boolean(recovery || emptyFolderNotice || manifestFailureNotice || manifestState);
     previous.textContent = recovery ? 'Parent folder' : 'Previous location';
     previous.hidden = recovery ? !recovery.parent : warningReturnFolder === null || warningReturnFolder === currentFolder;
     root.hidden = recovery ? false : !currentFolder;
     btnRetryWarning.hidden = Boolean(recovery);
+    btnRetryWarning.textContent = manifestState ? 'Reload Library' : 'Scan Again';
     $('warning-source-summary').hidden = confirmedAlbumState;
     $('warning-server-help').hidden = confirmedAlbumState;
     $('warning-offline-note').hidden = confirmedAlbumState;

@@ -102,11 +102,18 @@
             if (entry.scanCache !== undefined && typeof entry.scanCache !== 'boolean') {
                 throw new Error('scanCache must be true or false');
             }
+            const discoveryMode = entry.discoveryMode === undefined ? 'auto' : entry.discoveryMode;
+            if (!['auto', 'directory', 'manifest'].includes(discoveryMode)) {
+                throw new Error('discoveryMode must be auto, directory, or manifest');
+            }
+            if (discoveryMode === 'manifest' && !manifestUrl) {
+                throw new Error('discoveryMode manifest requires manifestPath');
+            }
             ids.add(entry.id);
             return { id: entry.id, label: entry.label.trim(), path: entry.path, url: url.href,
                 thumbnailPath: entry.thumbnailPath || null, thumbnailUrl: thumbnailUrl?.href || null,
                 manifestPath: entry.manifestPath || null, manifestUrl: manifestUrl?.href || null,
-                scanCache: entry.scanCache === true };
+                scanCache: entry.scanCache === true, discoveryMode };
         });
         return {
             baseUrl, sources,

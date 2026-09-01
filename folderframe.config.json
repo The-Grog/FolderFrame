@@ -3,7 +3,8 @@
     {
       "id": "photos",
       "label": "Photos",
-      "path": "photos/"
+      "path": "photos/",
+      "discoveryMode": "auto"
     }
   ],
   "defaults": {

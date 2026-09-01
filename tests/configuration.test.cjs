@@ -794,6 +794,20 @@ test('optional persistent manifest paths resolve safely and require JSON', () =>
         thumbnailPath: 'thumbnails/', manifestPath: 'folderframe-data/library.json'
     }] }).sources[0];
     assert.equal(source.manifestUrl, 'https://example.test/frame/folderframe-data/library.json');
+    assert.equal(source.discoveryMode, 'auto');
+    assert.equal(normalize({ sources: [{
+        id: 'static', label: 'Static', path: 'photos/',
+        manifestPath: 'folderframe-data/library.json', discoveryMode: 'manifest'
+    }] }).sources[0].discoveryMode, 'manifest');
+    assert.equal(normalize({ sources: [{
+        id: 'live', label: 'Live', path: 'photos/', discoveryMode: 'directory'
+    }] }).sources[0].discoveryMode, 'directory');
+    assert.throws(() => normalize({ sources: [{
+        id: 'bad', label: 'Bad', path: 'photos/', discoveryMode: 'manifest'
+    }] }), /requires manifestPath/);
+    assert.throws(() => normalize({ sources: [{
+        id: 'bad', label: 'Bad', path: 'photos/', discoveryMode: 'clever'
+    }] }), /discoveryMode/);
     for (const manifestPath of ['', 'file:///tmp/index.json', 'https://user:pass@example.test/index.json',
         'index.json?old=1', 'index.txt', '..\\index.json']) {
         assert.throws(() => normalize({ sources: [{ id: 'p', label: 'P', path: 'photos/', manifestPath }] }), /manifestPath/);
@@ -1006,11 +1020,11 @@ test('persistent manifest supplies listings, dates, sizes, and generated thumbna
         'https://example.test/frame/thumbs/2026/photo.jpg.webp');
 });
 
-test('invalid persistent manifest falls back to directory scanning and manual refresh bypasses it', async () => {
+test('auto discovery falls back from an invalid manifest and refresh revalidates it', async () => {
     const config = normalizeConfigCopy({ manifestPath: 'folderframe-data/library.json' });
     let manifestRequests = 0, directoryRequests = 0;
     const app = await boot({ config, fetchHandler: async url => {
-        if (url.endsWith('/folderframe-data/library.json')) {
+        if (new URL(url).pathname.endsWith('/folderframe-data/library.json')) {
             manifestRequests++;
             return { ok: true, json: async () => ({ version: 99 }) };
         }
@@ -1025,8 +1039,92 @@ test('invalid persistent manifest falls back to directory scanning and manual re
     await vm.runInContext("scanDirectory('Nested/Child')", app.context);
     assert.equal(manifestRequests, before);
     await vm.runInContext("scanDirectory('Live', { bypassCache: true })", app.context);
-    assert.equal(manifestRequests, before);
-    assert.ok(directoryRequests >= 2);
+    assert.equal(manifestRequests, before, 'one scan does not retry an already failed manifest');
+    await app.get('btn-refresh-grid').listeners.click();
+    assert.ok(manifestRequests > before, 'explicit refresh starts a new manifest validation');
+    assert.ok(directoryRequests >= 3);
+});
+
+test('manifest discovery rejects an invalid index without attempting directory listings', async () => {
+    const config = normalizeConfigCopy({
+        manifestPath: 'folderframe-data/library.json', discoveryMode: 'manifest', scanCache: true
+    });
+    let manifestRequests = 0, directoryRequests = 0;
+    const app = await boot({ config, fetchHandler: async url => {
+        if (url.includes('/folderframe-data/library.json')) {
+            manifestRequests++;
+            return { ok: true, json: async () => ({ version: 99 }) };
+        }
+        directoryRequests++;
+        return { ok: true, text: async () => '<a href="photo.jpg">photo</a>' };
+    } });
+    assert.equal(manifestRequests, 1);
+    assert.equal(directoryRequests, 0);
+    assert.equal(app.get('warning-title').textContent, 'Published Library Unavailable');
+    assert.match(app.get('warning-message').textContent, /Regenerate and redeploy/);
+    assert.equal(app.get('refresh-grid-label').textContent, 'Reload Library');
+    assert.match(app.get('btn-refresh-grid').title, /New files appear after/);
+    assert.equal([...app.saved.keys()].some(key => key.includes('scan-manifest')), false,
+        'strict manifest mode ignores browser scanCache');
+});
+
+test('manifest discovery accepts an empty index and cache-busts explicit reloads', async () => {
+    const config = normalizeConfigCopy({
+        manifestPath: 'folderframe-data/library.json', discoveryMode: 'manifest', scanCache: true
+    });
+    const manifestUrls = [];
+    const index = {
+        version: 1, generatedAt: '2026-09-01T12:00:00Z',
+        root: { path: '', files: [], folders: [] }, chunks: {}, errors: []
+    };
+    const app = await boot({ config, fetchHandler: async url => {
+        if (url.includes('/folderframe-data/library.json')) {
+            manifestUrls.push(url);
+            return { ok: true, json: async () => index };
+        }
+        throw new Error(`Unexpected directory request: ${url}`);
+    } });
+    assert.equal(app.get('warning-title').textContent, 'No Media Detected');
+    assert.match(app.get('warning-message').textContent, /published media index contains no supported media/i);
+    assert.equal(manifestUrls.length, 1);
+    await app.get('btn-refresh-grid').listeners.click();
+    assert.equal(manifestUrls.length, 2);
+    assert.match(manifestUrls[1], /[?&]ff_refresh=/);
+    assert.equal([...app.saved.keys()].some(key => key.includes('scan-manifest')), false);
+});
+
+test('directory discovery never requests a configured manifest', async () => {
+    const config = normalizeConfigCopy({
+        manifestPath: 'folderframe-data/library.json', discoveryMode: 'directory'
+    });
+    let manifestRequests = 0, directoryRequests = 0;
+    await boot({ config, fetchHandler: async url => {
+        if (url.includes('/folderframe-data/library.json')) {
+            manifestRequests++;
+            return { ok: true, json: async () => ({ version: 1 }) };
+        }
+        directoryRequests++;
+        return { ok: true, text: async () => '' };
+    } });
+    assert.equal(manifestRequests, 0);
+    assert.ok(directoryRequests >= 1);
+});
+
+test('manifest discovery treats a missing referenced chunk as a hard index error', async () => {
+    const config = normalizeConfigCopy({
+        manifestPath: 'folderframe-data/library.json', discoveryMode: 'manifest'
+    });
+    const index = {
+        version: 1,
+        root: { path: '', files: [], folders: ['2026'] },
+        chunks: {},
+        errors: []
+    };
+    const app = await boot({ config, fetchHandler: async url => {
+        if (url.includes('/folderframe-data/library.json')) return { ok: true, json: async () => index };
+        throw new Error(`Unexpected directory request: ${url}`);
+    } });
+    await assert.rejects(vm.runInContext("scanDirectory('2026')", app.context), /no chunk/);
 });
 
 test('all-files discovery paints the current directory before a deeper folder finishes', async () => {

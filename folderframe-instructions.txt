@@ -98,7 +98,8 @@ appdata and served as an ordinary static file. Add manifestPath to the source:
 
     { "id": "photos", "label": "Photos", "path": "photos/",
       "thumbnailPath": "thumbnails/",
-      "manifestPath": "folderframe-data/library.json" }
+      "manifestPath": "folderframe-data/library.json",
+      "discoveryMode": "manifest" }
 
 Generate thumbnails and the index together:
 
@@ -110,10 +111,36 @@ Or update only the index:
 
 The helper creates library.json and an adjacent library.d directory. Serve both.
 Later runs compare directory mtimes and re-list only changed directories while
-reusing unchanged records. Missing or invalid index data logs a fallback and the
-gallery scans normal HTML directory listings. Refresh Folder bypasses all cached
-index data. The browser reads the manifest but cannot write server appdata, so
-run the helper manually or on a schedule.
+reusing unchanged records.
+
+discoveryMode is configured per source:
+
+-   "auto" (default) tries the published manifest, then falls back to HTML
+    directory listings if it is unavailable or invalid.
+-   "directory" never requests the manifest and always uses directory listings.
+-   "manifest" requires a valid manifest and never attempts directory scanning.
+    This mode works on static hosts such as GitHub Pages or Cloudflare Pages.
+
+Strict manifest mode accepts a valid empty index, ignores browser scanCache, and
+continues to use thumbnailPath for grid and album previews. Missing/invalid index
+data or unreadable chunks show a published-library error with regenerate/redeploy
+guidance. The refresh button becomes Reload Library and cache-busts the published
+index; it cannot discover files not yet included in that index. Regenerate and
+redeploy library.json plus library.d after media changes. The browser reads the
+manifest but cannot write server appdata, so run the helper manually or on a
+schedule.
+
+Typical static package layout:
+
+    FolderFrame/
+    |-- index.html
+    |-- app.js
+    |-- folderframe.config.json
+    |-- photos/
+    |-- thumbnails/                 (optional)
+    `-- folderframe-data/
+        |-- library.json
+        `-- library.d/*.json
 
 OPTION 1 — QUICK LOCAL TEST WITH PYTHON
 

@@ -69,10 +69,9 @@ varies by mobile browser.
 
 ## Overview
 
-This is a lightweight, self-hosted photo and video gallery. It reads the
-contents of configured media directories dynamically from the web server’s
-directory listing, so there is no database, import process, or manually
-maintained media list.
+This is a lightweight, self-hosted photo and video gallery. It can read configured
+media directories dynamically from web-server directory listings or consume a
+generated static manifest, so there is no database, PHP, or build step.
 
 - **Folder-based albums:** thumbnail grid, image cover previews with folder badges, nested albums, breadcrumbs, and recursive All Pics view.
 - **Flexible sorting:** Natural Filename order by default, plus Newest and Oldest, with separate index/embed defaults. Date sorting uses server modification dates, not photo capture dates.
@@ -86,7 +85,7 @@ maintained media list.
 - **Optional persistent media index:** serve a lean appdata-generated manifest so unchanged large trees open without re-downloading and parsing every directory listing.
 - **Large-grid windowing:** large galleries render 100 tiles initially and keep at most 300 media tiles in the DOM while preserving the full scrollbar and media order.
 - **Bounded native decoding:** JPEG, PNG, WebP, and GIF loads use a four-slot priority queue so viewer images stay responsive while large grids populate.
-- **Static-server hosting:** no database or build step; works with a web server that supplies HTML directory listings.
+- **Flexible static hosting:** use live HTML directory listings or a generated manifest on hosts such as GitHub Pages and Cloudflare Pages.
 
 ## Browser and mobile support
 
@@ -129,7 +128,7 @@ and starts the embed as a controls-free slideshow including subfolders:
 ```json
 {
   "sources": [
-    { "id": "photos", "label": "Photos", "path": "photos/", "scanCache": true }
+    { "id": "photos", "label": "Photos", "path": "photos/", "scanCache": true, "discoveryMode": "auto" }
   ],
   "defaults": {
     "source": "photos",
@@ -172,6 +171,11 @@ When enabled, FolderFrame stores lean directory entries in localStorage and uses
 directory `Last-Modified` HEAD responses to reuse unchanged listings. Servers that
 do not expose a usable directory timestamp automatically receive normal full scans.
 Missing, corrupt, blocked, or quota-limited browser storage also falls back safely.
+
+Each source can set `discoveryMode` to `"auto"` (default: try a published
+manifest, then directory listings), `"directory"` (never request a manifest), or
+`"manifest"` (require the published manifest and never scan directories). Strict
+manifest mode is intended for static hosts and ignores `scanCache`.
 
 Put settings in `defaults` for both profiles or in `index`/`embed` to override them.
 
@@ -513,7 +517,8 @@ ordinary static file instead of walking every directory listing:
   "label": "Photos",
   "path": "photos/",
   "thumbnailPath": "thumbnails/",
-  "manifestPath": "folderframe-data/library.json"
+  "manifestPath": "folderframe-data/library.json",
+  "discoveryMode": "manifest"
 }
 ```
 
@@ -532,11 +537,31 @@ python generate_thumbnails.py photos --manifest folderframe-data/library.json --
 The helper stores path, modification time, size, and optional thumbnail path,
 with one chunk per top-level folder. Later runs stat known directories and only
 re-list subtrees whose directory mtime changed. The manifest and its adjacent
-`library.d/` directory must be served as static files. Missing, stale, invalid,
-or unreadable index data is reported in the browser console and falls back to
-normal directory scanning. **Refresh Folder** deliberately bypasses both the
-persistent index and browser scan cache for an immediate live scan. The browser
-never writes appdata itself; run the helper manually or on a schedule.
+`library.d/` directory must be served as static files.
+
+`"auto"` mode reports an unusable index in the console and falls back to normal
+directory scanning. `"manifest"` mode instead shows a clear published-index error
+and never attempts directory discovery, making it suitable for GitHub Pages,
+Cloudflare Pages, and other static hosts. A valid empty index is accepted.
+Browser `scanCache` is ignored in strict manifest mode, while `thumbnailPath`
+continues to work normally.
+
+In strict manifest mode the control reads **Reload Library**. It cache-busts and
+reloads the published index, but new media appears only after regenerating and
+redeploying `library.json` and `library.d/`. The browser never writes server
+appdata itself; run the helper manually or on a schedule.
+
+```text
+FolderFrame/
+├── index.html
+├── app.js
+├── folderframe.config.json
+├── photos/
+├── thumbnails/              # optional
+└── folderframe-data/
+    ├── library.json
+    └── library.d/*.json
+```
 
 The compact header places the album/file count beside the directory breadcrumb.
 Parent folders remain clickable; the current folder appears once as plain text,
