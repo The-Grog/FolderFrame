@@ -18,3 +18,7 @@ photos/*
 Thumbs.db
 __pycache__/
 *.py[cod]
+
+# GitHub Pages demo outputs are generated during deployment.
+demo-thumbnails/
+demo-manifest/
