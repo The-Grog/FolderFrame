@@ -23,7 +23,7 @@ Try the [FolderFrame public demo](https://demo.folderframe.com/). GitHub Pages
 cannot provide live directory listings, so the demo publishes a pre-generated
 media manifest and thumbnail tree. See [resilience and testing
 notes](RESILIENCE.md#optional-persistent-media-index) for why this static path
-is used. The curated demo media set is currently being prepared.
+is used. The curated demo media set showcases landscapes, architecture, space, and nested albums.
 
 Make it your own: FolderFrame is MIT-licensed, so you can edit the site and its
 files, customize the branding, and adapt it to your needs. Keep the required
