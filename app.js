@@ -673,6 +673,17 @@ const gridPath = $('grid-path');
 const breadcrumb = $('breadcrumb');
 const btnShuffle = $('btn-shuffle');
 const btnAutoRefresh = $('btn-auto-refresh');
+const btnGridOptions = $('btn-grid-options');
+const gridOptionsMenu = $('grid-options-menu');
+const gridHeader = $('grid-header');
+const gridHeaderMain = gridHeader?.querySelector('.grid-header-main');
+const gridActions = gridHeader?.querySelector('.grid-actions');
+const gridDensitySlot = $('grid-density-slot');
+const gridDensityMenuSlot = $('grid-density-menu-slot');
+const gridViewModeSlot = $('grid-view-mode-slot');
+const gridViewModeMenuSlot = $('grid-view-mode-menu-slot');
+const gridSortSlot = $('grid-sort-slot');
+const gridSortMenuSlot = $('grid-sort-menu-slot');
 const btnViewMode = $('btn-view-mode');
 const btnTvMode = $('btn-tv-mode');
 const scanStatus = $('scan-status');
@@ -688,6 +699,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     updateFullscreenButton();
     const loaded = await loadGallery({ preserveView: false });
     if (loaded !== false) updateFolderHistory(currentFolder, 'replace');
+    updateGalleryHeaderLayout();
     startAutoRefreshTimer();
 
     if (slideshowPlaying && mediaFiles.length > 0 && isGridViewActive) {
@@ -861,10 +873,41 @@ function updateMediaActions(filepath, filename, forceVideo = false) {
         : 'Copy displayed image after it loads';
 }
 
+function updateGalleryHeaderLayout() {
+    if (!gridHeader || !gridHeaderMain || !gridActions) return;
+    const controls = [
+        { button: $('btn-grid-density'), home: gridDensitySlot, menu: gridDensityMenuSlot },
+        { button: $('btn-sort'), home: gridSortSlot, menu: gridSortMenuSlot },
+        { button: $('btn-view-mode'), home: gridViewModeSlot, menu: gridViewModeMenuSlot }
+    ].filter(control => control.button && control.home && control.menu);
+
+    // Start with the full desktop toolbar. If the navigation and actions cannot
+    // share one line, move controls into Options one at a time, least essential first.
+    controls.forEach(({ button, home }) => {
+        if (button.parentElement !== home) home.appendChild(button);
+        button.setAttribute('role', 'button');
+    });
+    const available = gridHeader.clientWidth || 0;
+    const doesNotFit = () => available > 0 &&
+        (gridHeaderMain.scrollWidth || 0) + (gridActions.scrollWidth || 0) + 18 > available;
+    controls.forEach(({ button, menu }) => {
+        if (!doesNotFit()) return;
+        menu.appendChild(button);
+        button.setAttribute('role', 'menuitem');
+    });
+    gridHeader.classList.toggle('actions-collapsed', controls.some(({ button, menu }) => button.parentElement === menu));
+}
+
 function setViewerOptionsOpen(open) {
     const expanded = Boolean(open);
     viewerOptionsMenu.hidden = !expanded;
     btnViewerOptions.setAttribute('aria-expanded', String(expanded));
+}
+
+function setGridOptionsOpen(open) {
+    const expanded = Boolean(open);
+    gridOptionsMenu.hidden = !expanded;
+    btnGridOptions.setAttribute('aria-expanded', String(expanded));
 }
 
 function imageClipboardBlob() {
@@ -1555,36 +1598,42 @@ function isPhotoActive() { return mediaFiles[currentIndex] ? isImageFile(mediaFi
 
 function renderBreadcrumb() {
     breadcrumb.innerHTML = '';
-    const root = document.createElement('button');
-    root.className = 'crumb';
-    root.textContent = activeSource.label;
-    root.addEventListener('click', () => navigateToFolder(''));
-    breadcrumb.appendChild(root);
+    $('source-root-label').textContent = activeSource.label;
 
     const parts = currentFolder.split('/').filter(Boolean);
+    $('breadcrumb-root-separator').hidden = parts.length === 0;
+    $('gallery-path-bar').hidden = parts.length === 0;
     let running = '';
-    parts.slice(0, -1).forEach((part) => {
+    const ancestors = parts.slice(0, -1);
+    $('current-path-separator').hidden = ancestors.length === 0;
+    if (ancestors.length > 1) {
+        const ellipsis = document.createElement('span');
+        ellipsis.className = 'crumb-ellipsis';
+        ellipsis.textContent = '…';
+        ellipsis.setAttribute('aria-hidden', 'true');
+        breadcrumb.appendChild(ellipsis);
+    }
+    ancestors.forEach((part, index) => {
         const sep = document.createElement('span');
-        sep.className = 'crumb-separator';
+        sep.className = `crumb-separator${index < ancestors.length - 1 ? ' crumb-middle' : ''}`;
         sep.textContent = '›';
-        breadcrumb.appendChild(sep);
+        if (index > 0) breadcrumb.appendChild(sep);
         running = running ? `${running}/${part}` : part;
         const target = running;
         const crumb = document.createElement('button');
-        crumb.className = 'crumb';
+        crumb.className = `crumb${index < ancestors.length - 1 ? ' crumb-middle' : ' crumb-tail'}`;
         crumb.textContent = part;
         crumb.addEventListener('click', () => navigateToFolder(target));
         breadcrumb.appendChild(crumb);
     });
     if (galleryViewMode === 'all') {
-        gridPath.textContent = currentFolder
-            ? `${parts[parts.length - 1]} • including subfolders`
-            : 'All media • including subfolders';
+        gridPath.textContent = currentFolder ? parts[parts.length - 1] : 'All media';
     } else {
         gridPath.textContent = parts[parts.length - 1] || 'Sorted by folder';
     }
     gridPath.title = currentFolder || activeSource.label;
     gridPath.setAttribute('aria-current', currentFolder ? 'location' : 'false');
+    updateGalleryHeaderLayout();
 }
 
 async function navigateToFolder(folder, { historyMode = 'push' } = {}) {
@@ -1617,6 +1666,7 @@ async function navigateToFolder(folder, { historyMode = 'push' } = {}) {
 
 function renderGridView() {
     setViewerOptionsOpen(false);
+    setGridOptionsOpen(false);
     stopViewerSession();
     const session = startGridSession();
     const returnPosition = !isGridViewActive && gridReturn &&
@@ -1642,8 +1692,8 @@ function renderGridView() {
     const total = mediaFiles.length;
     const albums = galleryViewMode === 'folders' ? subfolders.length : 0;
     gridCount.textContent = galleryViewMode === 'all'
-        ? `${total} file${total === 1 ? '' : 's'} • all folders`
-        : `${albums ? `${albums} album${albums === 1 ? '' : 's'} • ` : ''}${total} file${total === 1 ? '' : 's'}`;
+        ? `${total} File${total === 1 ? '' : 's'} • All Folders`
+        : `${albums ? `${albums} Album${albums === 1 ? '' : 's'} • ` : ''}${total} File${total === 1 ? '' : 's'}`;
 
     // Album cards first when browsing by folder.
     const observeAlbum = galleryViewMode === 'folders' ? startAlbumPreviews() : null;
@@ -2310,6 +2360,7 @@ function setupEventListeners() {
     btnImageMode.addEventListener('click', toggleImageMode);
     btnCopyLink.addEventListener('click', copyCurrentImage);
     btnViewerOptions.addEventListener('click', () => setViewerOptionsOpen(viewerOptionsMenu.hidden));
+    btnGridOptions.addEventListener('click', () => setGridOptionsOpen(gridOptionsMenu.hidden));
     viewport.addEventListener('wheel', handleWheel, { passive: false });
     viewport.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('mousemove', handleMouseMove);
@@ -2346,6 +2397,11 @@ function setupEventListeners() {
         if (e.defaultPrevented || e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return;
         if (e.target?.isContentEditable || e.target?.closest?.('a, select, input, textarea, video, [contenteditable]:not([contenteditable="false"])')) return;
         if (isGridViewActive) {
+            if (e.key === 'Escape' && !gridOptionsMenu.hidden) {
+                e.preventDefault();
+                setGridOptionsOpen(false);
+                return;
+            }
             const direction = { ArrowUp: -48, ArrowDown: 48, PageUp: -0.85, PageDown: 0.85 };
             if (!['Home', 'End', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown'].includes(e.key)) return;
             e.preventDefault();
@@ -2379,9 +2435,13 @@ function setupEventListeners() {
     });
 
     window.addEventListener('mousemove', () => { if (!isGridViewActive) resetIdleTimer(); });
-    window.addEventListener('resize', () => { if (!isGridViewActive && isPhotoActive()) applyImageRotation(); });
+    window.addEventListener('resize', () => {
+        updateGalleryHeaderLayout();
+        if (!isGridViewActive && isPhotoActive()) applyImageRotation();
+    });
     window.addEventListener('click', event => {
         if (!event.target?.closest?.('#viewer-options')) setViewerOptionsOpen(false);
+        if (!event.target?.closest?.('#grid-options')) setGridOptionsOpen(false);
         if (!isGridViewActive) resetIdleTimer();
     });
     window.addEventListener('touchstart', () => { if (!isGridViewActive) resetIdleTimer(); });

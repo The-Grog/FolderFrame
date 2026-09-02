@@ -425,7 +425,8 @@ album hierarchy.
 
 ### Refreshing
 
-Click “Refresh Folder” to scan immediately.
+Open the gallery’s three-dot menu and choose **Refresh Folder** to scan
+immediately. Strict manifest sources show **Reload Library** instead.
 
 When Auto Refresh is enabled, the current folder is rescanned at the configured refreshInterval
 (default: one minute for index, five minutes for embed). The gallery also rescans when you return to the browser tab.
@@ -466,13 +467,13 @@ therefore take longer to populate than JPEG-based galleries.
 
 ### Grid and album view
 
-View, sorting, and Auto Refresh buttons show their current mode using neutral
-styling; Refresh Folder uses the same styling. In the viewer, Shuffle means
-shuffle is enabled and Shuffle Off means it is disabled.
+View, sorting, and grid-density buttons remain directly accessible. Auto Refresh
+and Refresh Folder/Reload Library live in the gallery’s three-dot menu. In the
+viewer, Shuffle means shuffle is enabled and Shuffle Off means it is disabled.
 
 ### Sorting
 
-The button between By Folder and Auto Refresh shows the current sorting.
+The sorting button beside By Folder shows the current sorting.
 Click it to cycle Newest, Oldest, Filename. Filename is the default.
 Newest/Oldest use the server's file modification date (HTTP Last-Modified),
 not when the photo was taken. Files with missing dates sort last by filename;
@@ -563,11 +564,16 @@ FolderFrame/
     └── library.d/*.json
 ```
 
-The compact header places the album/file count beside the directory breadcrumb.
-Parent folders remain clickable; the current folder appears once as plain text,
-including on phones. Hover over that label to see its full relative path.
-Click or tap the FolderFrame logo to return to the current source's top-level
-gallery. This works in both the standalone gallery and the embedded grid.
+The sticky gallery header keeps navigation available while the grid scrolls. A
+single root control combines the FolderFrame logo and source name, followed by
+a plain blue-chevron breadcrumb and an unboxed album/file count. Parent folders remain
+clickable and the current folder uses stronger text. Click or tap the combined root control to return to the current
+source’s top-level gallery. On narrow screens, middle breadcrumb segments
+collapse to an ellipsis while the source, last ancestor, current folder, and
+count remain visible. View, sort, and thumbnail-density controls stay directly
+available whenever the complete header fits one row. As space narrows they move
+progressively into the three-dot menu, keeping the header on one line and Options
+anchored at the right edge.
 
 Album tiles preview the first image directly inside that folder, using the
 natural filename order regardless of the selected sort (2.jpg before 10.jpg).
@@ -628,9 +634,8 @@ Docker Compose controls are documented in the
 -   Click a photo or video to open the full viewer.
 -   Click an album card to enter that folder.
 -   Use the breadcrumb to navigate back through albums.
--   Click “Refresh Folder” for an immediate rescan.
--   Toggle “Auto Refresh” to enable or disable the configured automatic
-    rescan.
+-   Open the three-dot gallery menu for Refresh Folder/Reload Library and
+    Auto Refresh.
 -   Toggle “By Folder” / “All Pics” to switch between album browsing and
     recursively showing media from the current folder and its subfolders.
 
@@ -676,14 +681,16 @@ Returning to Gallery restores the scroll position of the originally opened
 tile and briefly highlights it. If refreshed content moved the tile, it is
 scrolled into view; if removed, the saved scroll position is used instead.
 
-At widths up to 560 CSS pixels (including narrow embeds), the gallery uses
-a logo/count row, a separate breadcrumb, and a 2-by-2 button grid. Routine
-timestamps are hidden; scan errors remain visible. The viewer uses compact wrapping
+At narrow widths, the combined logo/source control and complete breadcrumb stay
+left-aligned while status and primary controls wrap together on the right. Middle
+breadcrumb segments collapse when necessary. Auto
+Refresh and manual reload remain in the three-dot menu. Routine timestamps are
+hidden while scan errors remain visible. The viewer uses compact wrapping
 controls for Gallery, playback, Rotate, Fit/Original, Full, and TV Mode. Reset Zoom is hidden
 at this width. To reset a magnified photo, switch Fit/Original; switch back to
 Fit if needed. Wider headers keep compact controls and wrap to use available space.
 The sizing button shows an icon with Fit or Original; Full toggles fullscreen.
-Long album breadcrumbs scroll sideways. Use the
+Long album breadcrumbs collapse their middle segments. Use the
 arrow buttons to change media; drag on a zoomed photo to pan it.
 The grid scrolls vertically, with a content-sized header and visible filenames.
 Photo pinch gestures zoom the image; page zoom remains available outside the photo.

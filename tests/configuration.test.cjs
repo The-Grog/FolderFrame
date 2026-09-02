@@ -148,6 +148,53 @@ test('viewer options menu owns secondary controls and closes before Escape exits
     assert.equal(app.state().isGridViewActive, true);
 });
 
+test('gallery options own refresh controls and the unified path bar owns logo and count', async () => {
+    const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+    const menu = html.indexOf('id="grid-options-menu"');
+    const headerEnd = html.indexOf('</header>', menu);
+    for (const id of ['btn-auto-refresh', 'btn-refresh-grid']) {
+        const position = html.indexOf(`id="${id}"`);
+        assert.ok(position > menu && position < headerEnd);
+    }
+    assert.ok(html.indexOf('id="grid-density-slot"') < html.indexOf('id="grid-options"'));
+    assert.ok(html.indexOf('id="grid-density-menu-slot"') > menu && html.indexOf('id="grid-density-menu-slot"') < headerEnd);
+    for (const id of ['grid-view-mode-menu-slot', 'grid-sort-menu-slot']) {
+        const position = html.indexOf(`id="${id}"`);
+        assert.ok(position > menu && position < headerEnd);
+    }
+    const pathBar = html.indexOf('class="gallery-path-bar"');
+    const sourceControl = html.indexOf('id="source-control"', pathBar);
+    for (const id of ['breadcrumb', 'grid-path']) {
+        const position = html.indexOf(`id="${id}"`);
+        assert.ok(position > pathBar && position < sourceControl);
+    }
+    assert.ok(html.indexOf('id="btn-gallery-home"') < pathBar);
+    const homeStart = html.indexOf('id="btn-gallery-home"');
+    const homeEnd = html.indexOf('</button>', homeStart);
+    assert.ok(html.indexOf('id="source-root-label"') > homeStart && html.indexOf('id="source-root-label"') < homeEnd);
+    const statusStack = html.indexOf('class="grid-status-stack"');
+    const headerEndPosition = html.indexOf('</header>');
+    assert.ok(statusStack > headerEndPosition);
+    assert.ok(html.indexOf('id="grid-count"') > statusStack);
+    assert.ok(html.indexOf('id="scan-status"') > html.indexOf('id="grid-count"'));
+    const css = fs.readFileSync(path.join(__dirname, '../styles.css'), 'utf8');
+    assert.match(css, /#grid-header\s*\{[^}]*position:sticky/s);
+    assert.match(css, /#grid-header \.grid-actions\s*\{[^}]*justify-content:flex-end/s);
+    assert.match(css, /#grid-header \.grid-actions\s*\{[^}]*flex-wrap:nowrap/s);
+    assert.match(css, /#grid-header\s*\{[^}]*flex-wrap:nowrap/s);
+    assert.match(css, /\.grid-options\s*\{[^}]*margin-left:0/s);
+
+    const app = await boot();
+    assert.equal(app.get('grid-options-menu').hidden, true);
+    app.get('btn-grid-options').listeners.click();
+    assert.equal(app.get('grid-options-menu').hidden, false);
+    let prevented = false;
+    app.windowListeners.keydown({ key: 'Escape', target: app.get('btn-grid-options'),
+        preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(app.get('grid-options-menu').hidden, true);
+});
+
 test('scan errors remain distinguishable from routine mobile timestamps', async () => {
     const app = await boot();
     const classes = new Set();
@@ -199,9 +246,13 @@ test('empty source root hides navigation actions that cannot leave the warning',
 test('breadcrumb links only ancestors and shows the current folder once as text', async () => {
     const app = await boot({ search: '?album=Family/2026' });
     const labels = app.get('breadcrumb').children.map(child => child.textContent);
-    assert.deepEqual(labels, ['Photos', '›', 'Family']);
+    assert.deepEqual(labels, ['Family']);
+    assert.equal(app.get('source-root-label').textContent, 'Photos');
+    assert.equal(app.get('breadcrumb-root-separator').hidden, false);
+    assert.equal(app.get('current-path-separator').hidden, false);
     assert.equal(app.get('grid-path').textContent, '2026');
     assert.equal(app.get('grid-path').title, 'Family/2026');
+    assert.equal(app.get('grid-count').textContent, '1 File');
 });
 
 test('album navigation uses browser history for mouse back and forward buttons', async () => {
