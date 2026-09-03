@@ -119,18 +119,16 @@ test('viewer options menu owns secondary controls and closes before Escape exits
     const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
     const menu = html.indexOf('id="viewer-options-menu"');
     const headerEnd = html.indexOf('</header>', menu);
-    for (const id of ['select-interval', 'btn-download', 'btn-copy-link']) {
+    for (const id of ['btn-shuffle', 'btn-reset-zoom', 'btn-fullscreen', 'btn-tv-mode',
+        'select-interval', 'btn-download', 'btn-copy-link', 'btn-copy-filename']) {
         const position = html.indexOf(`id="${id}"`);
         assert.ok(position > menu && position < headerEnd);
     }
     const options = html.indexOf('id="btn-viewer-options"');
-    const displayGroup = html.indexOf('class="viewer-display-controls"');
-    assert.ok(html.indexOf('id="btn-rotate"') < html.indexOf('id="btn-reset-zoom"'));
-    for (const id of ['btn-image-mode', 'btn-fullscreen', 'btn-tv-mode']) {
+    for (const id of ['btn-play-pause', 'btn-image-mode', 'btn-rotate']) {
         const position = html.indexOf(`id="${id}"`);
-        assert.ok(position > displayGroup && position < options);
+        assert.ok(position > 0 && position < options);
     }
-    assert.ok(html.indexOf('id="btn-shuffle"') < displayGroup);
 
     const app = await boot();
     vm.runInContext('enterFullScreenViewer(0)', app.context);
@@ -148,14 +146,16 @@ test('viewer options menu owns secondary controls and closes before Escape exits
     assert.equal(app.state().isGridViewActive, true);
 });
 
-test('gallery options own refresh controls and the unified path bar owns logo and count', async () => {
+test('gallery glow controls keep reload adaptive and the unified path bar owns logo and count', async () => {
     const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
     const menu = html.indexOf('id="grid-options-menu"');
     const headerEnd = html.indexOf('</header>', menu);
-    for (const id of ['btn-auto-refresh', 'btn-refresh-grid']) {
+    for (const id of ['btn-auto-refresh']) {
         const position = html.indexOf(`id="${id}"`);
         assert.ok(position > menu && position < headerEnd);
     }
+    assert.ok(html.indexOf('id="grid-refresh-slot"') < html.indexOf('id="grid-options"'));
+    assert.ok(html.indexOf('id="grid-refresh-menu-slot"') > menu && html.indexOf('id="grid-refresh-menu-slot"') < headerEnd);
     assert.ok(html.indexOf('id="grid-density-slot"') < html.indexOf('id="grid-options"'));
     assert.ok(html.indexOf('id="grid-density-menu-slot"') > menu && html.indexOf('id="grid-density-menu-slot"') < headerEnd);
     for (const id of ['grid-view-mode-menu-slot', 'grid-sort-menu-slot']) {
@@ -183,6 +183,18 @@ test('gallery options own refresh controls and the unified path bar owns logo an
     assert.match(css, /#grid-header \.grid-actions\s*\{[^}]*flex-wrap:nowrap/s);
     assert.match(css, /#grid-header\s*\{[^}]*flex-wrap:nowrap/s);
     assert.match(css, /\.grid-options\s*\{[^}]*margin-left:0/s);
+    assert.match(css, /--ff-glow:/);
+    assert.match(css, /--ff-pill-bg:/);
+    assert.match(css, /@media \(prefers-reduced-motion:reduce\)/);
+    const viewerHome = html.slice(html.indexOf('id="btn-show-grid"'), html.indexOf('</button>', html.indexOf('id="btn-show-grid"')));
+    assert.match(viewerHome, /ff-btn-home/);
+    assert.match(viewerHome, /docs\/images\/folderframe-(?:icon|mark)\.png/);
+    assert.match(html, /id="overlay-header" class="overlay ff-header"/);
+    assert.match(html, /class="header-left ff-header-left ff-pill"/);
+    assert.match(html, /class="header-right ff-header-right ff-pill"/);
+    assert.match(html, /id="grid-header" class="overlay ff-header"/);
+    assert.match(html, /class="grid-header-main ff-header-left ff-pill"/);
+    assert.match(html, /class="header-right grid-actions ff-header-right ff-pill"/);
 
     const app = await boot();
     assert.equal(app.get('grid-options-menu').hidden, true);

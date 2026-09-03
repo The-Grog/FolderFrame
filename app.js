@@ -647,6 +647,7 @@ const btnResetZoom = $('btn-reset-zoom');
 const btnImageMode = $('btn-image-mode');
 const btnDownload = $('btn-download');
 const btnCopyLink = $('btn-copy-link');
+const btnCopyFilename = $('btn-copy-filename');
 const btnViewerOptions = $('btn-viewer-options');
 const viewerOptionsMenu = $('viewer-options-menu');
 const imageModeText = $('image-mode-text');
@@ -684,6 +685,8 @@ const gridViewModeSlot = $('grid-view-mode-slot');
 const gridViewModeMenuSlot = $('grid-view-mode-menu-slot');
 const gridSortSlot = $('grid-sort-slot');
 const gridSortMenuSlot = $('grid-sort-menu-slot');
+const gridRefreshSlot = $('grid-refresh-slot');
+const gridRefreshMenuSlot = $('grid-refresh-menu-slot');
 const btnViewMode = $('btn-view-mode');
 const btnTvMode = $('btn-tv-mode');
 const scanStatus = $('scan-status');
@@ -848,12 +851,13 @@ function updateControlStates() {
     btnRefreshGrid.setAttribute('aria-label', strictManifest ? 'Reload published library index' : 'Refresh current folder');
     btnViewMode.classList.remove('is-active');
     btnViewMode.setAttribute('aria-pressed', String(galleryViewMode === 'all'));
+    if (btnCopyFilename) btnCopyFilename.disabled = !mediaFiles.length || isGridViewActive;
     // Like the other toggle buttons, the label describes the CURRENT state.
     btnViewMode.querySelector('.button-label').textContent = galleryViewMode === 'all' ? 'All Pics' : 'By Folder';
     btnViewMode.title = galleryViewMode === 'all'
         ? 'Currently showing all media recursively — click to browse by folder'
         : 'Currently browsing by folder — click to show all media recursively';
-    btnTvMode.classList.toggle('is-active', tvModeEnabled);
+    btnTvMode.classList.remove('is-active');
     btnTvMode.setAttribute('aria-pressed', String(tvModeEnabled));
     btnTvMode.querySelector('.button-label').textContent = tvModeEnabled ? 'TV Mode On' : 'TV Mode';
     syncPlayButton();
@@ -866,6 +870,7 @@ function updateMediaActions(filepath, filename, forceVideo = false) {
     const copyable = isImageFile(filepath) && !forceVideo;
     btnRotate.disabled = true;
     btnCopyLink.disabled = true;
+    if (btnCopyFilename) btnCopyFilename.disabled = true;
     const clipboardAvailable = window.isSecureContext && navigator.clipboard?.write && typeof ClipboardItem !== 'undefined';
     btnCopyLink.setAttribute('aria-label', copyable ? `Copy image ${filename}` : 'Copy Image is unavailable for video');
     btnCopyLink.title = !copyable ? 'Copy Image is unavailable for video'
@@ -875,6 +880,7 @@ function updateMediaActions(filepath, filename, forceVideo = false) {
 
 function updateGalleryHeaderLayout() {
     if (!gridHeader || !gridHeaderMain || !gridActions) return;
+    // Refresh Folder / Reload Library stays in the options menu with a text label.
     const controls = [
         { button: $('btn-grid-density'), home: gridDensitySlot, menu: gridDensityMenuSlot },
         { button: $('btn-sort'), home: gridSortSlot, menu: gridSortMenuSlot },
@@ -921,6 +927,35 @@ function imageClipboardBlob() {
         catch (error) { return reject(error); }
         canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not create clipboard image')), 'image/png');
     });
+}
+
+
+async function copyCurrentFilename() {
+    const name = mediaFiles[currentIndex] ? mediaFiles[currentIndex].split('/').pop() : (mediaTitle?.textContent || '').trim();
+    if (!name || name === 'Loading…') return;
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(name);
+        } else {
+            const ta = document.createElement('textarea');
+            ta.value = name;
+            ta.setAttribute('readonly', '');
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            ta.remove();
+        }
+        if (btnCopyFilename) {
+            const label = btnCopyFilename.querySelector('.button-label');
+            const prev = label?.textContent;
+            if (label) label.textContent = 'Copied';
+            setTimeout(() => { if (label && prev) label.textContent = prev; }, 1200);
+        }
+    } catch (error) {
+        console.warn('FolderFrame: could not copy filename.', error);
+    }
 }
 
 async function copyCurrentImage() {
@@ -2134,6 +2169,7 @@ function showMedia(index) {
             btnRotate.disabled = false;
             const clipboardAvailable = window.isSecureContext && navigator.clipboard?.write && typeof ClipboardItem !== 'undefined';
             btnCopyLink.disabled = !showCopyButton || !clipboardAvailable;
+    if (btnCopyFilename) btnCopyFilename.disabled = !showCopyButton || !clipboardAvailable;
             btnCopyLink.title = clipboardAvailable ? 'Copy displayed image' : 'Copy Image requires HTTPS or a trusted local context';
             setMediaLoading();
             img.style.display = 'block'; mediaTitle.textContent = displayName;
@@ -2359,6 +2395,7 @@ function setupEventListeners() {
     btnResetZoom.addEventListener('click', resetZoomAndPan);
     btnImageMode.addEventListener('click', toggleImageMode);
     btnCopyLink.addEventListener('click', copyCurrentImage);
+    btnCopyFilename?.addEventListener('click', copyCurrentFilename);
     btnViewerOptions.addEventListener('click', () => setViewerOptionsOpen(viewerOptionsMenu.hidden));
     btnGridOptions.addEventListener('click', () => setGridOptionsOpen(gridOptionsMenu.hidden));
     viewport.addEventListener('wheel', handleWheel, { passive: false });

@@ -219,6 +219,145 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     .btn { padding:8px 10px; }
 }
 
+/* Final specificity for glow controls after legacy responsive rules. */
+#overlay-header,
+#grid-header {
+    background:transparent;
+    border-color:transparent;
+    backdrop-filter:none;
+    -webkit-backdrop-filter:none;
+}
+.ff-btn.btn:focus-visible {
+    outline:none;
+    box-shadow:0 0 0 2px #000,0 0 0 4px var(--ff-accent);
+}
+
+/* Shared two-pill header geometry for grid and viewer. */
+:root {
+    --ff-pill-bg:rgba(20,20,22,.72);
+    --ff-pill-border:rgba(255,255,255,.08);
+    --ff-pill-blur:12px;
+    --ff-pill-radius:12px;
+    --ff-pill-pad-y:4px;
+    --ff-pill-pad-x:4px;
+}
+.ff-header {
+    display:flex; align-items:center; justify-content:space-between;
+    flex-direction:row; flex-wrap:nowrap; gap:12px;
+    min-height:50px; padding:0; background:transparent; border:0;
+    backdrop-filter:none; -webkit-backdrop-filter:none;
+}
+.ff-header-left,
+.ff-header-right { display:inline-flex; align-items:center; min-width:0; }
+.ff-header-left { flex:0 1 auto; }
+.ff-header-right { flex:0 0 auto; margin-left:auto; }
+.ff-pill {
+    display:inline-flex; align-items:center; width:max-content; max-width:100%;
+    min-height:50px; gap:var(--ff-btn-gap); flex-wrap:nowrap;
+    padding:var(--ff-pill-pad-y) var(--ff-pill-pad-x);
+    border:1px solid var(--ff-pill-border); border-radius:var(--ff-pill-radius);
+    background:var(--ff-pill-bg);
+    backdrop-filter:blur(var(--ff-pill-blur));
+    -webkit-backdrop-filter:blur(var(--ff-pill-blur));
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+}
+.ff-pill .ff-btn.btn,
+.ff-pill .ff-btn.btn-secondary { background:transparent; border:0; }
+.ff-pill .ff-btn.btn:hover:not(:disabled) { background:var(--ff-glow-hover); }
+.ff-pill .ff-btn.btn:active:not(:disabled) { background:var(--ff-glow-active); transform:scale(.97); }
+.ff-pill .ff-btn.btn[aria-pressed="true"],
+.ff-pill .ff-btn.btn.is-on,
+.ff-pill .ff-btn.btn.is-active { background:var(--ff-glow-active); }
+.ff-pill .ff-btn.btn[aria-pressed="true"].ff-btn-accent,
+.ff-pill .ff-btn.btn.is-on.ff-btn-accent { background:var(--ff-glow-on); }
+#grid-header .grid-header-main.ff-pill { flex:0 1 auto; width:max-content; max-width:calc(100% - 54px); }
+#grid-header .grid-actions.ff-pill { width:max-content; margin-left:auto; }
+
+@media (max-width:900px) {
+    .ff-header { flex-direction:row; flex-wrap:wrap; align-items:center; }
+    .ff-header .ff-header-left,
+    .ff-header .ff-header-right { flex:none; width:max-content; max-width:100%; min-width:0; }
+    .ff-header .ff-header-right { margin-left:auto; }
+}
+@media (max-width:560px) {
+    .hide-viewer-button-labels #overlay-header.ff-header,
+    #grid-header.ff-header { align-items:center; }
+    .hide-viewer-button-labels #overlay-header .ff-header-left,
+    .hide-viewer-button-labels #overlay-header .ff-header-right,
+    #grid-header .ff-header-left,
+    #grid-header .ff-header-right { width:max-content; max-width:100%; }
+}
+
+/* FolderFrame glow-only button system. */
+:root {
+    --ff-btn-fg:rgba(255,255,255,.88);
+    --ff-btn-fg-muted:rgba(255,255,255,.55);
+    --ff-btn-fg-on:#fff;
+    --ff-accent:#3b82f6;
+    --ff-accent-bright:#60a5fa;
+    --ff-glow:rgba(255,255,255,.06);
+    --ff-glow-hover:rgba(255,255,255,.12);
+    --ff-glow-active:rgba(255,255,255,.18);
+    --ff-glow-on:rgba(59,130,246,.22);
+    --ff-btn-height:34px;
+    --ff-btn-padding-x:12px;
+    --ff-btn-radius:9px;
+    --ff-btn-gap:4px;
+    --ff-icon-size:18px;
+    --ff-btn-ease:140ms ease;
+}
+@media (prefers-reduced-motion:reduce) {
+    :root { --ff-btn-ease:0ms; }
+}
+.ff-btn.btn {
+    display:inline-flex; align-items:center; justify-content:center; gap:7px;
+    width:auto; min-width:0; height:var(--ff-btn-height); min-height:0;
+    padding:0 var(--ff-btn-padding-x); border:0; border-radius:var(--ff-btn-radius);
+    background:var(--ff-glow); color:var(--ff-btn-fg);
+    font:inherit; font-size:13px; font-weight:500; line-height:1;
+    white-space:nowrap; cursor:pointer; user-select:none;
+    -webkit-tap-highlight-color:transparent;
+    transition:background var(--ff-btn-ease),color var(--ff-btn-ease),transform var(--ff-btn-ease),box-shadow var(--ff-btn-ease);
+}
+.ff-btn.btn-secondary { border:0; background:var(--ff-glow); }
+.ff-btn.btn:hover:not(:disabled) { background:var(--ff-glow-hover); border:0; transform:none; }
+.ff-btn.btn:active:not(:disabled) { background:var(--ff-glow-active); transform:scale(.97); }
+.ff-btn.btn:focus-visible { outline:0; box-shadow:0 0 0 2px #000,0 0 0 4px var(--ff-accent); }
+.ff-btn.btn:disabled,
+.ff-btn.btn[aria-disabled="true"] { opacity:.42; cursor:not-allowed; pointer-events:none; }
+.ff-btn.btn svg { width:var(--ff-icon-size); height:var(--ff-icon-size); flex-shrink:0; }
+.ff-btn.btn.ff-btn-icon { width:var(--ff-btn-height); padding:0; }
+.ff-btn.btn[aria-pressed="true"],
+.ff-btn.btn.is-on,
+.ff-btn.btn.is-active { border:0; background:var(--ff-glow-active); color:var(--ff-btn-fg-on); }
+.ff-btn.btn[aria-pressed="true"].ff-btn-accent,
+.ff-btn.btn.is-on.ff-btn-accent { background:var(--ff-glow-on); color:#fff; }
+.ff-btn.btn.ff-btn-home { width:var(--ff-btn-height); padding:0; background:transparent; color:var(--ff-accent); }
+.ff-btn.btn.ff-btn-home:hover:not(:disabled) { background:rgba(59,130,246,.12); color:var(--ff-accent-bright); }
+.ff-btn.btn.ff-btn-home:active:not(:disabled) { background:rgba(59,130,246,.2); transform:scale(.97); }
+.ff-btn-home img { display:block; width:20px; height:20px; object-fit:contain; }
+.ff-btn-group { display:inline-flex; align-items:center; gap:var(--ff-btn-gap); }
+.grid-refresh-slot .button-label { display:none; }
+.grid-options-menu .grid-refresh-menu-slot .button-label { display:inline; }
+.viewer-options-menu .ff-btn,
+.grid-options-menu .ff-btn { width:100%; justify-content:flex-start; }
+#overlay-header {
+    background:transparent; border-color:transparent;
+    backdrop-filter:none; -webkit-backdrop-filter:none;
+}
+
+@media (max-width:900px) and (pointer:coarse) {
+    .ff-btn.btn,
+    .ff-btn.btn.ff-btn-icon,
+    .ff-btn.btn.ff-btn-home {
+        width:auto; min-width:44px; height:44px; min-height:44px;
+    }
+    .ff-btn.btn.ff-btn-icon,
+    .ff-btn.btn.ff-btn-home { width:44px; padding:0; }
+    .viewer-options-menu .ff-btn,
+    .grid-options-menu .ff-btn { width:100%; }
+}
+
 
 /* Modern interaction/accessibility refinements */
 :focus-visible {
@@ -595,5 +734,357 @@ button, select, .media-error-actions a { touch-action:manipulation; }
         width:auto;
         margin-left:auto;
         gap:6px;
+    }
+}
+
+/* Keep the glow focus ring above the legacy global focus rule. */
+.ff-btn.btn:focus-visible {
+    outline:none;
+    box-shadow:0 0 0 2px #000,0 0 0 4px var(--ff-accent);
+}
+
+/* Final shared geometry after legacy header breakpoints. */
+#overlay-header.ff-header,
+#grid-header.ff-header {
+    display:flex; flex-direction:row; flex-wrap:nowrap;
+    align-items:center; justify-content:space-between;
+    gap:12px; min-height:50px; padding:0;
+    background:transparent; border:0;
+    backdrop-filter:none; -webkit-backdrop-filter:none;
+}
+#overlay-header.ff-header .ff-header-left.ff-pill,
+#overlay-header.ff-header .ff-header-right.ff-pill,
+#grid-header.ff-header .ff-header-left.ff-pill,
+#grid-header.ff-header .ff-header-right.ff-pill {
+    display:inline-flex; flex:0 1 auto; width:max-content; max-width:100%;
+    min-width:0; margin:0; align-items:center; flex-wrap:nowrap;
+}
+#overlay-header.ff-header .ff-header-right.ff-pill,
+#grid-header.ff-header .ff-header-right.ff-pill { flex:0 0 auto; margin-left:auto; }
+@media (max-width:900px) {
+    #overlay-header.ff-header,
+    #grid-header.ff-header { flex-direction:row; flex-wrap:wrap; align-items:center; }
+    #overlay-header.ff-header .ff-header-left.ff-pill,
+    #overlay-header.ff-header .ff-header-right.ff-pill,
+    #grid-header.ff-header .ff-header-left.ff-pill,
+    #grid-header.ff-header .ff-header-right.ff-pill { width:max-content; max-width:100%; }
+}
+
+
+/* ============================================================
+   Final header chrome — matched heights, logos, path, glow
+   ============================================================ */
+
+:root {
+    --ff-accent: #3b82f6;
+    --ff-accent-bright: #60a5fa;
+    --ff-glow: rgba(255, 255, 255, 0.06);
+    --ff-glow-hover: rgba(255, 255, 255, 0.12);
+    --ff-glow-active: rgba(255, 255, 255, 0.18);
+    --ff-glow-on: rgba(59, 130, 246, 0.22);
+    --ff-btn-fg: rgba(255, 255, 255, 0.88);
+    --ff-btn-fg-on: #fff;
+    --ff-btn-height: 34px;
+    --ff-btn-radius: 9px;
+    --ff-btn-ease: 140ms ease;
+    --ff-pill-bg: rgba(20, 20, 22, 0.72);
+    --ff-pill-border: rgba(255, 255, 255, 0.08);
+    --ff-pill-blur: 12px;
+    --ff-pill-radius: 11px;
+    --ff-pill-pad-y: 4px;
+    --ff-pill-pad-x: 4px;
+    /* Title lockup is 120×40; mark portion ≈ 36–40px tall */
+    --ff-title-logo-h: 40px;
+    --ff-title-logo-w: 120px;
+    --ff-mark-size: 30px;
+    --ff-header-pill-min: 48px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :root { --ff-btn-ease: 0ms; }
+}
+
+/* Kill legacy blue is-active on glow controls */
+.btn.is-active {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: transparent;
+    color: #fff;
+}
+.ff-btn.btn.is-active,
+.ff-btn.btn[aria-pressed="true"],
+.ff-btn.btn.is-on {
+    border: 0 !important;
+    background: var(--ff-glow-active) !important;
+    color: var(--ff-btn-fg-on) !important;
+}
+.ff-btn.btn.ff-btn-accent.is-active,
+.ff-btn.btn.ff-btn-accent[aria-pressed="true"],
+.ff-btn.btn.ff-btn-accent.is-on {
+    background: var(--ff-glow-on) !important;
+    color: #fff !important;
+}
+
+/* Shared header row + tight pills (grid + viewer) */
+#overlay-header.ff-header,
+#grid-header.ff-header {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 0;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+#overlay-header.ff-header .ff-pill,
+#grid-header.ff-header .ff-pill {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 2px;
+    min-height: var(--ff-header-pill-min);
+    padding: var(--ff-pill-pad-y) var(--ff-pill-pad-x);
+    border-radius: var(--ff-pill-radius);
+    background: var(--ff-pill-bg);
+    border: 1px solid var(--ff-pill-border);
+    backdrop-filter: blur(var(--ff-pill-blur));
+    -webkit-backdrop-filter: blur(var(--ff-pill-blur));
+    box-sizing: border-box;
+    width: max-content;
+    max-width: 100%;
+}
+#overlay-header.ff-header .ff-header-right.ff-pill,
+#grid-header.ff-header .ff-header-right.ff-pill {
+    flex: 0 0 auto;
+    margin-left: auto;
+}
+
+/* ---- Grid: title lockup + · Photos as one tight control ---- */
+#grid-header .brand-home {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    min-height: var(--ff-btn-height);
+    height: auto;
+    max-height: var(--ff-title-logo-h);
+    padding: 0 6px 0 2px;
+    margin: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    cursor: pointer;
+}
+#grid-header .brand-home:hover,
+#grid-header .brand-home:focus-visible {
+    background: var(--ff-glow-hover);
+}
+#grid-header .brand-logo {
+    width: var(--ff-title-logo-w) !important;
+    height: var(--ff-title-logo-h) !important;
+    max-width: var(--ff-title-logo-w) !important;
+    max-height: var(--ff-title-logo-h) !important;
+    object-fit: contain;
+    object-position: left center;
+    display: block;
+    flex: 0 0 auto;
+}
+/* Tight · Photos — reads as one control with the title logo */
+#grid-header .path-group-separator {
+    padding: 0 4px !important;
+    margin: 0 !important;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1;
+}
+#grid-header .source-root-label {
+    padding: 0 !important;
+    margin: 0 !important;
+    font-size: 13px !important;
+    font-weight: 650 !important;
+    color: #dbeafe !important;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+/* Path segments — uniform type + hover glow */
+#grid-header .crumb,
+#grid-header .folder-path {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--ff-btn-height);
+    height: var(--ff-btn-height);
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--ff-btn-radius);
+    background: transparent;
+    font-family: inherit;
+    font-size: 13px !important;
+    font-weight: 650 !important;
+    color: rgba(255, 255, 255, 0.82);
+    line-height: 1.2;
+}
+#grid-header button.crumb {
+    cursor: pointer;
+}
+#grid-header button.crumb:hover,
+#grid-header button.crumb:focus-visible {
+    background: var(--ff-glow-hover) !important;
+    color: #fff !important;
+}
+#grid-header button.crumb:active {
+    background: var(--ff-glow-active) !important;
+}
+#grid-header .folder-path {
+    cursor: default;
+    color: #fff !important;
+    background: transparent !important;
+}
+#grid-header .crumb-separator {
+    padding: 0 2px;
+    color: rgba(255, 255, 255, 0.35);
+    background: transparent !important;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+/* Glow buttons inside pills */
+.ff-pill .ff-btn.btn,
+.ff-pill .ff-btn.btn-secondary {
+    border: 0;
+    background: transparent;
+    height: var(--ff-btn-height);
+    min-height: var(--ff-btn-height);
+    border-radius: var(--ff-btn-radius);
+    color: var(--ff-btn-fg);
+    transition: background var(--ff-btn-ease), color var(--ff-btn-ease), transform var(--ff-btn-ease);
+}
+.ff-pill .ff-btn.btn:hover:not(:disabled) {
+    background: var(--ff-glow-hover);
+    transform: none;
+}
+.ff-pill .ff-btn.btn:active:not(:disabled) {
+    background: var(--ff-glow-active);
+    transform: scale(0.97);
+}
+.ff-btn.btn.ff-btn-icon {
+    width: var(--ff-btn-height);
+    padding: 0;
+}
+
+/* ---- Viewer: mark matches title-logo mark size + Back ---- */
+#overlay-header #btn-show-grid.ff-btn-home {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    width: auto !important;
+    min-width: 0 !important;
+    height: var(--ff-title-logo-h) !important;
+    min-height: var(--ff-title-logo-h) !important;
+    padding: 0 8px 0 2px !important;
+    border: 0;
+    background: transparent;
+    color: var(--ff-btn-fg);
+    border-radius: var(--ff-btn-radius);
+}
+#overlay-header #btn-show-grid.ff-btn-home:hover:not(:disabled) {
+    background: var(--ff-glow-hover);
+    color: #fff;
+}
+#overlay-header #btn-show-grid.ff-btn-home:active:not(:disabled) {
+    background: var(--ff-glow-active);
+    transform: scale(0.97);
+}
+/* Same visual size as the mark portion of the 40px-tall title lockup */
+#overlay-header .viewer-home-logo {
+    width: var(--ff-mark-size) !important;
+    height: var(--ff-mark-size) !important;
+    object-fit: contain;
+    object-position: center;
+    display: block;
+    flex: 0 0 auto;
+    /* Optical match to mark inside 40px title lockup */
+    margin: 0;
+    padding: 0;
+}
+#overlay-header .viewer-back-label {
+    display: inline !important;
+    /* Optical match to “FolderFrame” in the title lockup PNG */
+    font-family: "Rhodium Libre", "Times New Roman", Times, serif;
+    font-size: 13px;
+    font-weight: 400;
+    font-style: normal;
+    line-height: 1;
+    color: #f5f5f5;
+    margin: 0;
+    padding: 0;
+    letter-spacing: 0.01em;
+    /* Baseline with mark — same vertical center as title wordmark */
+    transform: translateY(0.5px);
+}
+#overlay-header .viewer-file-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+#overlay-header #media-title {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14px;
+    font-weight: 600;
+}
+#overlay-header #media-index.index-text {
+    flex: 0 0 auto;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+/* Refresh stays menu-only with label */
+#grid-refresh-slot { display: none !important; }
+.grid-options-menu .button-label,
+.viewer-options-menu .button-label {
+    display: inline !important;
+}
+.grid-options-menu .ff-btn,
+.viewer-options-menu .ff-btn {
+    width: 100%;
+    justify-content: flex-start;
+}
+
+.hide-viewer-button-labels #overlay-header #btn-show-grid.ff-btn-home {
+    width: auto !important;
+    min-width: 0 !important;
+    padding: 0 8px 0 2px !important;
+    gap: 0 !important;
+}
+.hide-viewer-button-labels #overlay-header #btn-show-grid .viewer-back-label {
+    display: inline !important;
+}
+
+@media (max-width: 900px) {
+    #overlay-header.ff-header {
+        flex-wrap: nowrap;
+        gap: 8px;
+    }
+    #overlay-header.ff-header .ff-header-left.ff-pill {
+        flex: 1 1 auto;
+        min-width: 0;
+        max-width: calc(100% - 160px);
     }
 }

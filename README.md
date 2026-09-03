@@ -570,10 +570,14 @@ a plain blue-chevron breadcrumb and an unboxed album/file count. Parent folders 
 clickable and the current folder uses stronger text. Click or tap the combined root control to return to the current
 source’s top-level gallery. On narrow screens, middle breadcrumb segments
 collapse to an ellipsis while the source, last ancestor, current folder, and
-count remain visible. View, sort, and thumbnail-density controls stay directly
-available whenever the complete header fits one row. As space narrows they move
-progressively into the three-dot menu, keeping the header on one line and Options
-anchored at the right edge.
+count remain visible. View, sort, thumbnail density, and Reload use separate
+glow-only controls whenever the complete header fits one row. As space narrows
+they move progressively into the three-dot menu, keeping the header on one line
+and Options anchored at the right edge. Grid and viewer headers use the same two
+tight translucent pills: one around the left identity/path cluster and one around
+the right controls, with no empty full-width capsule. The viewer uses the
+FolderFrame brand icon to return to the grid and the same glow-only interaction
+states.
 
 Album tiles preview the first image directly inside that folder, using the
 natural filename order regardless of the selected sort (2.jpg before 10.jpg).
