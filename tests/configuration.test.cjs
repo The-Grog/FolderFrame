@@ -115,6 +115,23 @@ test('Escape exits the viewer and returns to the gallery', async () => {
     assert.equal(app.get('grid-view-container').style.display, 'flex');
 });
 
+test('Escape moves up one gallery folder and does nothing at the source root', async () => {
+    const app = await boot();
+    vm.runInContext("currentFolder = '2024/Trip'; globalThis.escapeTarget = null; navigateToFolder = folder => { globalThis.escapeTarget = folder; return Promise.resolve(true); }", app.context);
+    let prevented = false;
+    app.windowListeners.keydown({ key: 'Escape', target: app.get('thumbnail-grid'),
+        preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(app.context.escapeTarget, '2024');
+
+    vm.runInContext("currentFolder = ''; globalThis.escapeTarget = null", app.context);
+    prevented = false;
+    app.windowListeners.keydown({ key: 'Escape', target: app.get('thumbnail-grid'),
+        preventDefault() { prevented = true; } });
+    assert.equal(prevented, false);
+    assert.equal(app.context.escapeTarget, null);
+});
+
 test('viewer options menu owns secondary controls and closes before Escape exits viewer', async () => {
     const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
     const menu = html.indexOf('id="viewer-options-menu"');
@@ -1583,6 +1600,20 @@ test('automatic slideshow transitions preserve hidden controls until interaction
     }
 });
 
+test('viewer arrow browsing does not reveal hidden controls or extend their idle timer', async () => {
+    const app = await boot();
+    vm.runInContext('enterFullScreenViewer(0)', app.context);
+    app.context.document.activeElement = { closest: () => null, matches: () => false };
+    vm.runInContext('hideUI()', app.context);
+    const idle = vm.runInContext('idleTimer', app.context);
+    let prevented = false;
+    app.windowListeners.keydown({ key: 'ArrowRight', target: app.get('media-viewport'),
+        preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(vm.runInContext('uiVisible', app.context), false);
+    assert.equal(vm.runInContext('idleTimer', app.context), idle);
+});
+
 test('viewer loading clears on image success, failure, and grid navigation', async () => {
     const app = await boot({ search: '?autoplay=1' });
     assert.equal(app.get('media-loading').hidden, false);
@@ -1771,7 +1802,8 @@ test('Rotate turns only the current photo clockwise and resets on media change',
     const image = app.get('gallery-image');
     const viewport = app.get('media-viewport');
     image.clientWidth = 800; image.clientHeight = 1200;
-    viewport.clientWidth = 400; viewport.clientHeight = 700;
+    image.naturalWidth = 800; image.naturalHeight = 1200;
+    viewport.clientWidth = 2400; viewport.clientHeight = 900;
     vm.runInContext('enterFullScreenViewer(0)', app.context);
     image.onload();
     const originalSource = image.src;
@@ -1781,6 +1813,7 @@ test('Rotate turns only the current photo clockwise and resets on media change',
         rotate.listeners.click();
         assert.equal(vm.runInContext('imageRotation', app.context), expected);
         assert.match(image.style.transform, new RegExp(`rotate\\(${expected}deg\\)`));
+        if (expected === 90 || expected === 270) assert.match(image.style.transform, /scale\(1\.5\)/);
         assert.equal(image.src, originalSource);
         assert.equal(vm.runInContext('zoom === 1 && panX === 0 && panY === 0', app.context), true);
     }

@@ -2398,7 +2398,9 @@ function applyImageRotation() {
         // width and height) to fit the viewport.
         const contentWidth = Math.min(viewport.clientWidth, viewport.clientHeight * img.naturalWidth / img.naturalHeight);
         const contentHeight = contentWidth * img.naturalHeight / img.naturalWidth;
-        fitScale = Math.min(1, viewport.clientWidth / contentHeight, viewport.clientHeight / contentWidth);
+        // Do not cap this at 1: rotating a portrait into landscape leaves room
+        // to enlarge the content while it still fits entirely in the viewport.
+        fitScale = Math.min(viewport.clientWidth / contentHeight, viewport.clientHeight / contentWidth);
     }
     img.style.transform = `rotate(${imageRotation}deg) scale(${fitScale})`;
     img.style.transformOrigin = 'center center';
@@ -2519,9 +2521,14 @@ function setupEventListeners() {
         if (e.defaultPrevented || e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return;
         if (e.target?.isContentEditable || e.target?.closest?.('a, select, input, textarea, video, [contenteditable]:not([contenteditable="false"])')) return;
         if (isGridViewActive) {
-            if (e.key === 'Escape' && !gridOptionsMenu.hidden) {
-                e.preventDefault();
-                setGridOptionsOpen(false);
+            if (e.key === 'Escape') {
+                if (!gridOptionsMenu.hidden) {
+                    e.preventDefault();
+                    setGridOptionsOpen(false);
+                } else if (currentFolder) {
+                    e.preventDefault();
+                    navigateToFolder(parentFolder(currentFolder));
+                }
                 return;
             }
             const direction = { ArrowUp: -48, ArrowDown: 48, PageUp: -0.85, PageDown: 0.85 };
@@ -2544,6 +2551,7 @@ function setupEventListeners() {
         // clicked. Prevent native Space/Enter activation of the focused button.
         e.preventDefault();
         if (e.repeat && key !== 'arrowleft' && key !== 'arrowright') return;
+        const browsingWithArrows = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
         if (e.key === 'ArrowLeft') prevMedia();
         if (e.key === 'ArrowRight') nextMedia();
         if (e.key === ' ') { e.preventDefault(); toggleSlideshow(); }
@@ -2553,7 +2561,9 @@ function setupEventListeners() {
         if (e.key.toLowerCase() === 't') toggleTvMode();
         if (e.key === 'Escape' && !viewerOptionsMenu.hidden) setViewerOptionsOpen(false);
         else if (e.key.toLowerCase() === 'g' || e.key === 'Escape') renderGridView();
-        resetIdleTimer();
+        // Arrow browsing must not keep waking or extending the viewer chrome.
+        // Pointer movement remains the normal way to reveal hidden controls.
+        if (!browsingWithArrows) resetIdleTimer();
     });
 
     window.addEventListener('mousemove', () => { if (!isGridViewActive) resetIdleTimer(); });
