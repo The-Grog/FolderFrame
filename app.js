@@ -39,7 +39,8 @@ function stopGridSession() {
 }
 function startGridSession() {
     stopGridSession();
-    gridSession = { controller: new AbortController(), cleanups: new Set(), observer: null };
+    gridSession = { controller: new AbortController(), cleanups: new Set(), observer: null,
+        folder: currentFolder, mode: galleryViewMode, appendTiles: null };
     return gridSession;
 }
 
@@ -1397,22 +1398,20 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
         let unpublished = 0, lastPublish = 0;
         const publishDiscovered = async force => {
             // A higher batch threshold plus a minimum time gap between rebuilds
-            // cuts how often renderGridView()'s full teardown-and-rebuild fires
-            // during a large scan — each call currently discards and reloads
-            // every already-rendered thumbnail, which is the source of visible
-            // flicker on big libraries. This is a mitigation, not a fix: the
-            // underlying full-rebuild-per-publish architecture is unchanged.
-            // See RESILIENCE.md for the follow-up incremental-update plan.
+            // still bounds how often a publish fires at all; updateGridView()
+            // (below) then decides whether this particular publish can extend
+            // the grid in place instead of a full teardown-and-rebuild.
             const now = Date.now();
             if (!progressive || !current() || (!force && (unpublished < 400 || now - lastPublish < 2000))) return;
             lastPublish = now;
+            const previousMediaFiles = mediaFiles;
             const preview = Array.from(discovered);
             mediaFiles = sortMode === 'filename' ? preview.sort(compareFilenames) : preview;
             subfolders = listing.folderNames;
             unpublished = 0;
             showWarning(false);
             renderBreadcrumb();
-            renderGridView();
+            updateGridView(previousMediaFiles);
         };
         if (progressive && listing.filePaths.length) {
             // The virtual grid remains bounded even if the directory itself is enormous.
@@ -1697,6 +1696,30 @@ async function navigateToFolder(folder, { historyMode = 'push' } = {}) {
         updateFolderHistory(folder, historyMode);
     }
     return succeeded !== false;
+}
+
+// Called from loadGallery's publishDiscovered instead of renderGridView()
+// directly. Progressive discovery only ever adds files — the `discovered`
+// Set it publishes from never shrinks — so mediaFiles is always
+// previousMediaFiles plus new entries, though sorting can interleave those
+// new entries anywhere (filename mode re-sorts the whole preview on every
+// publish). Appending the tail without touching existing DOM tiles is only
+// correct if every already-rendered index is unchanged between the old and
+// new arrays — checked directly here rather than re-deriving it from sort
+// rules, so this stays correct regardless of sort mode or future changes to
+// how previews are ordered.
+function updateGridView(previousMediaFiles) {
+    const session = gridSession;
+    if (!session?.appendTiles || session.folder !== currentFolder || session.mode !== galleryViewMode ||
+        !isGridViewActive || !gridVirtualizer || mediaFiles.length <= previousMediaFiles.length) {
+        renderGridView();
+        return;
+    }
+    const boundary = Math.min(gridVirtualizer.end, previousMediaFiles.length);
+    for (let i = 0; i < boundary; i++) {
+        if (previousMediaFiles[i] !== mediaFiles[i]) { renderGridView(); return; }
+    }
+    session.appendTiles(previousMediaFiles.length, mediaFiles.length);
 }
 
 function renderGridView() {
@@ -2040,6 +2063,56 @@ function renderGridView() {
     };
     renderMediaWindow(gridVirtualizer.start, gridVirtualizer.end);
 
+    // Called by updateGridView() — defined outside this closure — when a
+    // progressive-scan publish only ever adds files to the tail of
+    // mediaFiles (see updateGridView for the correctness check that
+    // guarantees this). Grows the DOM/spacer incrementally instead of the
+    // full teardown-and-rebuild this function normally does, so
+    // already-rendered, already-loaded thumbnails are left completely
+    // untouched — this is what fixes the progressive-scan flicker.
+    session.appendTiles = (previousLength, newLength) => {
+        if (!virtualized && newLength > GRID_BATCH_SIZE) {
+            // This session started small enough to skip virtualization but
+            // has now grown past the threshold. That transition needs a
+            // full rebuild to correctly re-establish windowing; this only
+            // happens once, right after the first small progressive batch.
+            renderGridView();
+            return;
+        }
+        gridCount.textContent = `${newLength} File${newLength === 1 ? '' : 's'} • All Folders`;
+        if (!virtualized) {
+            virtualWindow.appendChild(createRange(previousLength, newLength));
+            gridVirtualizer.end = newLength;
+            return;
+        }
+        if (gridVirtualizer.end < previousLength) {
+            // Newest items land below the current window entirely — nothing
+            // rendered needs to change, just grow the spacer to represent them.
+            const remaining = newLength - gridVirtualizer.end;
+            bottomSpacer.hidden = remaining <= 0;
+            bottomSpacer.style.height = remaining > 0 ? estimateSpacerHeight(remaining) + 'px' : '0px';
+            return;
+        }
+        // The window's tail already reaches the old end — newest items are
+        // visible or about to scroll into view. Grow in place if there's
+        // still room under the GRID_WINDOW_SIZE budget (existing tiles
+        // untouched). If the window is already at capacity, slide it
+        // forward via renderMediaWindow's existing prepend/release logic —
+        // the same path scroll-driven updates already use — which only
+        // releases tiles at the *front* of the window, farthest from the
+        // tail the user is actively scrolled toward.
+        const cappedEnd = Math.min(newLength, gridVirtualizer.start + GRID_WINDOW_SIZE);
+        if (cappedEnd > gridVirtualizer.end) {
+            virtualWindow.appendChild(createRange(gridVirtualizer.end, cappedEnd));
+            gridVirtualizer.end = cappedEnd;
+            const remaining = newLength - gridVirtualizer.end;
+            bottomSpacer.hidden = remaining <= 0;
+            bottomSpacer.style.height = remaining > 0 ? estimateSpacerHeight(remaining) + 'px' : '0px';
+        } else {
+            renderMediaWindow(Math.max(0, newLength - GRID_WINDOW_SIZE), newLength);
+        }
+    };
+
     gridViewContainer.style.display = 'flex';
     if (returnPosition) {
         gridViewContainer.scrollTop = returnPosition.scrollTop;
@@ -2312,8 +2385,20 @@ function applyTransform() {
 function resetZoomAndPan() { cancelTouchGesture(); zoom = 1.0; panX = 0; panY = 0; applyTransform(); }
 function applyImageRotation() {
     let fitScale = 1;
-    if (imageRotation % 180 && imageMode === 'fit' && img.clientWidth && img.clientHeight && viewport.clientWidth && viewport.clientHeight) {
-        fitScale = Math.min(1, viewport.clientWidth / img.clientHeight, viewport.clientHeight / img.clientWidth);
+    if (imageRotation % 180 && imageMode === 'fit' && img.naturalWidth && img.naturalHeight &&
+        viewport.clientWidth && viewport.clientHeight) {
+        // img.clientWidth/clientHeight under mode-fit's width:100%/height:100%
+        // just report the container box, not the actual letterboxed photo
+        // size object-fit:contain renders inside it — using the box size
+        // here understates (or overstates) how large the rotated image can
+        // actually be shown whenever the photo's aspect ratio doesn't match
+        // the viewport's, which is nearly always. Compute the real displayed
+        // content size from the image's natural dimensions instead, then
+        // scale that (swapped, since a 90°/270° rotation swaps footprint
+        // width and height) to fit the viewport.
+        const contentWidth = Math.min(viewport.clientWidth, viewport.clientHeight * img.naturalWidth / img.naturalHeight);
+        const contentHeight = contentWidth * img.naturalHeight / img.naturalWidth;
+        fitScale = Math.min(1, viewport.clientWidth / contentHeight, viewport.clientHeight / contentWidth);
     }
     img.style.transform = `rotate(${imageRotation}deg) scale(${fitScale})`;
     img.style.transformOrigin = 'center center';

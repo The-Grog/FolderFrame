@@ -232,61 +232,9 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     box-shadow:0 0 0 2px #000,0 0 0 4px var(--ff-accent);
 }
 
-/* Shared two-pill header geometry for grid and viewer. */
-:root {
-    --ff-pill-bg:rgba(20,20,22,.72);
-    --ff-pill-border:rgba(255,255,255,.08);
-    --ff-pill-blur:12px;
-    --ff-pill-radius:12px;
-    --ff-pill-pad-y:4px;
-    --ff-pill-pad-x:4px;
-}
-.ff-header {
-    display:flex; align-items:center; justify-content:space-between;
-    flex-direction:row; flex-wrap:nowrap; gap:12px;
-    min-height:50px; padding:0; background:transparent; border:0;
-    backdrop-filter:none; -webkit-backdrop-filter:none;
-}
-.ff-header-left,
-.ff-header-right { display:inline-flex; align-items:center; min-width:0; }
-.ff-header-left { flex:0 1 auto; }
-.ff-header-right { flex:0 0 auto; margin-left:auto; }
-.ff-pill {
-    display:inline-flex; align-items:center; width:max-content; max-width:100%;
-    min-height:50px; gap:var(--ff-btn-gap); flex-wrap:nowrap;
-    padding:var(--ff-pill-pad-y) var(--ff-pill-pad-x);
-    border:1px solid var(--ff-pill-border); border-radius:var(--ff-pill-radius);
-    background:var(--ff-pill-bg);
-    backdrop-filter:blur(var(--ff-pill-blur));
-    -webkit-backdrop-filter:blur(var(--ff-pill-blur));
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
-}
-.ff-pill .ff-btn.btn,
-.ff-pill .ff-btn.btn-secondary { background:transparent; border:0; }
-.ff-pill .ff-btn.btn:hover:not(:disabled) { background:var(--ff-glow-hover); }
-.ff-pill .ff-btn.btn:active:not(:disabled) { background:var(--ff-glow-active); transform:scale(.97); }
-.ff-pill .ff-btn.btn[aria-pressed="true"],
-.ff-pill .ff-btn.btn.is-on,
-.ff-pill .ff-btn.btn.is-active { background:var(--ff-glow-active); }
-.ff-pill .ff-btn.btn[aria-pressed="true"].ff-btn-accent,
-.ff-pill .ff-btn.btn.is-on.ff-btn-accent { background:var(--ff-glow-on); }
-#grid-header .grid-header-main.ff-pill { flex:0 1 auto; width:max-content; max-width:calc(100% - 54px); }
-#grid-header .grid-actions.ff-pill { width:max-content; margin-left:auto; }
-
-@media (max-width:900px) {
-    .ff-header { flex-direction:row; flex-wrap:wrap; align-items:center; }
-    .ff-header .ff-header-left,
-    .ff-header .ff-header-right { flex:none; width:max-content; max-width:100%; min-width:0; }
-    .ff-header .ff-header-right { margin-left:auto; }
-}
-@media (max-width:560px) {
-    .hide-viewer-button-labels #overlay-header.ff-header,
-    #grid-header.ff-header { align-items:center; }
-    .hide-viewer-button-labels #overlay-header .ff-header-left,
-    .hide-viewer-button-labels #overlay-header .ff-header-right,
-    #grid-header .ff-header-left,
-    #grid-header .ff-header-right { width:max-content; max-width:100%; }
-}
+/* Shared two-pill header geometry for grid and viewer now lives in one
+   consolidated block near the end of this file (search "Final header chrome"),
+   which is the only place .ff-header/.ff-pill layout and sizing is defined. */
 
 /* FolderFrame glow-only button system. */
 :root {
@@ -299,7 +247,7 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     --ff-glow-hover:rgba(255,255,255,.12);
     --ff-glow-active:rgba(255,255,255,.18);
     --ff-glow-on:rgba(59,130,246,.22);
-    --ff-btn-height:34px;
+    --ff-btn-height:40px;
     --ff-btn-padding-x:12px;
     --ff-btn-radius:9px;
     --ff-btn-gap:4px;
@@ -332,10 +280,11 @@ button, select, .media-error-actions a { touch-action:manipulation; }
 .ff-btn.btn.is-active { border:0; background:var(--ff-glow-active); color:var(--ff-btn-fg-on); }
 .ff-btn.btn[aria-pressed="true"].ff-btn-accent,
 .ff-btn.btn.is-on.ff-btn-accent { background:var(--ff-glow-on); color:#fff; }
-.ff-btn.btn.ff-btn-home { width:var(--ff-btn-height); padding:0; background:transparent; color:var(--ff-accent); }
-.ff-btn.btn.ff-btn-home:hover:not(:disabled) { background:rgba(59,130,246,.12); color:var(--ff-accent-bright); }
-.ff-btn.btn.ff-btn-home:active:not(:disabled) { background:rgba(59,130,246,.2); transform:scale(.97); }
-.ff-btn-home img { display:block; width:20px; height:20px; object-fit:contain; }
+/* .ff-btn-home no longer carries its own width/padding — it also gets the
+   ff-btn-icon class now that it's icon-only, so it's sized identically to
+   every other icon button (Play, Rotate, etc.) with nothing to drift out
+   of sync. Its hover/active colors and the brand-logo icon sizing still
+   live in the consolidated "Final header chrome" block below. */
 .ff-btn-group { display:inline-flex; align-items:center; gap:var(--ff-btn-gap); }
 .grid-refresh-slot .button-label { display:none; }
 .grid-options-menu .grid-refresh-menu-slot .button-label { display:inline; }
@@ -488,7 +437,11 @@ button, select, .media-error-actions a { touch-action:manipulation; }
 /* Reserve desktop control space before allocating room to the filename. */
 @media (min-width:901px) and (pointer:fine) {
     #overlay-header { gap:12px; }
-    #overlay-header .header-left { flex:1 1 0; min-width:170px; }
+    /* flex:0 1 auto (not flex-grow:1), same fix as the grid header's left
+       pill — the pill should hug its content (home button + filename),
+       not stretch to fill the row. #media-title's own max-width:32vw
+       already handles long filenames via ellipsis truncation. */
+    #overlay-header .header-left { flex:0 1 auto; min-width:0; }
     #overlay-header #media-title { flex:1 1 0; min-width:0; max-width:32vw; }
     #overlay-header #btn-show-grid, #overlay-header #media-index { flex:0 0 auto; }
     #overlay-header .header-right { flex:0 1 auto; width:max-content; min-width:0; }
@@ -606,7 +559,10 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     margin:max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left));
 }
 #grid-header .grid-header-main {
-    display:flex; flex:1 1 0; min-width:0; max-width:none;
+    /* flex:0 1 auto (not flex-grow:1) so this pill hugs its content — logo,
+       separator, breadcrumb — instead of stretching its pill background
+       across whatever empty space is left before the right-side pill. */
+    display:flex; flex:0 1 auto; min-width:0; max-width:none;
     flex-direction:row; flex-wrap:nowrap; align-items:center; gap:0;
 }
 #grid-header .gallery-path-bar {
@@ -686,7 +642,7 @@ button, select, .media-error-actions a { touch-action:manipulation; }
         gap:5px; padding:7px 8px;
     }
     #grid-header .grid-header-main {
-        flex:1 1 0; width:auto; min-width:0; flex-wrap:nowrap;
+        flex:0 1 auto; width:auto; min-width:0; flex-wrap:nowrap;
     }
     #grid-header .gallery-path-bar {
         display:flex; flex:0 1 auto; width:auto; min-width:0;
@@ -743,32 +699,9 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     box-shadow:0 0 0 2px #000,0 0 0 4px var(--ff-accent);
 }
 
-/* Final shared geometry after legacy header breakpoints. */
-#overlay-header.ff-header,
-#grid-header.ff-header {
-    display:flex; flex-direction:row; flex-wrap:nowrap;
-    align-items:center; justify-content:space-between;
-    gap:12px; min-height:50px; padding:0;
-    background:transparent; border:0;
-    backdrop-filter:none; -webkit-backdrop-filter:none;
-}
-#overlay-header.ff-header .ff-header-left.ff-pill,
-#overlay-header.ff-header .ff-header-right.ff-pill,
-#grid-header.ff-header .ff-header-left.ff-pill,
-#grid-header.ff-header .ff-header-right.ff-pill {
-    display:inline-flex; flex:0 1 auto; width:max-content; max-width:100%;
-    min-width:0; margin:0; align-items:center; flex-wrap:nowrap;
-}
-#overlay-header.ff-header .ff-header-right.ff-pill,
-#grid-header.ff-header .ff-header-right.ff-pill { flex:0 0 auto; margin-left:auto; }
-@media (max-width:900px) {
-    #overlay-header.ff-header,
-    #grid-header.ff-header { flex-direction:row; flex-wrap:wrap; align-items:center; }
-    #overlay-header.ff-header .ff-header-left.ff-pill,
-    #overlay-header.ff-header .ff-header-right.ff-pill,
-    #grid-header.ff-header .ff-header-left.ff-pill,
-    #grid-header.ff-header .ff-header-right.ff-pill { width:max-content; max-width:100%; }
-}
+/* The .ff-header/.ff-pill layout rules live in one place only — the
+   "Final header chrome" block further down — to avoid the exact kind of
+   drifting duplicate-definition bug that caused the back-button mismatch. */
 
 
 /* ============================================================
@@ -776,28 +709,22 @@ button, select, .media-error-actions a { touch-action:manipulation; }
    ============================================================ */
 
 :root {
-    --ff-accent: #3b82f6;
-    --ff-accent-bright: #60a5fa;
-    --ff-glow: rgba(255, 255, 255, 0.06);
-    --ff-glow-hover: rgba(255, 255, 255, 0.12);
-    --ff-glow-active: rgba(255, 255, 255, 0.18);
-    --ff-glow-on: rgba(59, 130, 246, 0.22);
-    --ff-btn-fg: rgba(255, 255, 255, 0.88);
-    --ff-btn-fg-on: #fff;
-    --ff-btn-height: 34px;
-    --ff-btn-radius: 9px;
-    --ff-btn-ease: 140ms ease;
+    /* --ff-accent, --ff-glow*, --ff-btn-fg*, --ff-btn-height, --ff-btn-radius,
+       and --ff-btn-ease are already defined once, above, in the glow-button
+       system block — not repeated here, so there's one source of truth. */
     --ff-pill-bg: rgba(20, 20, 22, 0.72);
     --ff-pill-border: rgba(255, 255, 255, 0.08);
     --ff-pill-blur: 12px;
-    --ff-pill-radius: 11px;
+    --ff-pill-radius: 12px;
     --ff-pill-pad-y: 4px;
     --ff-pill-pad-x: 4px;
-    /* Title lockup is 120×40; mark portion ≈ 36–40px tall */
+    /* Pill height = button height (40px, matches the brand logo's own
+       height) + 2 * pad-y + 2 * border. Every pill and every button inside
+       it share this one number, so the header can't change height when
+       switching between grid and viewer. */
+    --ff-header-pill-min: 50px;
     --ff-title-logo-h: 40px;
     --ff-title-logo-w: 120px;
-    --ff-mark-size: 30px;
-    --ff-header-pill-min: 48px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -868,9 +795,7 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     display: inline-flex;
     align-items: center;
     gap: 0;
-    min-height: var(--ff-btn-height);
-    height: auto;
-    max-height: var(--ff-title-logo-h);
+    height: 100%;
     padding: 0 6px 0 2px;
     margin: 0;
     border: 0;
@@ -976,21 +901,9 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     padding: 0;
 }
 
-/* ---- Viewer: mark matches title-logo mark size + Back ---- */
-#overlay-header #btn-show-grid.ff-btn-home {
-    display: inline-flex;
-    align-items: center;
-    gap: 0;
-    width: auto !important;
-    min-width: 0 !important;
-    height: var(--ff-title-logo-h) !important;
-    min-height: var(--ff-title-logo-h) !important;
-    padding: 0 8px 0 2px !important;
-    border: 0;
-    background: transparent;
-    color: var(--ff-btn-fg);
-    border-radius: var(--ff-btn-radius);
-}
+/* ---- Viewer: back-to-grid control — icon-only, same square sizing as
+   every other .ff-btn-icon (Play, Rotate, etc.); no custom width/padding
+   here anymore now that the button has no text label to make room for. */
 #overlay-header #btn-show-grid.ff-btn-home:hover:not(:disabled) {
     background: var(--ff-glow-hover);
     color: #fff;
@@ -999,32 +912,13 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     background: var(--ff-glow-active);
     transform: scale(0.97);
 }
-/* Same visual size as the mark portion of the 40px-tall title lockup */
-#overlay-header .viewer-home-logo {
-    width: var(--ff-mark-size) !important;
-    height: var(--ff-mark-size) !important;
+/* 1.5:1 asset (1536x1024) scaled to sit inside the 40px square button with
+   comfortable margin, same visual weight as the 18px SVG icons beside it. */
+#overlay-header .viewer-back-logo {
+    width: 26px;
+    height: 17px;
     object-fit: contain;
-    object-position: center;
     display: block;
-    flex: 0 0 auto;
-    /* Optical match to mark inside 40px title lockup */
-    margin: 0;
-    padding: 0;
-}
-#overlay-header .viewer-back-label {
-    display: inline !important;
-    /* Optical match to “FolderFrame” in the title lockup PNG */
-    font-family: "Rhodium Libre", "Times New Roman", Times, serif;
-    font-size: 13px;
-    font-weight: 400;
-    font-style: normal;
-    line-height: 1;
-    color: #f5f5f5;
-    margin: 0;
-    padding: 0;
-    letter-spacing: 0.01em;
-    /* Baseline with mark — same vertical center as title wordmark */
-    transform: translateY(0.5px);
 }
 #overlay-header .viewer-file-meta {
     display: flex;
@@ -1067,23 +961,13 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     justify-content: flex-start;
 }
 
-.hide-viewer-button-labels #overlay-header #btn-show-grid.ff-btn-home {
-    width: auto !important;
-    min-width: 0 !important;
-    padding: 0 8px 0 2px !important;
-    gap: 0 !important;
-}
-.hide-viewer-button-labels #overlay-header #btn-show-grid .viewer-back-label {
-    display: inline !important;
-}
-
 @media (max-width: 900px) {
     #overlay-header.ff-header {
         flex-wrap: nowrap;
         gap: 8px;
     }
     #overlay-header.ff-header .ff-header-left.ff-pill {
-        flex: 1 1 auto;
+        flex: 0 1 auto;
         min-width: 0;
         max-width: calc(100% - 160px);
     }

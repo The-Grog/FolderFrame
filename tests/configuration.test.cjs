@@ -188,7 +188,7 @@ test('gallery glow controls keep reload adaptive and the unified path bar owns l
     assert.match(css, /@media \(prefers-reduced-motion:reduce\)/);
     const viewerHome = html.slice(html.indexOf('id="btn-show-grid"'), html.indexOf('</button>', html.indexOf('id="btn-show-grid"')));
     assert.match(viewerHome, /ff-btn-home/);
-    assert.match(viewerHome, /docs\/images\/folderframe-(?:icon|mark)\.png/);
+    assert.match(viewerHome, /docs\/images\/folderframe-logo-back\.png/);
     assert.match(html, /id="overlay-header" class="overlay ff-header"/);
     assert.match(html, /class="header-left ff-header-left ff-pill"/);
     assert.match(html, /class="header-right ff-header-right ff-pill"/);

@@ -18,7 +18,7 @@ manual checks; automated tests do not verify browser layout or codecs.
   - [x] **Manage memory** — Bound the converted-image cache, release unused object URLs safely, and clean up thumbnail observers across navigation.
   - [x] **Handle partial failures** — Keep successfully discovered media when a subfolder fails and identify which folders could not be scanned.
 
-### Deployment and performance
+### Performance and deployment
 
 - [ ] **Large Immich directory support** — Improve scanning, navigation, and rendering for very large media directories exported or mounted from Immich while preserving database-free static hosting.
   - [x] **Incremental and windowed grid** — Render 100 media tiles initially, retain at most 300 media tiles in the DOM, preserve full scroll geometry/order, support reverse and keyboard scrolling, show a Back to Top control, and hide only confirmed-empty albums. Automated with a 15,633-file regression case; Immich device validation pending.
@@ -26,10 +26,9 @@ manual checks; automated tests do not verify browser layout or codecs.
   - [x] **Optional persistent media index** — Added a lean appdata-writable, chunked JSON index with directory-mtime reuse, manifest-provided metadata/thumbnail paths, cancellation, live-scan bypass, and safe directory-listing fallback. Automated and generator checks pass; Immich device validation pending.
   - [x] **Bound ordinary image decoding** — JPEG, PNG, WebP, and GIF source assignment now uses a four-slot cancellable priority queue. Viewer images outrank album covers and grid tiles; virtualized/offscreen unsettled work is cancelled. Automated coverage passes; low-power device validation pending.
   - [x] **Progressive directory discovery** — Recursive All Pics scans now use a deadlock-free five-worker pool over a shared directory frontier, with determinate top-level subtree progress. Automated coverage verifies deep/wide completion, the concurrency ceiling, cancellation, partial-failure isolation, and completion accounting; live Immich device validation remains pending.
-  - [ ] **Incremental progressive-scan grid updates** — `renderGridView()` still fully tears down and rebuilds on every progressive publish during a large scan, causing thumbnail flicker. A batch-threshold/time-gap mitigation (400 files / 2s minimum gap) is in place and reduces rebuild frequency, but the deeper fix — hoisting virtualizer state onto `gridSession` and appending in place instead of rebuilding — is not yet implemented. See RESILIENCE.md.
+  - [x] **Incremental progressive-scan grid updates** — Progressive publishes now extend the current DOM and virtual-grid spacers in place when the rendered prefix remains unchanged. Filename-sort insertions, stale sessions, and other unsafe cases retain the full-rebuild fallback. Existing tile nodes and decoded thumbnails survive append-only updates; large-library device validation remains pending. See RESILIENCE.md.
 - [x] **Thumbnail generation (optional)** — Added per-source `thumbnailPath`, parallel WebP preview lookup for grid/album covers, automatic original fallback, and an optional Pillow generator that preserves static-server hosting. Device validation with a large mixed-format library is pending.
-- [ ] **Automatic Docker/Unraid thumbnails** — Main CA, Docker, and Compose deployment work is implemented locally with persistent appdata previews, sequential background generation, HEIC/HEIF support, safe delayed pruning, and read-only originals. Deployment release and Unraid device validation pending.
-- [ ] **Docker packaging and Unraid templates** — Build a Docker image and an Unraid container template for easy deployment. Include configurable media/config mounts, port mapping, a web server with directory listings, and setup/update instructions. Keep ordinary static-server hosting supported.
+- [ ] **Validate automatic Docker/Unraid thumbnails** — The main CA, Docker, and Compose implementation provides persistent appdata previews, sequential background generation, HEIC/HEIF support, safe delayed pruning, and read-only originals. Verify the released deployment documentation and complete real Unraid device testing.
 - [x] **Escape returns to gallery** — Escape exits the image viewer and returns to the thumbnail/album grid without adding another on-screen control.
 
 ### Browser and device testing
@@ -39,6 +38,9 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ## Completed
 
+- [x] **Pinned, unified gallery and viewer headers** — Gallery navigation stays visible while scrolling, grid and viewer controls share compact two-pill geometry, and the viewer uses the dedicated Back control while preserving responsive options-menu behavior.
+- [x] **Rotated-image Fit correction** — Fit mode now derives the displayed content dimensions from the image's natural aspect ratio before calculating the 90°/270° rotation scale, avoiding incorrect sizing caused by the container-sized `clientWidth`/`clientHeight` box. Device validation pending.
+- [x] **Large-library scanning and grid controls release** — Published `fc9be39` with the deadlock-free five-worker recursive scanner, determinate scan progress, direct album item counts, Compact/Comfortable/Spacious grid density, configuration and documentation updates, and 114 passing automated tests.
 - [x] **Grid density control** — Added a cycling Compact/Comfortable/Spacious thumbnail-size button, driven by a `--grid-tile-min` CSS variable shared between the grid's `minmax()` template and the JS virtualizer's row-height math. Persists via saved preferences and a `density` URL/config override. Pure re-layout on toggle — no rescan, no new requests. Device validation pending.
 - [x] **Album item counts on grid cards** — Album cards now show a direct child count ("142 photos" / "6 albums") sourced from the same top-level directory listing `findAlbumCover` already fetches for its cover search — no additional requests. Device validation pending.
 - [x] **Configurable Download and Copy Image controls** — Download targets the original served media; Copy Image writes displayed photos as PNG and is disabled for video. Both can be enabled independently under defaults/index/embed or with `download=0/1` and `copy=0/1`, retaining browser clipboard and cross-origin restrictions. Interval, Download, and Copy Image are grouped in a right-side options menu; primary viewer controls remain icon-only by default with 44px touch targets.
@@ -68,5 +70,5 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 - User tested and approved the swipe, filename visibility, and grid-return update.
 - User tested and approved the mobile double-tap and pinch-flicker fixes.
-- Current regression suite: 90 automated app/settings/cache and resilience tests. Run both tests/configuration.test.cjs and tests/resilience.test.cjs.
+- Current regression suite: 114 automated app/settings/cache and resilience tests. Run both tests/configuration.test.cjs and tests/resilience.test.cjs.
 - User visually tested and approved the long-filename desktop layout. Node tests do not validate CSS layout.

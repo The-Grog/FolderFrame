@@ -35,16 +35,22 @@ The existing 30-second media/thumbnail watchdogs release stalled slots.
 
 ### Progressive scan rebuild frequency
 
-Progressive publishing (see below) triggers a full `renderGridView()`
-teardown-and-rebuild each time it fires, which currently discards and
-reloads every already-rendered thumbnail — visible as flicker on large
-libraries. The publish threshold (400 newly discovered files) and a 2-second
-minimum gap between rebuilds reduce how often this fires during a big scan,
-but do not eliminate the underlying full-rebuild-per-publish behavior. A
-true incremental update — appending new tiles without touching
-already-rendered ones, hoisting `renderGridView`'s internal virtualizer state onto
-`gridSession` so it survives across calls — remains a follow-up item; see
-TODO.md.
+Progressive publishing (see below) now updates the grid incrementally rather
+than always doing a full `renderGridView()` teardown-and-rebuild.
+`updateGridView()` checks whether a publish only ever adds files to the tail
+of `mediaFiles` — true by construction for non-`filename` sort modes, and
+verified directly (by comparing old and new array contents up through the
+currently-rendered window) for `filename` mode, where re-sorting can in
+principle insert a new file anywhere. When that check passes, `appendTiles()`
+grows the DOM/spacer in place: pure append if there's still room under the
+`GRID_WINDOW_SIZE` budget, or a slide via the same `renderMediaWindow`
+prepend/release logic already used for scroll-driven updates if the window is
+already at capacity at the tail. Already-rendered, already-loaded thumbnails
+are left completely untouched in both cases. Any publish that fails the
+safety check — or arrives for a stale/mismatched grid session — falls back to
+the original full rebuild. The publish threshold (400 newly discovered files)
+and 2-second minimum gap between publishes are unchanged and still bound how
+often a publish fires at all, independent of which path it then takes.
 
 ### Large grid rendering
 
