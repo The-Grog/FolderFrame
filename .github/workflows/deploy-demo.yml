@@ -9,6 +9,7 @@ on:
       - "demo-photos/**"
       - "docs/images/folderframe-icon.png"
       - "docs/images/folderframe-logo.png"
+      - "docs/images/folderframe-logo-back.png"
       - "app.js"
       - "settings.js"
       - "resilience.js"
@@ -57,7 +58,7 @@ jobs:
         run: |
           mkdir -p _site/docs/images
           cp index.html app.js settings.js resilience.js styles.css heic2any.min.js _site/
-          cp docs/images/folderframe-logo.png docs/images/folderframe-icon.png _site/docs/images/
+          cp docs/images/folderframe-logo.png docs/images/folderframe-logo-back.png docs/images/folderframe-icon.png _site/docs/images/
           cp -R demo-photos demo-thumbnails demo-manifest _site/
           printf '%s\n' 'demo.folderframe.com' > _site/CNAME
           python - <<'PY'
@@ -132,6 +133,7 @@ jobs:
         run: |
           test -s _site/index.html
           test -s _site/docs/images/folderframe-logo.png
+          test -s _site/docs/images/folderframe-logo-back.png
           test -s _site/docs/images/folderframe-icon.png
           test -s _site/folderframe.config.json
           test -s _site/demo-manifest/index.json
