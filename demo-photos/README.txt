@@ -2,7 +2,7 @@ FolderFrame Curated Stock Collection
 ====================================
 
 140 attributed, web-optimized photographs: 65 landscapes, 35 architecture, and 40 space images.
-The nested demo folders intentionally repeat three architecture images, producing 119 file placements.
+Each attributed image appears once in the demo tree, producing 140 file placements across the nested album structure.
 Images are 1600px or less on the long edge and saved as progressive JPEGs.
 
 LICENSING
