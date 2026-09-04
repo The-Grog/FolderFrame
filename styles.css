@@ -632,7 +632,35 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     background:transparent; box-shadow:none; white-space:nowrap;
     font-size:11px; line-height:1; color:#777; align-self:auto;
 }
-.crumb-ellipsis { display:none; color:#94a3b8; padding:0 2px; }
+.crumb-ellipsis { display:none; align-items:center; color:#94a3b8; padding:0 2px; white-space:nowrap; }
+
+/* Query the allocated header row rather than the viewport. This keeps path
+   truncation responsive when the right-side controls consume more room. */
+#grid-header.header-nav-container {
+    container-type:inline-size;
+    container-name:headernav;
+}
+
+/* Coarse-pointer viewer controls keep a 44px touch target in both pills.
+   The legacy right-side rule is intentionally high-specificity; repeat that
+   geometry here for the Back button so neither pill grows independently. */
+@media (max-width: 900px) and (pointer: coarse) {
+    #overlay-header.ff-header .ff-pill {
+        height: 54px;
+        min-height: 54px;
+    }
+    .hide-viewer-button-labels #overlay-header.ff-header .ff-header-left.ff-pill #btn-show-grid.ff-btn-home {
+        width: 44px;
+        min-width: 44px;
+        height: 44px;
+        min-height: 44px;
+    }
+}
+@container headernav (max-width:520px) {
+    #grid-header .crumb-middle { display:none; }
+    #grid-header .crumb-ellipsis { display:inline-flex; }
+    #grid-header .folder-path { font-weight:700; color:#fff; }
+}
 .grid-options { margin-left:0; }
 .grid-options-menu { width:205px; }
 .grid-options-menu .btn { width:100%; justify-content:flex-start; }
@@ -648,8 +676,10 @@ button, select, .media-error-actions a { touch-action:manipulation; }
         display:flex; flex:0 1 auto; width:auto; min-width:0;
         align-items:center; justify-content:flex-start;
     }
-    #grid-header .crumb-middle { display:none; }
-    #grid-header .crumb-ellipsis { display:inline-flex; align-items:center; }
+    @supports not (container-type:inline-size) {
+        #grid-header .crumb-middle { display:none; }
+        #grid-header .crumb-ellipsis { display:inline-flex; }
+    }
     #grid-header .breadcrumb { flex:0 1 auto; }
     #grid-header .folder-path { max-width:none; }
     #grid-header .grid-actions {

@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const os = require('node:os');
+const { spawnSync } = require('node:child_process');
 const api = require('../settings.js');
 const base = 'https://example.test/frame/index.html';
 const shipped = JSON.parse(fs.readFileSync(path.join(__dirname, '../folderframe.config.json'), 'utf8'));
@@ -209,8 +211,8 @@ test('gallery glow controls keep reload adaptive and the unified path bar owns l
     assert.match(html, /id="overlay-header" class="overlay ff-header"/);
     assert.match(html, /class="header-left ff-header-left ff-pill"/);
     assert.match(html, /class="header-right ff-header-right ff-pill"/);
-    assert.match(html, /id="grid-header" class="overlay ff-header"/);
-    assert.match(html, /class="grid-header-main ff-header-left ff-pill"/);
+    assert.match(html, /id="grid-header" class="overlay ff-header header-nav-container"/);
+    assert.match(html, /class="grid-header-main header-nav ff-header-left ff-pill"/);
     assert.match(html, /class="header-right grid-actions ff-header-right ff-pill"/);
 
     const app = await boot();
@@ -1600,6 +1602,128 @@ test('automatic slideshow transitions preserve hidden controls until interaction
     }
 });
 
+test('directory listings honor folderframe.ignore and filter conservative system junk', async () => {
+    const app = await boot();
+    app.context.DOMParser = class { parseFromString() {
+        return { querySelectorAll: () => [
+            'folderframe.ignore', 'visible.jpg', 'Nested/', '@eaDir/', '.Trash-1000/',
+            '.hidden.jpg', 'partial.jpg.part', 'normal.tmp.jpg'
+        ].map(href => ({ getAttribute: () => href })) };
+    } };
+    const ignored = await vm.runInContext("scanDirectory('Secret', { bypassCache: true })", app.context);
+    assert.equal(ignored.ignored, true);
+    assert.deepEqual(Array.from(ignored.filePaths), []);
+    assert.deepEqual(Array.from(ignored.folderNames), []);
+
+    app.context.DOMParser = class { parseFromString() {
+        return { querySelectorAll: () => [
+            'visible.jpg', 'Nested/', '@eaDir/', '.Trash-1000/', '.hidden.jpg',
+            'copy.jpg.partial', '~$draft.jpg', 'normal.tmp.jpg'
+        ].map(href => ({ getAttribute: () => href })) };
+    } };
+    const listing = await vm.runInContext("scanDirectory('Visible', { bypassCache: true })", app.context);
+    assert.deepEqual(Array.from(listing.folderNames), ['Nested']);
+    assert.equal(listing.filePaths.some(file => file.endsWith('/visible.jpg')), true);
+    assert.equal(listing.filePaths.some(file => file.endsWith('/normal.tmp.jpg')), true);
+    assert.equal(listing.filePaths.length, 2);
+});
+
+test('ignored albums disappear when their normal cover lookup sees the sentinel', async () => {
+    const app = await boot();
+    app.context.DOMParser = class { parseFromString() {
+        return { querySelectorAll: () => ['folderframe.ignore', 'cover.jpg', 'Nested/']
+            .map(href => ({ getAttribute: () => href })) };
+    } };
+    const item = app.get('ignored-album');
+    app.context.ignoredAlbum = item;
+    await vm.runInContext("loadAlbumPreview(ignoredAlbum, 'Private', new AbortController().signal)", app.context);
+    assert.equal(item.hidden, true);
+    assert.equal(item.dataset.ignoredAlbum, 'true');
+    assert.equal(item.children.length, 0);
+});
+
+test('ignored album-cover descendants do not hide their visible parent or siblings', async () => {
+    const app = await boot();
+    const calls = [];
+    app.context.scanDirectory = async folder => {
+        calls.push(folder);
+        if (folder === 'demo-photos') return { filePaths: [], folderNames: ['Architecture', 'Landscapes', 'Space'] };
+        if (folder === 'demo-photos/Architecture') return { filePaths: [], folderNames: [], ignored: true };
+        if (folder === 'demo-photos/Landscapes') return {
+            filePaths: ['https://example.test/frame/photos/demo-photos/Landscapes/cover.jpg'], folderNames: []
+        };
+        return { filePaths: [], folderNames: [] };
+    };
+    const item = app.get('demo-album');
+    app.context.demoAlbum = item;
+    await vm.runInContext("loadAlbumPreview(demoAlbum, 'demo-photos', new AbortController().signal)", app.context);
+    assert.equal(item.hidden, false);
+    assert.equal(item.dataset.ignoredAlbum, undefined);
+    assert.equal(item.children[0].src, 'https://example.test/frame/photos/demo-photos/Landscapes/cover.jpg');
+    assert.deepEqual(calls, ['demo-photos', 'demo-photos/Architecture', 'demo-photos/Landscapes']);
+});
+
+test('thumbnail manifest generator prunes ignored subtrees and junk files', { timeout: 10000 }, () => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'folderframe-ignore-'));
+    try {
+        const media = path.join(temporary, 'photos');
+        const manifest = path.join(temporary, 'data', 'library.json');
+        fs.mkdirSync(path.join(media, 'Keep'), { recursive: true });
+        fs.mkdirSync(path.join(media, 'Private', 'Nested'), { recursive: true });
+        fs.mkdirSync(path.join(media, '@eaDir'), { recursive: true });
+        fs.writeFileSync(path.join(media, 'Keep', 'photo.jpg'), 'x');
+        fs.writeFileSync(path.join(media, 'Keep', '.hidden.jpg'), 'x');
+        fs.writeFileSync(path.join(media, 'Keep', 'unfinished.jpg.part'), 'x');
+        fs.writeFileSync(path.join(media, 'Private', 'Nested', 'secret.jpg'), 'x');
+        fs.writeFileSync(path.join(media, '@eaDir', 'system.jpg'), 'x');
+        const python = process.platform === 'win32' ? 'python' : 'python3';
+        let result = spawnSync(python, [path.join(__dirname, '..', 'generate_thumbnails.py'), media,
+            '--manifest', manifest, '--manifest-only'], { encoding: 'utf8' });
+        assert.equal(result.status, 0, result.stderr || result.stdout);
+        assert.equal(JSON.parse(fs.readFileSync(manifest, 'utf8')).root.folders.includes('Private'), true);
+        fs.writeFileSync(path.join(media, 'Private', 'folderframe.ignore'), '');
+        result = spawnSync(python, [path.join(__dirname, '..', 'generate_thumbnails.py'), media,
+            '--manifest', manifest, '--manifest-only'], { encoding: 'utf8' });
+        assert.equal(result.status, 0, result.stderr || result.stdout);
+        const index = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+        assert.deepEqual(index.root.folders, ['Keep']);
+        const descriptor = index.chunks.Keep;
+        const chunk = JSON.parse(fs.readFileSync(path.join(path.dirname(manifest), descriptor.file), 'utf8'));
+        assert.deepEqual(chunk.directories.Keep.files.map(file => file.path), ['Keep/photo.jpg']);
+        assert.equal(Object.keys(index.chunks).includes('Private'), false);
+        assert.equal(Object.keys(index.chunks).includes('@eaDir'), false);
+    } finally {
+        fs.rmSync(temporary, { recursive: true, force: true });
+    }
+});
+
+test('deep breadcrumbs preserve clickable first and last ancestors with collapsible middle segments', async () => {
+    const app = await boot({ search: '?album=Family/2024/Summer/Beach' });
+    const children = app.get('breadcrumb').children;
+    const crumbs = children.filter(child => String(child.className || '').includes('breadcrumb-segment'));
+    assert.deepEqual(crumbs.map(child => child.textContent), ['Family', '2024', 'Summer']);
+    assert.match(crumbs[0].className, /crumb-first/);
+    assert.doesNotMatch(crumbs[0].className, /crumb-middle/);
+    assert.match(crumbs[1].className, /crumb-middle/);
+    assert.match(crumbs[2].className, /crumb-tail/);
+    assert.equal(typeof crumbs[0].listeners.click, 'function');
+    assert.equal(typeof crumbs[2].listeners.click, 'function');
+    const ellipsis = children.find(child => child.className === 'crumb-ellipsis');
+    assert.equal(ellipsis.textContent, '› …');
+    const css = fs.readFileSync(path.join(__dirname, '../styles.css'), 'utf8');
+    assert.match(css, /container-name:\s*headernav/);
+    assert.match(css, /@container headernav \(max-width:520px\)/);
+});
+
+test('strict manifest sources default Auto Refresh off but preserve explicit choices', () => {
+    const raw = { sources: [{ id: 'photos', label: 'Photos', path: 'photos/',
+        manifestPath: 'data/library.json', discoveryMode: 'manifest' }] };
+    const config = normalize(raw);
+    assert.equal(api.resolveSettings(config, '').settings.autoRefresh, false);
+    assert.equal(api.resolveSettings(config, '?autorefresh=1').settings.autoRefresh, true);
+    assert.equal(api.resolveSettings(normalize({ ...raw, defaults: { autoRefresh: true } }), '').settings.autoRefresh, true);
+});
+
 test('viewer arrow browsing does not reveal hidden controls or extend their idle timer', async () => {
     const app = await boot();
     vm.runInContext('enterFullScreenViewer(0)', app.context);
@@ -1688,6 +1812,19 @@ test('generated grid thumbnails fall back to originals without failing the tile'
     image.onload();
     assert.equal(tile.failedPreview, undefined);
 
+});
+
+test('confirmed missing originals remove stale generated-thumbnail tiles on activation', async () => {
+    const config = { sources: [{ id: 'photos', label: 'Photos', path: 'photos/', thumbnailPath: 'thumbs/' }] };
+    const app = await boot({ config, fetchHandler: async (url, options) => {
+        if (options.method === 'HEAD' && url.endsWith('/photo.jpg')) return { ok: false, status: 404 };
+        return { ok: true, url, text: async () => '' };
+    } });
+    const tile = app.get('thumbnail-grid').querySelectorAll('.media-tile')[0];
+    assert.ok(tile);
+    await tile.listeners.click();
+    assert.equal(vm.runInContext('mediaFiles.length', app.context), 0);
+    assert.equal(app.state().isGridViewActive, true);
 });
 
 test('large grids render incrementally and keep a bounded media-tile DOM window', async () => {

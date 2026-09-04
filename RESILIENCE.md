@@ -25,6 +25,14 @@ listings can have substantial response bodies. Queue waiting time does not count
 as decoding time. Limits are named constants/defaults in app.js and resilience.js,
 not additional JSON settings.
 
+An ignored subtree is terminated when its directory listing contains
+`folderframe.ignore` (or the server-visible `.frameignore` alias). No extra probe
+request is made for every live folder: album cards use their existing lazy cover
+lookup and recursive scans use their normal listing request. The Python generator
+can inspect the filesystem directly, so it prunes ignored children before writing
+thumbnails or manifest records. Common OS/NAS junk names are filtered in both
+paths, and the browser scan-cache version is bumped when these semantics change.
+
 Ordinary browser-decoded images use a separate four-slot queue. The queue gates
 native image source assignment so a newly visible grid cannot ask a phone, Pi,
 or low-power display to decode hundreds of large JPEG/PNG/WebP/GIF files at

@@ -79,6 +79,16 @@ When an album contains only folders, FolderFrame performs a bounded descendant
 search and flows the first usable image up as its cover. It stops after four
 levels or twelve directory listings per visible album card.
 
+FOLDER EXCLUSIONS
+
+Place an empty folderframe.ignore file inside any media folder to exclude that
+folder and every subfolder. .frameignore is also recognized when your web server
+shows dotfiles; folderframe.ignore is more reliable on ordinary static servers.
+The live scanner and generate_thumbnails.py follow the same rule. FolderFrame
+also skips common OS/NAS recycle, metadata, snapshot, and index folders,
+dotfiles/resource forks, and temporary/partial/backup files. It does not guess
+that folders named thumbnails, cache, private, originals, or exports are hidden.
+
 OPTIONAL SCAN MANIFEST
 
 For a large recursive source, add "scanCache": true to that source in

@@ -12,6 +12,22 @@ let emptyFolderNotice = false;
 const DIRECTORY_TIMEOUT = 15000, MEDIA_TIMEOUT = 30000;
 const GRID_BATCH_SIZE = 100, GRID_WINDOW_SIZE = 300;
 const SCAN_SIBLING_CONCURRENCY = 5; // Bounds simultaneous directory-listing requests during recursive "All Pics" scans.
+const IGNORE_SENTINELS = new Set(['folderframe.ignore', '.frameignore']);
+const IGNORED_DIRECTORY_NAMES = new Set([
+    '@eadir', '#recycle', '@recycle', '$recycle.bin', '.trash', '.trashes',
+    '.appledouble', '__macosx', '.spotlight-v100', '.fseventsd', '.snapshot',
+    '.snapshots', 'system volume information', 'lost+found'
+]);
+function isIgnoredDirectoryName(name) {
+    const normalized = String(name || '').toLowerCase();
+    return IGNORED_DIRECTORY_NAMES.has(normalized) || normalized.startsWith('.trash-');
+}
+function isIgnoredFileName(name) {
+    const normalized = String(name || '').toLowerCase();
+    return normalized.startsWith('.') || normalized.startsWith('~$') ||
+        ['.tmp', '.part', '.partial', '.crdownload', '.download', '.bak', '.old']
+            .some(suffix => normalized.endsWith(suffix));
+}
 const NATIVE_IMAGE_CONCURRENCY = 4;
 const NATIVE_IMAGE_PRIORITY = Object.freeze({ grid: 0, album: 5, viewer: 10 });
 const nativeImageQueue = resilience.createTaskQueue({ concurrency: NATIVE_IMAGE_CONCURRENCY });
@@ -170,6 +186,13 @@ async function findAlbumCover(folder, signal) {
             listing = await scanDirectory(candidate.folder, { signal });
             if (albumPreviewSession && !signal.aborted) albumPreviewSession.listingCache.set(candidate.folder, listing);
         }
+        // A sentinel on the album itself hides that album. A sentinel found
+        // deeper during cover discovery excludes only that descendant; keep
+        // searching sibling folders for a usable cover.
+        if (listing.ignored) {
+            if (candidate.depth === 0) return { file: null, confirmedEmpty: true, directCount, ignored: true };
+            continue;
+        }
         if (candidate.depth === 0 && directCount === null) {
             directCount = {
                 files: listing.filePaths.length,
@@ -218,6 +241,7 @@ async function loadAlbumPreview(item, folder, signal) {
         if (!result.file && result.confirmedEmpty) {
             item.hidden = true;
             item.dataset.emptyAlbum = 'true';
+            if (result.ignored) item.dataset.ignoredAlbum = 'true';
             return;
         }
         if (result.directCount && !signal.aborted) {
@@ -315,7 +339,7 @@ const DATE_CACHE_TTL = 24 * 60 * 60 * 1000;
 const DATE_CACHE_LIMIT = 2000;
 let dateCacheKey = null;
 let scanManifest = null, scanManifestKey = null;
-const SCAN_MANIFEST_VERSION = 1;
+const SCAN_MANIFEST_VERSION = 2;
 const SCAN_MANIFEST_DIRECTORY_LIMIT = 5000;
 const PERSISTENT_MANIFEST_VERSION = 1;
 let persistentManifestState = null;
@@ -383,12 +407,14 @@ function validateManifestRecord(record, expectedPath) {
     const folders = [];
     for (const name of record.folders) {
         if (typeof name !== 'string' || !name || /[\/\\\x00-\x1f]/.test(name) || ['.', '..'].includes(name)) return null;
+        if (isIgnoredDirectoryName(name)) continue;
         folders.push(name);
     }
     const files = [];
     for (const entry of record.files) {
         const path = safeManifestPath(entry?.path);
         if (!path || parentFolder(path) !== expectedPath || !isMediaFile(path)) return null;
+        if (isIgnoredFileName(path.split('/').pop()) || path.split('/').some(isIgnoredDirectoryName)) continue;
         files.push({ ...entry, path });
     }
     return { files, folders };
@@ -1125,23 +1151,28 @@ async function scanDirectory(folder = currentFolder, options = {}) {
         if (directoryMtime != null && cached?.mtime === directoryMtime &&
             Array.isArray(cached.files) && Array.isArray(cached.folders)) {
             cached.checked = Date.now();
-            return { filePaths: cached.files.map(file => file.path), folderNames: [...cached.folders] };
+            return { filePaths: cached.files.map(file => file.path), folderNames: [...cached.folders], ignored: Boolean(cached.ignored) };
         }
     }
     const html = await resilience.request(url, { cache: 'no-store', timeout: DIRECTORY_TIMEOUT, ...options });
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const files = new Set();
     const folders = new Set();
+    let ignored = false;
 
     for (const link of doc.querySelectorAll('a')) {
         const entry = settingsApi.listingEntry(link.getAttribute('href'), url);
         if (!entry) continue;
         if (entry.directory) {
-            folders.add(entry.name);
-        } else if (isMediaFile(entry.name)) {
+            if (!isIgnoredDirectoryName(entry.name)) folders.add(entry.name);
+        } else if (IGNORE_SENTINELS.has(entry.name.toLowerCase())) {
+            ignored = true;
+        } else if (!isIgnoredFileName(entry.name) && isMediaFile(entry.name)) {
             files.add(entry.name);
         }
     }
+
+    if (ignored) { files.clear(); folders.clear(); }
 
     const filePaths = Array.from(files)
         .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
@@ -1158,12 +1189,12 @@ async function scanDirectory(folder = currentFolder, options = {}) {
                 return { path, mtime: metadata?.date ?? null, size: metadata?.size ?? null,
                     thumbnailPath: persistentThumbnailUrl(path) };
             }),
-            folders: folderNames
+            folders: folderNames, ignored
         };
         saveScanManifest();
     }
 
-    return { filePaths, folderNames };
+    return { filePaths, folderNames, ignored };
 }
 
 async function scanDirectoryRecursive(folder = currentFolder, visited = new Set(), listing = null, signal, onBatch = null, options = {}) {
@@ -1225,6 +1256,7 @@ async function scanDirectoryRecursive(folder = currentFolder, visited = new Set(
             // Do not publish late results after the overall scan has rejected.
             if (settled) return;
             const { filePaths, folderNames } = dir;
+            if (dir.ignored) return;
             files.push(...filePaths);
             scannedFolders++; scannedFiles += filePaths.length;
             setScanProgress(`Scanning… ${scannedFolders} folders checked · ${scannedFiles} files found`);
@@ -1640,25 +1672,26 @@ function renderBreadcrumb() {
     let running = '';
     const ancestors = parts.slice(0, -1);
     $('current-path-separator').hidden = ancestors.length === 0;
-    if (ancestors.length > 1) {
-        const ellipsis = document.createElement('span');
-        ellipsis.className = 'crumb-ellipsis';
-        ellipsis.textContent = '…';
-        ellipsis.setAttribute('aria-hidden', 'true');
-        breadcrumb.appendChild(ellipsis);
-    }
     ancestors.forEach((part, index) => {
         const sep = document.createElement('span');
-        sep.className = `crumb-separator${index < ancestors.length - 1 ? ' crumb-middle' : ''}`;
+        const middle = index > 0 && index < ancestors.length - 1;
+        sep.className = `crumb-separator${middle ? ' crumb-middle' : ''}`;
         sep.textContent = '›';
         if (index > 0) breadcrumb.appendChild(sep);
         running = running ? `${running}/${part}` : part;
         const target = running;
         const crumb = document.createElement('button');
-        crumb.className = `crumb${index < ancestors.length - 1 ? ' crumb-middle' : ' crumb-tail'}`;
+        crumb.className = `crumb breadcrumb-segment${index === 0 ? ' crumb-first' : middle ? ' crumb-middle' : ' crumb-tail'}`;
         crumb.textContent = part;
         crumb.addEventListener('click', () => navigateToFolder(target));
         breadcrumb.appendChild(crumb);
+        if (index === 0 && ancestors.length > 2) {
+            const ellipsis = document.createElement('span');
+            ellipsis.className = 'crumb-ellipsis';
+            ellipsis.textContent = '› …';
+            ellipsis.setAttribute('aria-hidden', 'true');
+            breadcrumb.appendChild(ellipsis);
+        }
     });
     if (galleryViewMode === 'all') {
         gridPath.textContent = currentFolder ? parts[parts.length - 1] : 'All media';
@@ -1921,7 +1954,32 @@ function renderGridView() {
             caption.textContent = filename;
         }
         item.appendChild(caption);
-        item.addEventListener('click', () => enterFullScreenViewer(index));
+        item.addEventListener('click', async () => {
+            const current = mediaFiles.indexOf(file);
+            if (current < 0) return;
+            // Generated previews can outlive moved/deleted originals. Verify
+            // only on activation, never by probing every tile during a scan.
+            if (persistentThumbnailUrl(file)) {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), DIRECTORY_TIMEOUT);
+                try {
+                    const response = await fetch(file, { method: 'HEAD', cache: 'no-store', signal: controller.signal });
+                    if (response.status === 404 || response.status === 410) {
+                        persistentThumbnailUrls.delete(file);
+                        modifiedDateCache.delete(file);
+                        mediaFiles = mediaFiles.filter(candidate => candidate !== file);
+                        setScanStatus(`Removed unavailable file: ${filename}`, true);
+                        renderGridView();
+                        return;
+                    }
+                } catch {
+                    // Unsupported HEAD, CORS, timeout, and offline failures are
+                    // inconclusive; preserve existing open-and-recover behavior.
+                } finally { clearTimeout(timer); }
+            }
+            const latest = mediaFiles.indexOf(file);
+            if (latest >= 0) enterFullScreenViewer(latest);
+        });
         return item;
     };
 

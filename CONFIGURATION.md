@@ -148,6 +148,14 @@ the directory being scanned. Strict `"manifest"` sources do not require
 directory listings and work on static hosts such as GitHub Pages or Cloudflare
 Pages after the generated index and media are published together.
 
+To exclude a folder and its entire subtree, place an empty
+`folderframe.ignore` file inside it. `.frameignore` is also supported when the
+server exposes dotfiles. The browser scanner and `generate_thumbnails.py` use
+the same rule. They also skip common OS/NAS recycle, metadata, snapshot, and
+index directories; dotfiles/resource forks; and temporary, partial-download,
+and backup suffixes (`.tmp`, `.part`, `.partial`, `.crdownload`, `.download`,
+`.bak`, `.old`). Ordinary semantic folder names are never guessed as private.
+
 The optional scan manifest is browser-local, capped at 5,000 recently checked
 directories per source, and remains database-free. Entries include directory path
 and timestamp, child folders, and media path plus available modification time,

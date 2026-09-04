@@ -86,6 +86,22 @@ generated static manifest, so there is no database, PHP, or build step.
 - **Large-grid windowing:** large galleries render 100 tiles initially and keep at most 300 media tiles in the DOM while preserving the full scrollbar and media order.
 - **Bounded native decoding:** JPEG, PNG, WebP, and GIF loads use a four-slot priority queue so viewer images stay responsive while large grids populate.
 - **Flexible static hosting:** use live HTML directory listings or a generated manifest on hosts such as GitHub Pages and Cloudflare Pages.
+- **Subtree exclusions:** place an empty `folderframe.ignore` file in any media folder to omit that folder and everything below it. `.frameignore` is also recognized when the web server exposes dotfiles.
+
+### Ignoring folders and temporary files
+
+Place an empty file named `folderframe.ignore` inside a media folder to exclude
+that folder and its complete subtree. The live scanner notices it when the folder
+is listed, and `generate_thumbnails.py` omits it from thumbnails and manifests.
+`.frameignore` is an alias, but many servers hide dotfiles, so
+`folderframe.ignore` is the portable choice.
+
+FolderFrame also skips common system/recycle directories (`@eaDir`, recycle and
+trash folders, `__MACOSX`, `.AppleDouble`, snapshot/index folders, and
+`lost+found`), dotfiles/resource forks, and incomplete or backup suffixes such as
+`.tmp`, `.part`, `.partial`, `.crdownload`, `.download`, `.bak`, and `.old`.
+It does not automatically exclude normal folders named `thumbnails`, `cache`,
+`private`, `originals`, or `exports`.
 
 ## Browser and mobile support
 

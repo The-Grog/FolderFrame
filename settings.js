@@ -162,6 +162,12 @@
         const overrides = urlSettings(params, config.sources, warnings);
         const source = config.sources.find(item => item.id === (overrides.source || settings.source));
         settings.source = source.id;
+        const configuredAutoRefresh = [config.defaults, config[profile]].some(layer =>
+            Object.prototype.hasOwnProperty.call(layer, 'autoRefresh') || layer.tvMode === true);
+        // A published manifest cannot discover changes by rescanning the static
+        // host, so periodic refresh is opt-in there. Saved/URL choices below
+        // still override this source-aware default.
+        if (source.discoveryMode === 'manifest' && !configuredAutoRefresh) settings.autoRefresh = false;
         const remember = overrides.rememberPreferences ?? settings.rememberPreferences;
         const preferenceKey = `folderframe.preferences:${config.baseUrl}:${profile}:${source.id}:${source.url}`;
         if (remember) {

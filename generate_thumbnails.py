@@ -13,6 +13,31 @@ from typing import Optional
 IMAGE_TYPES = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"}
 MEDIA_TYPES = IMAGE_TYPES | {".mp4", ".mov"}
 MANIFEST_VERSION = 1
+IGNORE_SENTINELS = {"folderframe.ignore", ".frameignore"}
+IGNORED_DIRECTORY_NAMES = {
+    "@eadir", "#recycle", "@recycle", "$recycle.bin", ".trash", ".trashes",
+    ".appledouble", "__macosx", ".spotlight-v100", ".fseventsd", ".snapshot",
+    ".snapshots", "system volume information", "lost+found",
+}
+IGNORED_FILE_SUFFIXES = (".tmp", ".part", ".partial", ".crdownload", ".download", ".bak", ".old")
+
+
+def ignored_directory_name(name: str) -> bool:
+    normalized = name.casefold()
+    return normalized in IGNORED_DIRECTORY_NAMES or normalized.startswith(".trash-")
+
+
+def ignored_file_name(name: str) -> bool:
+    normalized = name.casefold()
+    return normalized.startswith(".") or normalized.startswith("~$") or normalized.endswith(IGNORED_FILE_SUFFIXES)
+
+
+def has_ignore_sentinel(directory: Path) -> bool:
+    return any((directory / name).is_file() for name in IGNORE_SENTINELS)
+
+
+def ignored_child_directory(directory: Path, name: str) -> bool:
+    return ignored_directory_name(name) or has_ignore_sentinel(directory / name)
 
 
 def natural_key(value: str):
@@ -49,28 +74,35 @@ def generate(media_root: Path, thumb_root: Path, size: int, quality: int) -> tup
 
     created = current = failed = 0
     changed_directories = set()
-    for source in media_root.rglob("*"):
-        if not source.is_file() or source.suffix.lower() not in IMAGE_TYPES:
+    for root, directories, filenames in os.walk(media_root):
+        directory = Path(root)
+        if has_ignore_sentinel(directory):
+            directories[:] = []
             continue
-        target = thumb_root / (source.relative_to(media_root).as_posix() + ".webp")
-        if target.exists() and target.stat().st_mtime >= source.stat().st_mtime:
-            current += 1
-            continue
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with Image.open(source) as image:
-                image.seek(0)
-                image = ImageOps.exif_transpose(image)
-                if image.mode not in ("RGB", "RGBA"):
-                    image = image.convert("RGBA" if "transparency" in image.info else "RGB")
-                image.thumbnail((size, size), Image.Resampling.LANCZOS)
-                image.save(target, "WEBP", quality=quality, method=6)
-            created += 1
-            changed_directories.add(source.parent.relative_to(media_root).as_posix()
-                if source.parent != media_root else "")
-        except Exception as error:
-            failed += 1
-            print(f"Skipped {source}: {error}")
+        directories[:] = [name for name in directories if not ignored_child_directory(directory, name)]
+        for filename in filenames:
+            source = directory / filename
+            if ignored_file_name(filename) or source.suffix.lower() not in IMAGE_TYPES:
+                continue
+            target = thumb_root / (source.relative_to(media_root).as_posix() + ".webp")
+            if target.exists() and target.stat().st_mtime >= source.stat().st_mtime:
+                current += 1
+                continue
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with Image.open(source) as image:
+                    image.seek(0)
+                    image = ImageOps.exif_transpose(image)
+                    if image.mode not in ("RGB", "RGBA"):
+                        image = image.convert("RGBA" if "transparency" in image.info else "RGB")
+                    image.thumbnail((size, size), Image.Resampling.LANCZOS)
+                    image.save(target, "WEBP", quality=quality, method=6)
+                created += 1
+                changed_directories.add(source.parent.relative_to(media_root).as_posix()
+                    if source.parent != media_root else "")
+            except Exception as error:
+                failed += 1
+                print(f"Skipped {source}: {error}")
     return created, current, failed, changed_directories
 
 
@@ -79,10 +111,18 @@ def directory_record(media_root: Path, relative: str, old_record, thumb_root: Op
     directory = media_root / relative if relative else media_root
     stat = directory.stat()
     mtime_ns = stat.st_mtime_ns
+    if has_ignore_sentinel(directory):
+        counters["listed"] += 1
+        return {"path": relative, "mtimeNs": mtime_ns, "files": [], "folders": [], "ignored": True}
     if not force and isinstance(old_record, dict) and old_record.get("mtimeNs") == mtime_ns and \
             isinstance(old_record.get("files"), list) and isinstance(old_record.get("folders"), list):
-        counters["reused"] += 1
-        return old_record
+        reusable_folders = [name for name in old_record["folders"]
+            if not ignored_child_directory(directory, name)]
+        reusable_files = [entry for entry in old_record["files"]
+            if isinstance(entry, dict) and not ignored_file_name(Path(entry.get("path", "")).name)]
+        if len(reusable_folders) == len(old_record["folders"]) and len(reusable_files) == len(old_record["files"]):
+            counters["reused"] += 1
+            return old_record
 
     files, folders = [], []
     with os.scandir(directory) as entries:
@@ -90,8 +130,9 @@ def directory_record(media_root: Path, relative: str, old_record, thumb_root: Op
             entry_path = f"{relative}/{entry.name}" if relative else entry.name
             try:
                 if entry.is_dir(follow_symlinks=False):
-                    folders.append(entry.name)
-                elif entry.is_file(follow_symlinks=False) and Path(entry.name).suffix.lower() in MEDIA_TYPES:
+                    if not ignored_child_directory(directory, entry.name):
+                        folders.append(entry.name)
+                elif entry.is_file(follow_symlinks=False) and not ignored_file_name(entry.name) and Path(entry.name).suffix.lower() in MEDIA_TYPES:
                     file_stat = entry.stat(follow_symlinks=False)
                     thumbnail = None
                     if thumb_root is not None:
