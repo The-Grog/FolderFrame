@@ -1532,11 +1532,14 @@ test('viewer actions download the original, copy the displayed image, and show t
     app.context.window.isSecureContext = false;
     vm.runInContext('showMedia(0)', app.context);
     assert.equal(app.get('btn-copy-link').disabled, true);
+    assert.equal(app.get('btn-copy-link').hidden, true);
+    assert.equal(app.get('btn-copy-filename').hidden, true);
     assert.match(app.get('btn-copy-link').title, /requires HTTPS/);
 
     const hidden = await boot({ config: { defaults: { showDownloadButton: false, showCopyButton: false } } });
     assert.equal(hidden.get('btn-download').hidden, true);
     assert.equal(hidden.get('btn-copy-link').hidden, true);
+    assert.equal(hidden.get('btn-copy-filename').hidden, true);
 });
 
 test('returning to the grid restores the original tile and scroll position after browsing', async () => {

@@ -641,6 +641,20 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     container-name:headernav;
 }
 
+@media (min-width: 901px) and (pointer: fine) {
+    #overlay-header .viewer-options-menu .timer-control {
+        justify-content: center;
+        gap: 8px;
+    }
+    #overlay-header .viewer-options-menu .timer-control label {
+        margin-left: 0;
+        color: var(--ff-btn-fg);
+        font-size: 13px;
+        font-weight: 500;
+        line-height: 1;
+    }
+}
+
 /* Coarse-pointer viewer controls keep a 44px touch target in both pills.
    The legacy right-side rule is intentionally high-specificity; repeat that
    geometry here for the Back button so neither pill grows independently. */
@@ -665,43 +679,136 @@ button, select, .media-error-actions a { touch-action:manipulation; }
 .grid-options-menu { width:205px; }
 .grid-options-menu .btn { width:100%; justify-content:flex-start; }
 
+/*
+ * Mobile grid browse bar (≤700px only):
+ * - Options ⋮ stays on row 1, separate pill, reserved width
+ * - Path stays on row 1 of the left pill when it fits
+ * - Wraps to a tight second row inside the same path pill only when needed
+ * - Desktop / Final header chrome otherwise unchanged
+ */
 @media (max-width:700px) {
-    #grid-header {
-        gap:5px; padding:7px 8px;
+    #grid-header,
+    #grid-header.ff-header {
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: flex-start;
+        gap: 6px;
+        padding: 0;
     }
-    #grid-header .grid-header-main {
-        flex:0 1 auto; width:auto; min-width:0; flex-wrap:nowrap;
+
+    #grid-header .grid-header-main,
+    #grid-header .grid-header-main.ff-pill,
+    #grid-header.ff-header .ff-header-left.ff-pill {
+        flex: 1 1 auto;
+        width: auto;
+        min-width: 0;
+        max-width: calc(100% - 52px);
+        flex-wrap: wrap;
+        align-items: center;
+        align-content: flex-start;
+        row-gap: 2px;
+        column-gap: 0;
+        min-height: 0;
+        padding: 4px 6px;
     }
+
+    #grid-header .brand-home {
+        flex: 0 0 auto;
+        min-width: 0;
+    }
+
+    /* Share first row with brand; do NOT force 100% width (that always wraps) */
     #grid-header .gallery-path-bar {
-        display:flex; flex:0 1 auto; width:auto; min-width:0;
-        align-items:center; justify-content:flex-start;
+        display: flex;
+        flex: 1 1 auto;
+        width: auto;
+        min-width: 0;
+        max-width: 100%;
+        align-items: center;
+        justify-content: flex-start;
+        flex-wrap: nowrap;
+        gap: 0;
+        padding: 0;
+        overflow: hidden;
     }
+
     @supports not (container-type:inline-size) {
-        #grid-header .crumb-middle { display:none; }
-        #grid-header .crumb-ellipsis { display:inline-flex; }
+        #grid-header .crumb-middle { display: none; }
+        #grid-header .crumb-ellipsis { display: inline-flex; }
     }
-    #grid-header .breadcrumb { flex:0 1 auto; }
-    #grid-header .folder-path { max-width:none; }
-    #grid-header .grid-actions {
-        flex:0 0 auto; width:auto; gap:5px;
+    #grid-header .breadcrumb {
+        flex: 0 1 auto;
+        min-width: 0;
+        overflow: hidden;
     }
-    .grid-status-stack { min-width:0; padding:6px 10px; }
-    #grid-header .grid-actions > .btn { flex:0 0 auto; width:auto; }
-    #grid-header .grid-options { margin-left:0; width:auto; }
-    #grid-header .grid-options > .btn { width:44px; min-width:44px; padding:6px; }
-    #grid-header .grid-options-menu .btn { width:100%; min-width:0; flex-direction:row; }
+    #grid-header .folder-path {
+        flex: 0 1 auto;
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    #grid-header .grid-actions,
+    #grid-header .grid-actions.ff-pill,
+    #grid-header.ff-header .ff-header-right.ff-pill {
+        flex: 0 0 auto;
+        width: auto;
+        max-width: none;
+        margin-left: 0;
+        gap: 4px;
+        min-height: 0;
+        padding: 4px;
+        align-self: flex-start;
+    }
+
+    .grid-status-stack { min-width: 0; padding: 6px 10px; }
+    #grid-header .grid-actions > .btn { flex: 0 0 auto; width: auto; }
+    #grid-header .grid-options { margin-left: 0; width: auto; }
+    #grid-header .grid-options > .btn {
+        width: 40px;
+        min-width: 40px;
+        height: 40px;
+        min-height: 40px;
+        padding: 0;
+    }
+    #grid-header .grid-options-menu .btn {
+        width: 100%;
+        min-width: 0;
+        flex-direction: row;
+    }
 }
 
 @media (max-width:420px) {
-    #grid-header { margin-left:6px; margin-right:6px; gap:4px; padding:6px; }
-    #grid-header .gallery-path-bar { gap:2px; padding:0; }
-    #grid-header .source-root-label { max-width:24vw; overflow:hidden; text-overflow:ellipsis; }
-    #grid-header .crumb { padding-left:2px; padding-right:2px; }
-    #grid-header .folder-path { max-width:none; }
-    #grid-header #grid-count { padding:0; }
-    #grid-header .grid-actions { gap:4px; }
-    #grid-header .grid-actions .btn { min-height:42px; padding:5px 7px; }
-    .grid-status-stack { min-width:0; padding:5px 8px; }
+    #grid-header {
+        margin-left: max(6px, env(safe-area-inset-left));
+        margin-right: max(6px, env(safe-area-inset-right));
+        gap: 5px;
+    }
+    #grid-header .grid-header-main,
+    #grid-header .grid-header-main.ff-pill {
+        max-width: calc(100% - 48px);
+        padding: 3px 5px;
+        row-gap: 1px;
+    }
+    #grid-header .gallery-path-bar { gap: 0; padding: 0; }
+    #grid-header .source-root-label {
+        max-width: 28vw;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    #grid-header .crumb { padding-left: 2px; padding-right: 2px; }
+    #grid-header .folder-path { max-width: 100%; }
+    #grid-header #grid-count { padding: 0; }
+    #grid-header .grid-actions { gap: 3px; padding: 3px; }
+    #grid-header .grid-options > .btn {
+        width: 38px;
+        min-width: 38px;
+        height: 38px;
+        min-height: 38px;
+    }
+    .grid-status-stack { min-width: 0; padding: 5px 8px; }
 }
 
 /* Keep every compact viewer action on one row beneath the filename. */
@@ -1000,5 +1107,34 @@ button, select, .media-error-actions a { touch-action:manipulation; }
         flex: 0 1 auto;
         min-width: 0;
         max-width: calc(100% - 160px);
+    }
+}
+
+/* Mobile path wrap wins over Final header chrome nowrap (grid only) */
+@media (max-width: 700px) {
+    #grid-header.ff-header {
+        flex-wrap: nowrap !important;
+        align-items: flex-start !important;
+    }
+    #grid-header.ff-header .ff-header-left.ff-pill,
+    #grid-header .grid-header-main.ff-pill {
+        flex-wrap: wrap !important;
+        width: auto !important;
+        max-width: calc(100% - 52px) !important;
+        flex: 1 1 auto !important;
+    }
+    #grid-header .gallery-path-bar {
+        flex: 1 1 auto !important;
+        width: auto !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+    }
+    #grid-header.ff-header .ff-header-right.ff-pill,
+    #grid-header .grid-actions.ff-pill {
+        flex: 0 0 auto !important;
+        width: auto !important;
+        max-width: none !important;
+        margin-left: 0 !important;
+        align-self: flex-start !important;
     }
 }

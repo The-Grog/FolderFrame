@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Rhodium+Libre&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=20260904-mobile-viewer-pills">
+<link rel="stylesheet" href="styles.css?v=20260904-interval-centered">
 <link rel="icon" type="image/png" href="docs/images/folderframe-icon.png?v=20260828-brand">
 </head>
 <body>
@@ -73,7 +73,7 @@
                         <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="5" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="19" r="2" fill="currentColor"/></svg>
                     </button>
                     <div id="viewer-options-menu" class="viewer-options-menu" role="menu" hidden>
-                        <button id="btn-shuffle" class="btn btn-secondary ff-btn ff-btn-accent" type="button" role="menuitem" aria-pressed="false" title="Shuffle slideshow order" aria-label="Shuffle slideshow order">
+                        <button id="btn-shuffle" class="btn btn-secondary ff-btn" type="button" role="menuitem" aria-pressed="false" title="Shuffle slideshow order" aria-label="Shuffle slideshow order">
                             <span class="shuffle-on-icon" hidden><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M10.59 9.17 5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg></span>
                             <span class="shuffle-off-icon"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 5h11V2l5 4-5 4V7H4V5zm0 12h11v-3l5 4-5 4v-3H4v-2z"/></svg></span>
                             <span class="button-label">Shuffle Off</span>
@@ -86,7 +86,7 @@
                             <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
                             <span class="button-label">Full</span>
                         </button>
-                        <button id="btn-tv-mode" class="btn btn-secondary ff-btn ff-btn-accent" type="button" role="menuitem" aria-pressed="false" title="Start photo-frame mode" aria-label="Start photo-frame mode">
+                        <button id="btn-tv-mode" class="btn btn-secondary ff-btn" type="button" role="menuitem" aria-pressed="false" title="Start photo-frame mode" aria-label="Start photo-frame mode">
                             <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7v2H7v2h10v-2h-3v-2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>
                             <span class="button-label">TV Mode</span>
                         </button>
@@ -178,7 +178,7 @@
                                     <span id="refresh-grid-label" class="button-label">Refresh Folder</span>
                                 </button>
                             </span>
-                            <button id="btn-auto-refresh" class="btn btn-secondary ff-btn ff-btn-accent" type="button" role="menuitem" aria-pressed="true" title="Automatically rescan every 60 seconds">
+                            <button id="btn-auto-refresh" class="btn btn-secondary ff-btn" type="button" role="menuitem" aria-pressed="true" title="Automatically rescan every 60 seconds">
                                 <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 6V3l-4 4 4 4V8c2.76 0 5 2.24 5 5 0 .75-.17 1.46-.46 2.1l1.46 1.46A6.96 6.96 0 0 0 19 13c0-3.87-3.13-7-7-7zm-5.54.9L5 5.44A6.96 6.96 0 0 0 4 9c0 3.87 3.13 7 7 7v3l4-4-4-4v3c-2.76 0-5-2.24-5-5 0-.75.17-1.46.46-2.1z"/></svg>
                                 <span class="button-label">Auto Refresh On</span>
                             </button>
@@ -222,6 +222,6 @@
     <p id="config-notice" role="status" hidden></p>
     <script src="resilience.js?v=20260831-native-decode-queue"></script>
     <script src="settings.js?v=20260904-manifest-refresh-default"></script>
-    <script src="app.js?v=20260904-folder-ignore-2"></script>
+    <script src="app.js?v=20260904-copy-controls-visibility"></script>
 </body>
 </html>

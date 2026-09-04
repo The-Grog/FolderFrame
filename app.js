@@ -807,7 +807,8 @@ async function loadConfiguration() {
     showDownloadButton = startupSettings.showDownloadButton;
     showCopyButton = startupSettings.showCopyButton;
     btnDownload.hidden = !showDownloadButton;
-    btnCopyLink.hidden = !showCopyButton;
+    btnCopyLink.hidden = !showCopyButton || !imageClipboardAvailable();
+    if (btnCopyFilename) btnCopyFilename.hidden = btnCopyLink.hidden;
     document.body.classList.toggle('hide-filenames', !startupSettings.showFilenames);
     document.body.classList.toggle('hide-viewer-button-labels', !startupSettings.showButtonLabels);
     document.body.classList.toggle('controls-free', !controlsEnabled);
@@ -890,6 +891,10 @@ function updateControlStates() {
     syncPlayButton();
 }
 
+function imageClipboardAvailable() {
+    return Boolean(window.isSecureContext && navigator.clipboard?.write && typeof ClipboardItem !== 'undefined');
+}
+
 function updateMediaActions(filepath, filename, forceVideo = false) {
     btnDownload.href = filepath;
     btnDownload.download = filename;
@@ -898,7 +903,9 @@ function updateMediaActions(filepath, filename, forceVideo = false) {
     btnRotate.disabled = true;
     btnCopyLink.disabled = true;
     if (btnCopyFilename) btnCopyFilename.disabled = true;
-    const clipboardAvailable = window.isSecureContext && navigator.clipboard?.write && typeof ClipboardItem !== 'undefined';
+    const clipboardAvailable = imageClipboardAvailable();
+    btnCopyLink.hidden = !showCopyButton || !clipboardAvailable;
+    if (btnCopyFilename) btnCopyFilename.hidden = btnCopyLink.hidden;
     btnCopyLink.setAttribute('aria-label', copyable ? `Copy image ${filename}` : 'Copy Image is unavailable for video');
     btnCopyLink.title = !copyable ? 'Copy Image is unavailable for video'
         : !clipboardAvailable ? 'Copy Image requires HTTPS or a trusted local context'
@@ -2298,9 +2305,11 @@ function showMedia(index) {
             clearWatchdog();
             imageReady = true;
             btnRotate.disabled = false;
-            const clipboardAvailable = window.isSecureContext && navigator.clipboard?.write && typeof ClipboardItem !== 'undefined';
+            const clipboardAvailable = imageClipboardAvailable();
+            btnCopyLink.hidden = !showCopyButton || !clipboardAvailable;
+            if (btnCopyFilename) btnCopyFilename.hidden = btnCopyLink.hidden;
             btnCopyLink.disabled = !showCopyButton || !clipboardAvailable;
-    if (btnCopyFilename) btnCopyFilename.disabled = !showCopyButton || !clipboardAvailable;
+            if (btnCopyFilename) btnCopyFilename.disabled = !showCopyButton || !clipboardAvailable;
             btnCopyLink.title = clipboardAvailable ? 'Copy displayed image' : 'Copy Image requires HTTPS or a trusted local context';
             setMediaLoading();
             img.style.display = 'block'; mediaTitle.textContent = displayName;
