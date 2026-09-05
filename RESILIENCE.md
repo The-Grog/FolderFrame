@@ -14,7 +14,8 @@ and the existing assets. No configuration migration is needed.
 | Video stall without progress | 30 seconds; paused video is exempt |
 | HEIC decode/preview processing after download | 30 seconds before reporting failure |
 | Shared HEIC processing | 2 active jobs; queued viewer work has priority |
-| Native JPEG/PNG/WebP/GIF display | 4 active loads; viewer, then album, then grid priority |
+| Native viewer JPEG/PNG/WebP/GIF display | 2 active full-resolution loads |
+| Native grid/album thumbnail display | 12 active loads; album work has priority over grid work within the thumbnail queue |
 | Orphaned queued job | 250 ms grace for reattachment |
 | Viewer converted-image cache | 32 entries / 64 MiB of Blob data |
 | HEIC thumbnail cache | 128 entries / 16 MiB; maximum 480-pixel edge |

@@ -92,6 +92,7 @@ def generate(media_root: Path, thumb_root: Path, size: int, quality: int) -> tup
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with Image.open(source) as image:
                     image.seek(0)
+                    image.draft("RGB", (size, size))
                     image = ImageOps.exif_transpose(image)
                     if image.mode not in ("RGB", "RGBA"):
                         image = image.convert("RGBA" if "transparency" in image.info else "RGB")

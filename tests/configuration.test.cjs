@@ -1002,11 +1002,13 @@ test('logo returns index and embed to the current source root without restarting
         const app = await boot({ search: '?profile=' + profile + '&album=Family/2026',
             config: { sources: [{ id: 'family', label: 'Family', path: '/family/' }] } });
         app.get('grid-view-container').scrollTop = 300;
+        vm.runInContext("galleryViewMode = 'all'; updateControlStates()", app.context);
         await app.get('btn-gallery-home').listeners.click();
         assert.equal(app.state().currentFolder, '');
         assert.equal(app.state().activeSource.id, 'family');
         assert.equal(app.state().isGridViewActive, true);
         assert.equal(app.state().slideshowPlaying, false);
+        assert.equal(vm.runInContext('galleryViewMode', app.context), 'folders');
         assert.equal(app.get('grid-view-container').scrollTop, 0);
         assert.ok(app.requests.includes('https://example.test/family/'));
     }
@@ -1308,35 +1310,49 @@ test('HEIC decoder loads only when requested and concurrent callers share one sc
     assert.equal(head.children.length, 1);
 });
 
-test('native image loads are bounded and a queued viewer outranks grid work', async () => {
+test('native viewer and thumbnail loads use independent bounded priority queues', async () => {
     const app = await boot({ empty: true });
-    app.context.queueElements = Array.from({ length: 6 }, () => app.context.document.createElement('img'));
-    app.context.queueControllers = Array.from({ length: 6 }, () => new AbortController());
+    app.context.queueElements = Array.from({ length: 14 }, () => app.context.document.createElement('img'));
+    app.context.queueControllers = Array.from({ length: 14 }, () => new AbortController());
     vm.runInContext(`gridQueueLoads = queueElements.map((element, index) =>
         queueNativeImageSource(element, 'grid-' + index + '.jpg', queueControllers[index].signal,
             { priority: NATIVE_IMAGE_PRIORITY.grid }))`, app.context);
-    assert.deepEqual(app.context.queueElements.map(element => element.src || ''), [
-        'grid-0.jpg', 'grid-1.jpg', 'grid-2.jpg', 'grid-3.jpg', '', ''
-    ]);
-    app.context.viewerElement = app.context.document.createElement('img');
-    app.context.viewerController = new AbortController();
-    vm.runInContext(`viewerQueueLoad = queueNativeImageSource(viewerElement, 'viewer.jpg', viewerController.signal,
-        { priority: NATIVE_IMAGE_PRIORITY.viewer })`, app.context);
+    assert.equal(app.context.queueElements.filter(element => element.src).length, 12);
+
+    app.context.albumElement = app.context.document.createElement('img');
+    app.context.albumController = new AbortController();
+    vm.runInContext(`albumQueueLoad = queueNativeImageSource(albumElement, 'album.jpg', albumController.signal,
+        { priority: NATIVE_IMAGE_PRIORITY.album })`, app.context);
+
+    app.context.viewerElements = Array.from({ length: 3 }, () => app.context.document.createElement('img'));
+    app.context.viewerControllers = Array.from({ length: 3 }, () => new AbortController());
+    vm.runInContext(`viewerQueueLoads = viewerElements.map((element, index) =>
+        queueNativeImageSource(element, 'viewer-' + index + '.jpg', viewerControllers[index].signal,
+            { priority: NATIVE_IMAGE_PRIORITY.viewer }))`, app.context);
+    assert.deepEqual(app.context.viewerElements.map(element => element.src || ''),
+        ['viewer-0.jpg', 'viewer-1.jpg', '']);
+
     app.context.queueElements[0].onload();
     await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-    assert.equal(app.context.viewerElement.src, 'viewer.jpg');
-    assert.equal(app.context.queueElements[4].src || '', '');
+    assert.equal(app.context.albumElement.src, 'album.jpg', 'album work outranks queued grid thumbnails');
+    assert.equal(app.context.queueElements[12].src || '', '');
 
-    const cancelled = assert.rejects(app.context.gridQueueLoads[4], { name: 'AbortError' });
-    app.context.queueControllers[4].abort();
+    const cancelled = assert.rejects(app.context.gridQueueLoads[12], { name: 'AbortError' });
+    app.context.queueControllers[12].abort();
     await cancelled;
-    for (const element of [...app.context.queueElements.slice(1, 4), app.context.viewerElement]) element.onload?.();
-    for (let index = 0; index < 20 && !app.context.queueElements[5].src; index++) await Promise.resolve();
-    assert.equal(app.context.queueElements[5].src, 'grid-5.jpg');
-    app.context.queueElements[5].onload();
-    await Promise.allSettled([...app.context.gridQueueLoads, app.context.viewerQueueLoad]);
-    assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(nativeImageQueue.stats())', app.context)),
-        { active: 0, queued: 0, concurrency: 4 });
+    app.context.albumElement.onload();
+    app.context.viewerElements[0].onload();
+    for (let index = 0; index < 20 && (!app.context.queueElements[13].src || !app.context.viewerElements[2].src); index++) {
+        await Promise.resolve();
+    }
+    assert.equal(app.context.queueElements[13].src, 'grid-13.jpg');
+    assert.equal(app.context.viewerElements[2].src, 'viewer-2.jpg');
+    for (const element of [...app.context.queueElements, ...app.context.viewerElements]) element.onload?.();
+    await Promise.allSettled([...app.context.gridQueueLoads, app.context.albumQueueLoad, ...app.context.viewerQueueLoads]);
+    assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(nativeViewerImageQueue.stats())', app.context)),
+        { active: 0, queued: 0, concurrency: 2 });
+    assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(nativeThumbnailImageQueue.stats())', app.context)),
+        { active: 0, queued: 0, concurrency: 12 });
 });
 
 test('container detection distinguishes genuine HEIC, QuickTime, ordinary images, and garbage', async () => {
@@ -1718,13 +1734,18 @@ test('deep breadcrumbs preserve clickable first and last ancestors with collapsi
     assert.match(css, /@container headernav \(max-width:520px\)/);
 });
 
-test('strict manifest sources default Auto Refresh off but preserve explicit choices', () => {
+test('manifest-backed sources default Auto Refresh off but preserve explicit choices', () => {
     const raw = { sources: [{ id: 'photos', label: 'Photos', path: 'photos/',
         manifestPath: 'data/library.json', discoveryMode: 'manifest' }] };
     const config = normalize(raw);
     assert.equal(api.resolveSettings(config, '').settings.autoRefresh, false);
     assert.equal(api.resolveSettings(config, '?autorefresh=1').settings.autoRefresh, true);
     assert.equal(api.resolveSettings(normalize({ ...raw, defaults: { autoRefresh: true } }), '').settings.autoRefresh, true);
+    const automatic = normalize({ sources: [{ id: 'photos', label: 'Photos', path: 'photos/',
+        manifestPath: 'data/library.json', discoveryMode: 'auto' }] });
+    assert.equal(api.resolveSettings(automatic, '').settings.autoRefresh, false);
+    assert.equal(api.resolveSettings(normalize({ sources: [{ id: 'photos', label: 'Photos', path: 'photos/' }] }), '')
+        .settings.autoRefresh, true);
 });
 
 test('viewer arrow browsing does not reveal hidden controls or extend their idle timer', async () => {
@@ -1957,6 +1978,8 @@ test('Rotate turns only the current photo clockwise and resets on media change',
         assert.equal(image.src, originalSource);
         assert.equal(vm.runInContext('zoom === 1 && panX === 0 && panY === 0', app.context), true);
     }
+    app.windowListeners.keydown({ key: 'r', target: image, preventDefault() {} });
+    assert.equal(vm.runInContext('imageRotation', app.context), 90);
     vm.runInContext("mediaFiles = ['https://example.test/clip.mp4']; showMedia(0)", app.context);
     assert.equal(vm.runInContext('imageRotation', app.context), 0);
     assert.equal(rotate.disabled, true);

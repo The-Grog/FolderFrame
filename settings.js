@@ -167,7 +167,8 @@
         // A published manifest cannot discover changes by rescanning the static
         // host, so periodic refresh is opt-in there. Saved/URL choices below
         // still override this source-aware default.
-        if (source.discoveryMode === 'manifest' && !configuredAutoRefresh) settings.autoRefresh = false;
+        const usesManifest = source.discoveryMode !== 'directory' && Boolean(source.manifestUrl);
+        if (usesManifest && !configuredAutoRefresh) settings.autoRefresh = false;
         const remember = overrides.rememberPreferences ?? settings.rememberPreferences;
         const preferenceKey = `folderframe.preferences:${config.baseUrl}:${profile}:${source.id}:${source.url}`;
         if (remember) {

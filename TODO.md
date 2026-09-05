@@ -5,19 +5,6 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ## Remaining work
 
-### Album recovery
-
-- [x] **Recover from deleted or renamed albums** — A confirmed HTTP 404/410 for the currently open album stops playback, clears stale media, replaces the saved album with its parent, and offers Parent folder/Gallery root recovery. Transient failures and recursive descendant failures still retain usable content. Automated coverage includes active slideshow recovery, repaired preferences, and descendant 404 isolation; device validation pending.
-
-### Large-library resilience
-
-- [x] **Large-library resilience** — Extend existing bounded metadata/album lookups across the app without requiring a database, PHP, or server-side generated thumbnails. Implemented; device validation pending (see RESILIENCE.md).
-  - [x] **Timeouts and recovery** — Bound directory and media loading waits, show actionable errors, and skip stalled files during a running slideshow.
-  - [x] **Cancel outdated work** — Cancel unnecessary requests when changing folders or leaving the viewer; ignore late results from superseded work.
-  - [x] **Limit HEIC processing** — Queue conversions with a small concurrency limit to avoid overwhelming phone CPU and memory.
-  - [x] **Manage memory** — Bound the converted-image cache, release unused object URLs safely, and clean up thumbnail observers across navigation.
-  - [x] **Handle partial failures** — Keep successfully discovered media when a subfolder fails and identify which folders could not be scanned.
-
 ### Performance and deployment
 
 - [ ] **Large Immich directory support** — Improve scanning, navigation, and rendering for very large media directories exported or mounted from Immich while preserving database-free static hosting.
@@ -28,9 +15,7 @@ manual checks; automated tests do not verify browser layout or codecs.
   - [x] **Progressive directory discovery** — Recursive All Pics scans now use a deadlock-free five-worker pool over a shared directory frontier, with determinate top-level subtree progress. Automated coverage verifies deep/wide completion, the concurrency ceiling, cancellation, partial-failure isolation, and completion accounting; live Immich device validation remains pending.
   - [x] **Sub-folder exclusions** — `folderframe.ignore` (plus `.frameignore` when exposed) excludes a complete subtree across live listings, album-cover discovery, recursive scans, browser caches, generated thumbnails, and published manifests. Conservative OS/NAS junk rules are shared by browser and generator paths; automated coverage passes.
   - [x] **Incremental progressive-scan grid updates** — Progressive publishes now extend the current DOM and virtual-grid spacers in place when the rendered prefix remains unchanged. Filename-sort insertions, stale sessions, and other unsafe cases retain the full-rebuild fallback. Existing tile nodes and decoded thumbnails survive append-only updates; large-library device validation remains pending. See RESILIENCE.md.
-- [x] **Thumbnail generation (optional)** — Added per-source `thumbnailPath`, parallel WebP preview lookup for grid/album covers, automatic original fallback, and an optional Pillow generator that preserves static-server hosting. Device validation with a large mixed-format library is pending.
 - [ ] **Validate automatic Docker/Unraid thumbnails** — The main CA, Docker, and Compose implementation provides persistent appdata previews, sequential background generation, HEIC/HEIF support, safe delayed pruning, and read-only originals. Verify the released deployment documentation and complete real Unraid device testing.
-- [x] **Escape returns to gallery** — Escape exits the image viewer and returns to the thumbnail/album grid without adding another on-screen control.
 
 ### Browser and device testing
 
@@ -39,7 +24,20 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ## Completed
 
-- [x] **Manifest refresh defaults and stale-preview recovery** — Strict manifest sources now default periodic Auto Refresh off while preserving explicit config, saved, TV-mode, and URL choices. Activating a generated preview lazily verifies its original; confirmed 404/410 originals remove the stale tile, while unsupported HEAD, CORS, timeout, and offline failures retain normal viewer recovery.
+- [x] **Separate native viewer and thumbnail decode queues** — Full-resolution viewer images use a two-slot queue while grid and album thumbnails use a twelve-slot queue with album-over-grid priority. Navigation and scroll cancellation remain intact, and HEIC processing remains isolated in its existing pool.
+- [x] **Reduced-resolution JPEG thumbnail decode** — `generate_thumbnails.py` now calls Pillow's `Image.draft()` before EXIF transpose and final resizing, allowing JPEG decoders to use a cheaper internal DCT scale while remaining a safe no-op for other formats.
+- [x] **Manifest-aware Auto Refresh default** — Sources using a published manifest in either `"manifest"` or `"auto"` discovery default periodic Auto Refresh off. Explicit profile/config, saved, TV-mode, and URL choices still override the source-aware default; directory-only sources remain on by default.
+- [x] **Viewer `R` shortcut** — `R` invokes the existing 90-degree clockwise Rotate action, and the on-screen shortcut hint documents it.
+- [x] **Home resets the gallery presentation** — Clicking the FolderFrame logo returns to the current source root in By Folder mode without changing Filename/Newest/Oldest sort order, then saves the resulting preference.
+- [x] **Resize layout throttle** — Viewer/grid header layout and rotated-photo fit recalculation now run at most once per animation frame during window resizing.
+- [x] **Secure-context copy controls** — Copy Image and Copy Filename disappear when clipboard access is unavailable over ordinary HTTP, while HTTPS/trusted contexts and configuration visibility remain supported.
+- [x] **Manifest refresh and stale-preview recovery** — Activating a generated preview lazily verifies its original; confirmed 404/410 originals remove the stale tile, while unsupported HEAD, CORS, timeout, and offline failures retain normal viewer recovery.
+- [x] **Recover from deleted or renamed albums** — A confirmed HTTP 404/410 for the currently open album stops playback, clears stale media, repairs the saved album to its parent, and offers Parent folder/Gallery root recovery. Transient and descendant failures retain usable content; automated coverage passes and device validation remains.
+- [x] **Large-library resilience foundation** — Directory/media timeouts, cancellation, bounded HEIC work, bounded converted-image memory, and partial-failure retention are implemented without a database, PHP, or required server-generated thumbnails. See RESILIENCE.md; device validation remains.
+- [x] **Apple Live Photo and mislabeled-HEIC compatibility** — Magic-byte sniffing distinguishes HEIF from QuickTime/MP4, routes mislabeled motion clips away from `heic2any`, preserves cancellation and slideshow skipping, and reports specific HEVC/Live Photo playback guidance without automatic still/motion pairing.
+- [x] **Gallery-grid keyboard navigation** — Arrow keys move tile focus, Enter opens the focused album/media item, and Escape moves up one gallery level while preserving viewer Escape behavior, virtualized-grid navigation, and native control semantics.
+- [x] **Generated Docker/Unraid thumbnail and manifest worker** — Persistent WebP previews, sequential background generation, HEIC/HEIF support, scheduled incremental scans, read-only originals, and delayed pruning are implemented. Release/documentation verification and real Unraid validation remain tracked above.
+- [x] **Community contribution foundation** — Structured issue forms, `CONTRIBUTING.md`, pull-request template, and the initial contributor label set are complete.
 - [x] **Pinned, unified gallery and viewer headers** — Gallery navigation stays visible while scrolling, grid and viewer controls share compact two-pill geometry, and the viewer uses the dedicated Back control while preserving responsive options-menu behavior.
 - [x] **Rotated-image Fit correction** — Fit mode now derives the displayed content dimensions from the image's natural aspect ratio before calculating the 90°/270° rotation scale, avoiding incorrect sizing caused by the container-sized `clientWidth`/`clientHeight` box. Device validation pending.
 - [x] **Large-library scanning and grid controls release** — Published `fc9be39` with the deadlock-free five-worker recursive scanner, determinate scan progress, direct album item counts, Compact/Comfortable/Spacious grid density, configuration and documentation updates, and 114 passing automated tests.
@@ -72,5 +70,5 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 - User tested and approved the swipe, filename visibility, and grid-return update.
 - User tested and approved the mobile double-tap and pinch-flicker fixes.
-- Current regression suite: 114 automated app/settings/cache and resilience tests. Run both tests/configuration.test.cjs and tests/resilience.test.cjs.
+- Current regression suite: 128 automated app/settings/cache and resilience tests. Run both tests/configuration.test.cjs and tests/resilience.test.cjs.
 - User visually tested and approved the long-filename desktop layout. Node tests do not validate CSS layout.

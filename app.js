@@ -28,9 +28,11 @@ function isIgnoredFileName(name) {
         ['.tmp', '.part', '.partial', '.crdownload', '.download', '.bak', '.old']
             .some(suffix => normalized.endsWith(suffix));
 }
-const NATIVE_IMAGE_CONCURRENCY = 4;
+const NATIVE_VIEWER_IMAGE_CONCURRENCY = 2;
+const NATIVE_THUMBNAIL_IMAGE_CONCURRENCY = 12;
 const NATIVE_IMAGE_PRIORITY = Object.freeze({ grid: 0, album: 5, viewer: 10 });
-const nativeImageQueue = resilience.createTaskQueue({ concurrency: NATIVE_IMAGE_CONCURRENCY });
+const nativeViewerImageQueue = resilience.createTaskQueue({ concurrency: NATIVE_VIEWER_IMAGE_CONCURRENCY });
+const nativeThumbnailImageQueue = resilience.createTaskQueue({ concurrency: NATIVE_THUMBNAIL_IMAGE_CONCURRENCY });
 let gridVirtualizer = null;
 function clearMediaSource(element) {
     if (element.removeAttribute) element.removeAttribute('src');
@@ -116,7 +118,8 @@ function startAlbumPreviews() {
 }
 
 function queueNativeImageSource(element, source, signal, { priority = 0, onStart = null } = {}) {
-    const operation = nativeImageQueue.schedule(() => new Promise((resolve, reject) => {
+    const queue = priority === NATIVE_IMAGE_PRIORITY.viewer ? nativeViewerImageQueue : nativeThumbnailImageQueue;
+    const operation = queue.schedule(() => new Promise((resolve, reject) => {
         if (signal?.aborted) { reject(resilience.abortError()); return; }
         const token = Symbol('native-image-load');
         const originalLoad = element.onload;
@@ -2520,7 +2523,12 @@ function setupEventListeners() {
         if (failedNavigation !== null) { const target = failedNavigation; failedNavigation = null; return navigateToFolder(target); }
         return loadGallery({ forceCacheClear: true });
     });
-    $('btn-gallery-home').addEventListener('click', () => navigateToFolder(''));
+    $('btn-gallery-home').addEventListener('click', async () => {
+        galleryViewMode = 'folders';
+        updateControlStates();
+        await navigateToFolder('');
+        savePreferences();
+    });
     $('select-source').addEventListener('change', event => {
         const url = new URL(location.href);
         url.searchParams.set('source', event.target.value);
@@ -2613,7 +2621,7 @@ function setupEventListeners() {
             return;
         }
         const key = e.key.toLowerCase();
-        if (!['arrowleft', 'arrowright', ' ', 'enter', 's', 'f', 't', 'g', 'escape'].includes(key)) return;
+        if (!['arrowleft', 'arrowright', ' ', 'enter', 's', 'f', 't', 'r', 'g', 'escape'].includes(key)) return;
         // Viewer shortcuts own these keys even after a toolbar/arrow button is
         // clicked. Prevent native Space/Enter activation of the focused button.
         e.preventDefault();
@@ -2626,6 +2634,7 @@ function setupEventListeners() {
         if (e.key.toLowerCase() === 's') { shuffleEnabled = !shuffleEnabled; updateControlStates(); savePreferences(); }
         if (e.key.toLowerCase() === 'f') toggleFullscreen();
         if (e.key.toLowerCase() === 't') toggleTvMode();
+        if (e.key.toLowerCase() === 'r') rotateImage();
         if (e.key === 'Escape' && !viewerOptionsMenu.hidden) setViewerOptionsOpen(false);
         else if (e.key.toLowerCase() === 'g' || e.key === 'Escape') renderGridView();
         // Arrow browsing must not keep waking or extending the viewer chrome.
@@ -2634,9 +2643,14 @@ function setupEventListeners() {
     });
 
     window.addEventListener('mousemove', () => { if (!isGridViewActive) resetIdleTimer(); });
+    let resizeFrame = null;
     window.addEventListener('resize', () => {
-        updateGalleryHeaderLayout();
-        if (!isGridViewActive && isPhotoActive()) applyImageRotation();
+        if (resizeFrame) return;
+        resizeFrame = requestAnimationFrame(() => {
+            resizeFrame = null;
+            updateGalleryHeaderLayout();
+            if (!isGridViewActive && isPhotoActive()) applyImageRotation();
+        });
     });
     window.addEventListener('click', event => {
         if (!event.target?.closest?.('#viewer-options')) setViewerOptionsOpen(false);
