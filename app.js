@@ -33,6 +33,8 @@ const NATIVE_THUMBNAIL_IMAGE_CONCURRENCY = 12;
 const NATIVE_IMAGE_PRIORITY = Object.freeze({ grid: 0, album: 5, viewer: 10 });
 const nativeViewerImageQueue = resilience.createTaskQueue({ concurrency: NATIVE_VIEWER_IMAGE_CONCURRENCY });
 const nativeThumbnailImageQueue = resilience.createTaskQueue({ concurrency: NATIVE_THUMBNAIL_IMAGE_CONCURRENCY });
+const videoThumbnailQueue = resilience.createTaskQueue({ concurrency: 2 });
+const VIDEO_THUMBNAIL_TIMEOUT = 8000;
 let gridVirtualizer = null;
 function clearMediaSource(element) {
     if (element.removeAttribute) element.removeAttribute('src');
@@ -154,6 +156,9 @@ function queueNativeImageSource(element, source, signal, { priority = 0, onStart
         signal?.addEventListener('abort', cancel, { once: true });
         try {
             onStart?.();
+            // Visibility is already gated by our observer/queue. Browser lazy
+            // loading can otherwise occupy every slot without starting a request.
+            element.loading = 'eager';
             element.src = source;
         } catch (error) {
             signal?.removeEventListener('abort', cancel);
@@ -170,6 +175,42 @@ function queueNativeImageSource(element, source, signal, { priority = 0, onStart
 }
 
 const ALBUM_COVER_MAX_DEPTH = 4;
+function queueVideoThumbnail(element, source, signal) {
+    const operation = videoThumbnailQueue.schedule(() => new Promise((resolve, reject) => {
+        if (signal.aborted) { reject(resilience.abortError()); return; }
+        const loaded = element.onloadeddata, failed = element.onerror;
+        let settled = false, timer;
+        const finish = (error = false, aborted = false) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            signal.removeEventListener('abort', cancel);
+            element.onloadeddata = loaded;
+            element.onerror = failed;
+            if (error || aborted) clearMediaSource(element);
+            if (aborted) reject(resilience.abortError());
+            else {
+                element.preload = 'metadata';
+                try { (error ? failed : loaded)?.call(element); }
+                finally { resolve(); }
+            }
+        };
+        const cancel = () => finish(false, true);
+        element.onloadeddata = () => finish();
+        element.onerror = () => finish(true);
+        signal.addEventListener('abort', cancel, { once: true });
+        timer = setTimeout(() => finish(true), VIDEO_THUMBNAIL_TIMEOUT);
+        // Metadata alone need not produce a visible frame. Limit frame requests
+        // separately from images, and abort them when the tile leaves the margin.
+        element.preload = 'auto';
+        element.src = source;
+    }), { signal });
+    operation.catch(error => {
+        if (error.name !== 'AbortError') console.warn('FolderFrame: video preview failed.', error);
+    });
+    return operation;
+}
+
 const ALBUM_COVER_MAX_LISTINGS = 12;
 async function findAlbumCover(folder, signal) {
     const queue = [{ folder, depth: 0 }];
@@ -1610,7 +1651,7 @@ function watchThumbnail(element, item, videoThumbnail = false) {
         item.classList.remove('thumb-loading'); element.classList.add('thumb-loaded');
     };
     element.onload = finish;
-    if (videoThumbnail) element.onloadeddata = element.onloadedmetadata = finish;
+    if (videoThumbnail) element.onloadeddata = finish;
     element.onerror = () => {
         if (element.generatedFallback) {
             const generatedFallback = element.generatedFallback;
@@ -1637,10 +1678,13 @@ function watchThumbnail(element, item, videoThumbnail = false) {
     // Native lazy images start their deadline only once in preload range.
     element.startDeadline = () => {
         clearTimeout(timer);
-        timer = setTimeout(() => { element.onerror?.(); element.src = ''; }, MEDIA_TIMEOUT);
+        timer = setTimeout(() => {
+            // Clear the failed request before the error handler starts a fallback.
+            clearMediaSource(element);
+            element.onerror?.();
+        }, MEDIA_TIMEOUT);
     };
     element.cancelDeadline = () => clearTimeout(timer);
-    if (videoThumbnail) element.startDeadline();
     const cleanup = () => {
         clearTimeout(timer);
         element.queueImageSource = null;
@@ -1822,7 +1866,7 @@ function renderGridView() {
         const state = observed.get(el);
         if (!state) return;
         if (!visible) {
-            if (!state.heic && !el.thumbnailSettled && state.controller) {
+            if (!state.heic && (!el.thumbnailSettled || el.tagName === 'VIDEO') && state.controller) {
                 el.resourceActive = false;
                 el.cancelDeadline();
                 state.controller.abort(); state.controller = null;
@@ -1847,6 +1891,10 @@ function renderGridView() {
         const owner = new AbortController();
         state.controller = owner;
         el.thumbnailSettled = false;
+        if (el.tagName === 'VIDEO') {
+            queueVideoThumbnail(el, state.file, owner.signal);
+            return;
+        }
         el.queueImageSource = source => queueNativeImageSource(el, source, owner.signal, {
             priority: NATIVE_IMAGE_PRIORITY.grid,
             onStart: el.startDeadline
@@ -1861,10 +1909,21 @@ function renderGridView() {
             el.queueImageSource(generated || state.file);
         }
     };
+    // rootMargin used by both the IntersectionObserver below and the manual
+    // catch-up check in createRange() — keep these in sync, they must agree.
+    const OBSERVER_LOAD_MARGIN = 300;
+    const isWithinLoadMargin = el => {
+        const container = gridViewContainer.getBoundingClientRect();
+        const rect = el.getBoundingClientRect();
+        return rect.bottom >= container.top - OBSERVER_LOAD_MARGIN &&
+            rect.top <= container.bottom + OBSERVER_LOAD_MARGIN &&
+            rect.right >= container.left - OBSERVER_LOAD_MARGIN &&
+            rect.left <= container.right + OBSERVER_LOAD_MARGIN;
+    };
     if ('IntersectionObserver' in window) session.observer = new IntersectionObserver(entries => {
         if (session.controller.signal.aborted) return;
         entries.forEach(entry => updateThumbnail(entry.target, entry.isIntersecting));
-    }, { root: gridViewContainer, rootMargin: '300px' });
+    }, { root: gridViewContainer, rootMargin: `${OBSERVER_LOAD_MARGIN}px` });
     const observeImage = (el, file, heic = false, item = null) => {
         const state = { file, heic, item, controller: null, video: null, objectUrl: null, cleanup: null };
         state.cleanup = () => {
@@ -1890,11 +1949,11 @@ function renderGridView() {
         if (isVideoFile(file)) {
             const vid = document.createElement('video');
             watchThumbnail(vid, item, true);
-            vid.src = file;
-            vid.preload = 'metadata';
+            vid.preload = 'none';
             vid.disablePictureInPicture = true;
             vid.muted = true;
             vid.playsInline = true;
+            observeImage(vid, file, false, item);
             item.mediaElement = vid;
             item.appendChild(vid);
             const badge = document.createElement('div');
@@ -1922,7 +1981,7 @@ function renderGridView() {
             observeImage(imgEl, file, false, item);
             imgEl.alt = filename;
             imgEl.draggable = false;
-            imgEl.loading = 'lazy';
+            imgEl.loading = 'eager';
             imgEl.decoding = 'async';
             item.mediaElement = imgEl;
             item.appendChild(imgEl);
@@ -2008,11 +2067,28 @@ function renderGridView() {
     };
     const createRange = (start, end) => {
         const fragment = document.createDocumentFragment();
+        const created = [];
         for (let index = start; index < end; index++) {
             const item = createMediaTile(index);
             renderedTiles.set(index, item);
             fragment.appendChild(item);
+            created.push(item);
         }
+        // The elements above are still detached (or only in this fragment) at
+        // this point, so getBoundingClientRect() on them now would be
+        // meaningless — this must wait until after the caller has actually
+        // attached the fragment to the live DOM. requestAnimationFrame fires
+        // after the current synchronous script (including that attachment)
+        // completes, so by the time this runs the geometry is real.
+        if (session.observer) requestAnimationFrame(() => {
+            if (session.controller.signal.aborted) return;
+            for (const item of created) {
+                const element = item.mediaElement;
+                if (element && observed.has(element) && !element.resourceActive && isWithinLoadMargin(item)) {
+                    updateThumbnail(element, true);
+                }
+            }
+        });
         return fragment;
     };
     // These two scale factors (0.778, 0.667) are the single source of truth

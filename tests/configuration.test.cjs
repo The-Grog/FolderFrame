@@ -1295,6 +1295,51 @@ test('recursive scan cancellation rejects and does not start queued folders', as
     assert.equal(started.length, 5);
 });
 
+test('video grid loads only visible tiles and releases limited slots on frame, timeout and cancellation', async () => {
+    const app = await boot({ empty: true });
+    const observers = [], timers = new Map();
+    let timerId = 0;
+    app.context.setTimeout = (fn, delay) => { timers.set(++timerId, { fn, delay }); return timerId; };
+    app.context.clearTimeout = id => timers.delete(id);
+    app.context.window.IntersectionObserver = true;
+    app.context.IntersectionObserver = class {
+        constructor(callback) { this.callback = callback; this.items = []; observers.push(this); }
+        observe(item) { this.items.push(item); }
+        disconnect() {}
+    };
+    vm.runInContext("mediaFiles = Array.from({length: 6}, (_, i) => 'https://example.test/' + i + '.mp4'); renderGridView()", app.context);
+    const observer = observers.find(o => o.items.length);
+    assert.equal(observer.items.length, 6);
+    assert.ok(observer.items.every(el => !el.src), 'detached and offscreen video tiles make no requests');
+    observer.callback(observer.items.map(target => ({ target, isIntersecting: true })));
+    assert.equal(observer.items.filter(el => el.src).length, 2);
+    const first = observer.items[0];
+    assert.equal(first.onloadedmetadata, undefined, 'metadata does not mean a frame is available');
+    first.onloadeddata();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    assert.equal(observer.items.filter(el => el.src).length, 3);
+    const timeout = [...timers.values()].find(timer => timer.delay === 8000);
+    assert.ok(timeout);
+    timeout.fn();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    assert.equal(vm.runInContext('videoThumbnailQueue.stats().active', app.context), 2);
+    observer.callback(observer.items.map(target => ({ target, isIntersecting: false })));
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    assert.equal(vm.runInContext('videoThumbnailQueue.stats().active', app.context), 0);
+    assert.equal(vm.runInContext('videoThumbnailQueue.stats().queued', app.context), 0);
+});
+
+test('thumbnail watchdog preserves the replacement source started by its error fallback', async () => {
+    const app = await boot({ empty: true });
+    let deadline;
+    app.context.setTimeout = fn => { deadline = fn; return 1; };
+    app.context.timeoutImage = app.context.document.createElement('img');
+    app.context.timeoutTile = app.context.document.createElement('button');
+    vm.runInContext("watchThumbnail(timeoutImage, timeoutTile); timeoutImage.fallbackSrc = 'original.jpg'; timeoutImage.startDeadline()", app.context);
+    deadline();
+    assert.equal(app.context.timeoutImage.src, 'original.jpg');
+});
+
 test('HEIC decoder loads only when requested and concurrent callers share one script', async () => {
     const app = await boot();
     const head = app.context.document.head;
@@ -1321,6 +1366,7 @@ test('native viewer and thumbnail loads use independent bounded priority queues'
         queueNativeImageSource(element, 'grid-' + index + '.jpg', queueControllers[index].signal,
             { priority: NATIVE_IMAGE_PRIORITY.grid }))`, app.context);
     assert.equal(app.context.queueElements.filter(element => element.src).length, 12);
+    assert.ok(app.context.queueElements.filter(element => element.src).every(element => element.loading === 'eager'));
 
     app.context.albumElement = app.context.document.createElement('img');
     app.context.albumController = new AbortController();

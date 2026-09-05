@@ -16,6 +16,7 @@ and the existing assets. No configuration migration is needed.
 | Viewer HEIC processing | 2 active jobs; grid and album covers use generated thumbnails only |
 | Native viewer JPEG/PNG/WebP/GIF display | 2 active full-resolution loads |
 | Native grid/album thumbnail display | 12 active loads; album work has priority over grid work within the thumbnail queue |
+| Video grid previews | 2 concurrent first-frame loads; 8-second timeout; offscreen requests cancelled |
 | Orphaned queued job | 250 ms grace for reattachment |
 | Viewer converted-image cache | 32 entries / 64 MiB of Blob data |
 | HEIC thumbnail cache | 128 entries / 16 MiB; maximum 480-pixel edge |
@@ -39,13 +40,34 @@ can inspect the filesystem directly, so it prunes ignored children before writin
 thumbnails or manifest records. Common OS/NAS junk names are filtered in both
 paths, and the browser scan-cache version is bumped when these semantics change.
 
-Ordinary browser-decoded images use a separate four-slot queue. The queue gates
-native image source assignment so a newly visible grid cannot ask a phone, Pi,
-or low-power display to decode hundreds of large JPEG/PNG/WebP/GIF files at
-once. Viewer work has first priority, album covers second, and grid tiles third;
-already-running loads finish normally. Leaving a viewer, removing a virtualized
-tile, or moving an unsettled tile outside preload range cancels its queued work.
-The existing 30-second media/thumbnail watchdogs release stalled slots.
+Ordinary browser-decoded images use two separate task queues gating native
+image source assignment: viewer full-resolution loads (concurrency 2) and
+grid/album thumbnails (concurrency 12), so a fast scroll through many small
+pre-generated previews no longer competes for the same limited slots as the
+current full-resolution viewer image. Viewer work has first priority within
+its own queue, album covers second and grid tiles third within the thumbnail
+queue; already-running loads finish normally. Leaving a viewer, removing a
+virtualized tile, or moving an unsettled tile outside preload range cancels
+its queued work. The existing 30-second media/thumbnail watchdogs release
+stalled slots. Images are eager once assigned a queue slot: visibility is already
+controlled by FolderFrame, so browser lazy loading cannot hold slots indefinitely.
+Video tiles now enter a separate two-slot queue only inside the load margin.
+Metadata alone does not mark a preview loaded; a decoded frame does. Unsupported
+or stalled previews settle to the existing unavailable state without blocking images.
+
+Grid tile visibility for lazy loading is driven by an `IntersectionObserver`
+against the scrollable grid container as a custom root. Newly created tiles
+also get an immediate manual visibility check (matching the observer's own
+margin exactly) once they've actually been attached to the live DOM via
+`requestAnimationFrame`. This exists because a custom-root observer can fail
+to (re)compute intersection for elements created in the same synchronous tick
+as a change to the root's own scroll geometry — here, the virtualizer's
+top/bottom spacer height changes alongside every tile append — leaving
+otherwise-visible tiles waiting indefinitely for a callback that a real
+scroll event would otherwise force. The manual check and the observer are
+complementary, not redundant: the observer still handles ordinary
+scroll-driven visibility changes; the manual check only catches tiles that
+were already visible the instant they were created.
 
 ### Progressive scan rebuild frequency
 
