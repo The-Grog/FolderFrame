@@ -256,7 +256,8 @@ async function loadAlbumPreview(item, folder, signal) {
         const file = result.file;
         if (!file || signal.aborted || controller.signal.aborted) return;
         const generatedUrl = persistentThumbnailUrl(file);
-        let url = generatedUrl || (isHeicFile(file) ? await getSpecialImageURL(file, signal, 'thumbnail') : file);
+        if (isHeicFile(file) && !generatedUrl) return;
+        let url = generatedUrl || file;
         if (signal.aborted || controller.signal.aborted) return;
         preview = item.coverImage || document.createElement('img');
         item.coverImage = preview;
@@ -293,14 +294,12 @@ async function loadAlbumPreview(item, folder, signal) {
             preview.hidden = false;
             item.classList.add('has-album-cover');
         };
-        preview.onerror = async () => {
+        preview.onerror = () => {
             clearTimeout(timeout);
-            if (generatedUrl && preview.src === generatedUrl && !signal.aborted) {
-                try {
-                    url = isHeicFile(file) ? await getSpecialImageURL(file, signal, 'thumbnail') : file;
-                    if (!signal.aborted) loadPreview(url);
-                    return;
-                } catch {}
+            if (generatedUrl && !isHeicFile(file) && preview.src === generatedUrl && !signal.aborted) {
+                url = file;
+                loadPreview(url);
+                return;
             }
             fallback();
         };
@@ -752,8 +751,8 @@ window.addEventListener('beforeunload', () => {
 });
 
 function isHeicFile(path) { return /\.(heic|heif)$/i.test(path); }
-function isImageFile(path) { return /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(path); }
-function isVideoFile(path) { return /\.(mp4|mov)$/i.test(path); }
+function isImageFile(path) { return /\.(jpe?g|png|webp|gif|avif|bmp|heic|heif)$/i.test(path); }
+function isVideoFile(path) { return /\.(mp4|mov|webm|m4v)$/i.test(path); }
 function isMediaFile(path) { return isImageFile(path) || isVideoFile(path); }
 
 function currentDirectoryUrl(folder = currentFolder) {
@@ -1041,6 +1040,8 @@ function detectContainer(arrayBuffer) {
         for (let offset = 16; offset + 4 <= Math.min(b.length, 64); offset += 4) {
             brands.push(ascii(b, offset, offset + 4));
         }
+        const avifBrands = new Set(['avif','avis']);
+        if (brands.some(brand => avifBrands.has(brand))) return 'avif';
         const heifBrands = new Set(['heic','heix','hevc','hevx','heim','heis','mif1','msf1','avic']);
         if (brands.some(brand => heifBrands.has(brand))) return 'heic';
         const quickTimeBrands = new Set(['qt  ','isom','iso2','mp41','mp42','m4v ','M4V ','avc1','hvc1','hev1','dash','msdh','M4A ','3gp4','3g2a']);
@@ -1077,7 +1078,7 @@ function ascii(bytes, start, end) {
 }
 
 function mimeForFormat(format) {
-    return ({ jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' })[format] || '';
+    return ({ jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', avif: 'image/avif' })[format] || '';
 }
 
 async function makeThumbnail(blob) {
@@ -1123,7 +1124,7 @@ function getImagePool() {
         download: (file, signal) => resilience.request(file, { signal, timeout: MEDIA_TIMEOUT, body: 'arrayBuffer', cache: 'no-store' }),
         decode: async data => {
             const format = detectContainer(data);
-            if (['jpeg', 'png', 'webp', 'gif'].includes(format)) return new Blob([data], { type: mimeForFormat(format) });
+            if (['jpeg', 'png', 'webp', 'gif', 'avif'].includes(format)) return new Blob([data], { type: mimeForFormat(format) });
             if (format === 'quicktime') throw reclassifiedContainerError('quicktime', data);
             if (format !== 'heic') throw new Error('Unknown or corrupt image format');
             const decodeHeic = await loadHeicDecoder();
@@ -1851,33 +1852,9 @@ function renderGridView() {
             onStart: el.startDeadline
         });
         if (state.heic) {
-            const useSpecialImage = () => getSpecialImageURL(state.file, owner.signal, 'thumbnail').then(url => {
-                if (!owner.signal.aborted) el.queueImageSource(url);
-            }).catch(error => {
-                if (owner.signal.aborted || error.name === 'AbortError') return;
-                if (!isQuickTimeReclassification(error)) throw error;
-                const objectUrl = URL.createObjectURL(new Blob([error.data], { type: 'video/quicktime' }));
-                const vid = document.createElement('video');
-                state.objectUrl = objectUrl; state.video = vid;
-                watchThumbnail(vid, state.item, true);
-                vid.preload = 'metadata'; vid.disablePictureInPicture = true;
-                vid.muted = true; vid.playsInline = true;
-                el.style.display = 'none';
-                state.item.insertBefore(vid, el);
-                state.item.mediaElement = vid;
-                if (!state.item.querySelector('.video-badge')) {
-                    const badge = document.createElement('div');
-                    badge.className = 'video-badge';
-                    badge.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>';
-                    state.item.appendChild(badge);
-                }
-                vid.src = objectUrl;
-            });
             const generated = persistentThumbnailUrl(state.file);
-            if (generated) {
-                el.generatedFallback = useSpecialImage;
-                el.queueImageSource(generated);
-            } else useSpecialImage().catch(() => el.onerror?.());
+            if (generated) el.queueImageSource(generated);
+            else el.onerror?.();
         } else {
             const generated = persistentThumbnailUrl(state.file);
             el.fallbackSrc = generated ? state.file : null;

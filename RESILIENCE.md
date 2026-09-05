@@ -13,7 +13,7 @@ and the existing assets. No configuration migration is needed.
 | Media/HEIC download or initial native-media load | 30 seconds |
 | Video stall without progress | 30 seconds; paused video is exempt |
 | HEIC decode/preview processing after download | 30 seconds before reporting failure |
-| Shared HEIC processing | 2 active jobs; queued viewer work has priority |
+| Viewer HEIC processing | 2 active jobs; grid and album covers use generated thumbnails only |
 | Native viewer JPEG/PNG/WebP/GIF display | 2 active full-resolution loads |
 | Native grid/album thumbnail display | 12 active loads; album work has priority over grid work within the thumbnail queue |
 | Orphaned queued job | 250 ms grace for reattachment |
@@ -25,6 +25,11 @@ Directory listings receive a longer budget than config/metadata because large
 listings can have substantial response bodies. Queue waiting time does not count
 as decoding time. Limits are named constants/defaults in app.js and resilience.js,
 not additional JSON settings.
+
+For HEIC/HEIF libraries, generated WebP previews are the only HEIC image source
+used by grid tiles and album covers. Missing or broken previews leave the existing
+placeholder and do not trigger `heic2any`; opening the item still uses the full
+viewer HEIC and QuickTime reclassification path.
 
 An ignored subtree is terminated when its directory listing contains
 `folderframe.ignore` (or the server-visible `.frameignore` alias). No extra probe

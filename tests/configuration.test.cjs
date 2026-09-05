@@ -15,10 +15,10 @@ const normalizeConfigCopy = source => {
     return config;
 };
 function bmff(major, compatible = []) {
-    const brands = [major, ...compatible];
     const bytes = Buffer.alloc(16 + compatible.length * 4);
     bytes.writeUInt32BE(bytes.length, 0); bytes.write('ftyp', 4, 'ascii');
-    brands.forEach((brand, index) => bytes.write(brand, 8 + index * 4, 4, 'ascii'));
+    bytes.write(major, 8, 'ascii');
+    compatible.forEach((brand, index) => bytes.write(brand, 16 + index * 4, 4, 'ascii'));
     return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 }
 
@@ -431,8 +431,10 @@ test('media watchdog reports stalls, skips only while playing, and ignores super
     }
 });
 
-test('HEIC thumbnail observer releases its consumer offscreen and disconnects on viewer entry', async () => {
-    const app = await boot();
+test('HEIC grid uses generated thumbnails without conversion and cleans up offscreen', async () => {
+    const app = await boot({ config: { sources: [{
+        id: 'photos', label: 'Photos', path: 'photos/', thumbnailPath: 'thumbs/'
+    }] } });
     const observers = [];
     app.context.window.IntersectionObserver = true;
     app.context.IntersectionObserver = class {
@@ -440,19 +442,21 @@ test('HEIC thumbnail observer releases its consumer offscreen and disconnects on
         observe(item) { this.items.push(item); }
         disconnect() { this.disconnected = true; }
     };
-    const signals = [];
-    app.context.getSpecialImageURL = async (_file, signal) => { signals.push(signal); return 'blob:thumb'; };
+    let conversions = 0;
+    app.context.getSpecialImageURL = async () => { conversions++; return 'blob:thumb'; };
     vm.runInContext("mediaFiles = ['https://example.test/frame/photos/a.heic']; renderGridView()", app.context);
     const observer = observers.find(o => o.items.length);
     const target = observer.items[0];
     observer.callback([{ target, isIntersecting: true }]);
     await Promise.resolve(); await Promise.resolve();
+    assert.equal(target.src, 'https://example.test/frame/thumbs/a.heic.webp');
+    assert.equal(conversions, 0);
     observer.callback([{ target, isIntersecting: false }]);
-    assert.equal(signals[0].aborted, true);
+    assert.equal(target.resourceActive, false);
     observer.callback([{ target, isIntersecting: true }]);
     await Promise.resolve();
     vm.runInContext('enterFullScreenViewer(0)', app.context);
-    assert.equal(signals[1].aborted, true);
+    assert.equal(conversions, 1, 'opening the viewer still performs HEIC conversion');
     assert.equal(observer.disconnected, true);
 });
 
@@ -957,23 +961,22 @@ test('empty, video-only, and failed album listings retain the folder fallback', 
     assert.equal(app.context.albumItem.children.length, 0);
 });
 
-test('HEIC album covers reuse conversion and aborted loads cannot update old tiles', async () => {
-    const app = await boot();
+test('HEIC album covers use generated previews only and never fall back to conversion', async () => {
+    const app = await boot({ config: { sources: [{
+        id: 'photos', label: 'Photos', path: 'photos/', thumbnailPath: 'thumbs/'
+    }] } });
     app.context.albumItem = app.get('test-album');
     app.context.DOMParser = class { parseFromString() {
         return { querySelectorAll: () => [{ getAttribute: () => 'cover.heic' }] };
     } };
-    vm.runInContext("getSpecialImageURL = async () => 'blob:cover'", app.context);
+    vm.runInContext("specialCalls = 0; getSpecialImageURL = async () => { specialCalls++; return 'blob:cover'; }", app.context);
     await vm.runInContext("loadAlbumPreview(albumItem, 'Family', new AbortController().signal)", app.context);
-    assert.equal(app.context.albumItem.children[0].src, 'blob:cover');
-    let finish;
-    app.context.fetch = () => new Promise(resolve => { finish = resolve; });
-    const controller = new AbortController();
-    app.context.coverSignal = controller.signal;
-    const pending = vm.runInContext("loadAlbumPreview(albumItem, 'Other', coverSignal)", app.context);
-    controller.abort();
-    finish({ ok: true, text: async () => '' });
-    await pending;
+    const cover = app.context.albumItem.children[0];
+    assert.equal(cover.src, 'https://example.test/frame/thumbs/Family/cover.heic.webp');
+    cover.onerror();
+    await Promise.resolve();
+    assert.equal(vm.runInContext('specialCalls', app.context), 0);
+    assert.equal(cover.hidden, true);
     assert.equal(app.context.albumItem.children.length, 1);
 });
 
@@ -1355,9 +1358,11 @@ test('native viewer and thumbnail loads use independent bounded priority queues'
         { active: 0, queued: 0, concurrency: 12 });
 });
 
-test('container detection distinguishes genuine HEIC, QuickTime, ordinary images, and garbage', async () => {
+test('container detection distinguishes AVIF, genuine HEIC, QuickTime, ordinary images, and garbage', async () => {
     const app = await boot();
     const cases = [
+        [bmff('avif', ['mif1']), 'avif'],
+        [bmff('mif1', ['avis']), 'avif'],
         [bmff('heic', ['mif1', 'hvc1']), 'heic'],
         [bmff('qt  ', ['hvc1']), 'quicktime'],
         [bmff('isom', ['mp42', 'avc1']), 'quicktime'],
@@ -1370,7 +1375,7 @@ test('container detection distinguishes genuine HEIC, QuickTime, ordinary images
     }
 });
 
-test('special-image decode sends genuine HEIC to heic2any and reclassifies QuickTime without decoding', async () => {
+test('special-image decode keeps AVIF native, sends genuine HEIC to heic2any, and reclassifies QuickTime', async () => {
     const app = await boot();
     vm.runInContext(`window.FolderFrameResilience.createImagePool = options => {
         globalThis.capturedImagePoolOptions = options;
@@ -1383,6 +1388,11 @@ test('special-image decode sends genuine HEIC to heic2any and reclassifies Quick
     assert.equal(still.type, 'image/jpeg');
     assert.equal(decoderCalls, 1);
 
+    app.context.sampleContainer = bmff('avif', ['mif1']);
+    const avif = await vm.runInContext('capturedImagePoolOptions.decode(sampleContainer)', app.context);
+    assert.equal(avif.type, 'image/avif');
+    assert.equal(decoderCalls, 1);
+
     app.context.sampleContainer = bmff('qt  ', ['hvc1']);
     await assert.rejects(vm.runInContext('capturedImagePoolOptions.decode(sampleContainer)', app.context), error => {
         assert.equal(error.name, 'MediaReclassificationError');
@@ -1391,6 +1401,25 @@ test('special-image decode sends genuine HEIC to heic2any and reclassifies Quick
         return true;
     });
     assert.equal(decoderCalls, 1);
+});
+
+test('common image and video extensions use native directory-listing paths', async () => {
+    const app = await boot();
+    for (const extension of ['jpg', 'png', 'avif', 'bmp']) {
+        assert.equal(vm.runInContext(`isImageFile('photo.${extension}')`, app.context), true);
+    }
+    for (const extension of ['mp4', 'mov', 'webm', 'm4v']) {
+        assert.equal(vm.runInContext(`isVideoFile('clip.${extension}')`, app.context), true);
+    }
+    assert.equal(vm.runInContext("isHeicFile('photo.avif')", app.context), false);
+    assert.equal(vm.runInContext("isHeicFile('photo.heic')", app.context), true);
+    app.context.DOMParser = class { parseFromString() {
+        return { querySelectorAll: () => ['photo.avif', 'scan.bmp', 'movie.webm', 'camera.m4v', 'notes.txt']
+            .map(href => ({ getAttribute: () => href })) };
+    } };
+    const listing = await vm.runInContext("scanDirectory('Formats', { bypassCache: true })", app.context);
+    assert.deepEqual(Array.from(listing.filePaths).map(file => file.split('/').pop()),
+        ['camera.m4v', 'movie.webm', 'photo.avif', 'scan.bmp']);
 });
 
 test('mislabeled HEIC becomes a Live Photo video without a second download and has specific HEVC guidance', async () => {
@@ -1435,16 +1464,19 @@ test('range sniffer accepts a server that returns the whole body and preserves a
     await assert.rejects(vm.runInContext("sniffContainer('https://example.test/fake.jpg', abortedSniff.signal)", app.context), { name: 'AbortError' });
 });
 
-test('HEIC grid tile reclassifies QuickTime bytes into a video preview', async () => {
+test('HEIC grid without a generated thumbnail stays a clickable placeholder', async () => {
     const app = await boot();
-    app.context.motionBytes = bmff('qt  ', ['hvc1']);
-    vm.runInContext(`getSpecialImageURL = async () => {
-        throw reclassifiedContainerError('quicktime', motionBytes);
-    }; mediaFiles = ['https://example.test/IMG_1211.heic']; renderGridView();`, app.context);
+    vm.runInContext(`specialCalls = 0;
+        getSpecialImageURL = async () => { specialCalls++; return 'blob:unexpected'; };
+        mediaFiles = ['https://example.test/IMG_1211.heic']; renderGridView();`, app.context);
     await Promise.resolve(); await Promise.resolve();
     const tile = app.get('thumbnail-grid').querySelectorAll('.media-tile')[0];
-    assert.equal(tile.mediaElement.tagName, 'VIDEO');
-    assert.match(tile.mediaElement.src, /^blob:/);
+    assert.equal(tile.mediaElement.tagName, 'IMG');
+    assert.equal(vm.runInContext('specialCalls', app.context), 0);
+    assert.ok(tile.querySelectorAll('.heic-fallback').length);
+    assert.ok(tile.querySelectorAll('.thumbnail-unavailable').length);
+    await tile.listeners.click();
+    assert.equal(app.state().isGridViewActive, false);
 });
 
 test('ordinary MOV remains on the native video path and Live Photo slideshow errors keep the normal delay', async () => {
@@ -1691,6 +1723,10 @@ test('thumbnail manifest generator prunes ignored subtrees and junk files', { ti
         fs.mkdirSync(path.join(media, 'Private', 'Nested'), { recursive: true });
         fs.mkdirSync(path.join(media, '@eaDir'), { recursive: true });
         fs.writeFileSync(path.join(media, 'Keep', 'photo.jpg'), 'x');
+        fs.writeFileSync(path.join(media, 'Keep', 'image.avif'), 'x');
+        fs.writeFileSync(path.join(media, 'Keep', 'image.bmp'), 'x');
+        fs.writeFileSync(path.join(media, 'Keep', 'clip.webm'), 'x');
+        fs.writeFileSync(path.join(media, 'Keep', 'clip.m4v'), 'x');
         fs.writeFileSync(path.join(media, 'Keep', '.hidden.jpg'), 'x');
         fs.writeFileSync(path.join(media, 'Keep', 'unfinished.jpg.part'), 'x');
         fs.writeFileSync(path.join(media, 'Private', 'Nested', 'secret.jpg'), 'x');
@@ -1708,7 +1744,8 @@ test('thumbnail manifest generator prunes ignored subtrees and junk files', { ti
         assert.deepEqual(index.root.folders, ['Keep']);
         const descriptor = index.chunks.Keep;
         const chunk = JSON.parse(fs.readFileSync(path.join(path.dirname(manifest), descriptor.file), 'utf8'));
-        assert.deepEqual(chunk.directories.Keep.files.map(file => file.path), ['Keep/photo.jpg']);
+        assert.deepEqual(chunk.directories.Keep.files.map(file => file.path),
+            ['Keep/clip.m4v', 'Keep/clip.webm', 'Keep/image.avif', 'Keep/image.bmp', 'Keep/photo.jpg']);
         assert.equal(Object.keys(index.chunks).includes('Private'), false);
         assert.equal(Object.keys(index.chunks).includes('@eaDir'), false);
     } finally {

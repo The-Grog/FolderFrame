@@ -140,6 +140,12 @@ folders, uses the first GIF frame, skips current outputs, and never modifies
 originals. The output directory must be served at the configured
 `thumbnailPath`; it does not need directory listings.
 
+Recognized images are JPEG, PNG, WebP, GIF, AVIF, BMP, HEIC, and HEIF;
+recognized videos are MP4, MOV, WEBM, and M4V. AVIF/BMP use browser-native
+display support. WEBM/M4V follow normal HTML5 codec support, like MP4/MOV. The
+thumbnail helper attempts AVIF/BMP through the installed Pillow stack and skips
+an input cleanly when that environment cannot decode it.
+
 A disk or network path such as `C:\Photos` or a UNC share cannot be scanned
 directly by the browser. Map it to a web-server directory first. Sources using
 `"auto"` fallback or `"directory"` discovery must provide HTML directory

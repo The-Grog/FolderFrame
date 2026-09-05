@@ -75,13 +75,13 @@ generated static manifest, so there is no database, PHP, or build step.
 
 - **Folder-based albums:** thumbnail grid, image cover previews with folder badges, nested albums, breadcrumbs, and recursive All Pics view.
 - **Flexible sorting:** Natural Filename order by default, plus Newest and Oldest, with separate index/embed defaults. Date sorting uses server modification dates, not photo capture dates.
-- **Photos and videos:** JPEG, PNG, WebP, GIF, HEIC/HEIF conversion, and MP4/MOV playback (browser codec support applies).
+- **Photos and videos:** JPEG, PNG, WebP, GIF, AVIF, BMP, and HEIC/HEIF images plus MP4, MOV, WEBM, and M4V video. AVIF/BMP use browser-native image support; video codec support still applies.
 - **Slideshow and TV mode:** selectable intervals, Shuffle, fullscreen, automatic rescans, and automatic skipping of failed media.
 - **Responsive viewer:** compact mobile controls, pinch zoom, pan, display-only 90° rotation, and Fit/Original sizing.
 - **Embeddable:** iframe example and an optional controls-free, muted-video slideshow.
 - **Configurable startup:** named media sources, separate index/embed defaults, saved preferences, and URL overrides.
 - **Clear feedback:** folder scan progress, thumbnail placeholders, media loading indicators, and recovery guidance.
-- **Optional generated thumbnails:** serve small WebP grid/album previews with automatic original-image fallback; the full viewer always uses originals.
+- **Optional generated thumbnails:** serve small WebP grid/album previews with automatic original-image fallback for browser-native images; HEIC/HEIF tiles use generated previews or a placeholder, while the full viewer still opens originals.
 - **Optional persistent media index:** serve a lean appdata-generated manifest so unchanged large trees open without re-downloading and parsing every directory listing.
 - **Large-grid windowing:** large galleries render 100 tiles initially and keep at most 300 media tiles in the DOM while preserving the full scrollbar and media order.
 - **Bounded native decoding:** JPEG, PNG, WebP, and GIF loads use a four-slot priority queue so viewer images stay responsive while large grids populate.
@@ -416,7 +416,14 @@ Images: .jpg .jpeg .png .webp .gif .heic .heif
 Animated and static GIF files are displayed directly by the browser and
 participate in slideshows like other images.
 
-Videos: .mp4 .mov
+Browser-native images: .jpg .jpeg .png .webp .gif .avif .bmp
+
+Converted images: .heic .heif
+
+Videos: .mp4 .mov .webm .m4v
+
+AVIF and BMP display when the browser supports them. WEBM and M4V use normal
+HTML5 video playback and remain codec-dependent, like MP4 and MOV.
 
 The browser must support the codec contained inside a video file. A .mov
 or .mp4 extension alone does not guarantee browser playback.
@@ -601,10 +608,9 @@ A blue folder badge and the album name distinguish covers from individual
 photos. Empty, video-only, nested-folder-only, or failed previews keep the
 folder icon. Covers do not recursively scan descendant albums.
 
-Previews load near the visible grid, with up to three album-preview jobs and
-two shared HEIC-processing jobs at once. HEIC previews are downscaled to a
-480-pixel maximum edge; other formats still use original images. No server-side
-thumbnail generation is required. Offscreen HEIC previews release their leases.
+Previews load near the visible grid, with up to three album-preview jobs.
+HEIC/HEIF album covers use generated WebP previews when present and otherwise
+retain the folder placeholder, avoiding full-file browser conversion in the grid.
 Use Refresh Folder to reselect covers after changing files inside albums;
 unchanged background refreshes keep existing tiles. There is no cover.jpg
 override yet.
@@ -629,8 +635,11 @@ WebP previews:
 
 FolderFrame maps `photos/Family/image.jpg` to
 `thumbnails/Family/image.jpg.webp`. Generated previews are used only in the
-grid and for album covers. Missing or invalid previews automatically fall back
-to the original, and the full viewer always opens the original media.
+grid and for album covers. Missing or invalid previews fall back to the original
+for browser-native images. HEIC/HEIF tiles instead keep their HEIC or album
+placeholder so large libraries do not run `heic2any` for every visible tile.
+Opening a HEIC/HEIF file still performs the full viewer conversion and container
+reclassification path.
 
 Generate or refresh the parallel tree locally with Pillow:
 
@@ -640,8 +649,10 @@ python generate_thumbnails.py photos thumbnails
 ```
 
 Install `pillow-heif` as well to generate previews for HEIC/HEIF files. The
-script preserves subfolders, uses the first GIF frame, skips current outputs,
-and never modifies originals. Run it again after adding or changing media.
+script also attempts AVIF and BMP through the installed Pillow stack and skips
+unsupported formats cleanly. It preserves subfolders, uses the first GIF frame,
+skips current outputs, and never modifies originals. Run it again after adding
+or changing media.
 
 The official Docker and Unraid deployment generates persistent thumbnails in
 the configured appdata directory by default. It processes media in the

@@ -12,7 +12,7 @@ maintained media list.
 
 The gallery supports: - Thumbnail grid view - Subfolders as albums,
 including nested albums - Breadcrumb navigation - JPG, JPEG, PNG, WebP, GIF,
-HEIC/HEIF images - MP4 and MOV video detection/playback (browser codec
+AVIF, BMP, and HEIC/HEIF images - MP4, MOV, WEBM, and M4V video detection/playback (browser codec
 support still applies) - Content-aware handling of mislabeled HEIC
 files - Slideshow playback with selectable intervals - Shuffle mode -
 Configurable automatic folder rescanning - TV / photo-frame mode -
@@ -73,8 +73,11 @@ Then install Pillow and generate the tree:
 
 Install pillow-heif too for HEIC/HEIF input. A file at
 photos/Family/image.jpg maps to thumbnails/Family/image.jpg.webp.
-Missing previews fall back to the original automatically. Thumbnails are
-used only in the grid and for album covers; the viewer uses originals.
+Missing previews fall back to the original for browser-native images.
+HEIC/HEIF grid tiles and album covers use generated previews only; a missing
+or broken preview keeps the HEIC or folder placeholder instead of running
+heic2any for every visible tile. Opening the item still uses the full viewer
+HEIC and QuickTime reclassification path.
 When an album contains only folders, FolderFrame performs a bounded descendant
 search and flows the first usable image up as its cover. It stops after four
 levels or twelve directory listings per visible album card.
@@ -245,7 +248,13 @@ Images: .jpg .jpeg .png .webp .gif .heic .heif
 Animated and static GIF files are displayed directly by the browser and
 participate in slideshows like other images.
 
-Videos: .mp4 .mov
+Browser-native images: .jpg .jpeg .png .webp .gif .avif .bmp
+Converted images: .heic .heif
+Videos: .mp4 .mov .webm .m4v
+
+AVIF and BMP display when supported by the browser. WEBM and M4V follow normal
+HTML5 video codec support, like MP4 and MOV. The thumbnail helper attempts AVIF
+and BMP with the installed Pillow stack and skips unsupported inputs cleanly.
 
 The browser must support the codec contained inside a video file. A .mov
 or .mp4 extension alone does not guarantee browser playback.
@@ -416,9 +425,9 @@ BROWSER AND MOBILE SUPPORT
 
 Large-library loading is bounded and cancellable. Failed subfolders retain
 successful results and show a Retry scan warning. HEIC work uses two shared
-slots and separate viewer/480-pixel-preview caches. Ordinary JPEG, PNG, WebP,
-and GIF display uses four native-load slots, prioritizing the viewer over album
-covers and grid tiles. See RESILIENCE.md for limits,
+slots and separate viewer/480-pixel-preview caches. Browser-native JPEG, PNG,
+WebP, GIF, AVIF, and BMP display uses two full-resolution viewer slots plus
+twelve grid/album thumbnail slots, with album priority over grid work. See RESILIENCE.md for limits,
 stuck-decoder recovery, and the device-testing checklist. Deploy resilience.js
 with the other application files.
 

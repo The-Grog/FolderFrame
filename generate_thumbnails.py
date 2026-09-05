@@ -10,8 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-IMAGE_TYPES = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"}
-MEDIA_TYPES = IMAGE_TYPES | {".mp4", ".mov"}
+IMAGE_TYPES = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp", ".heic", ".heif"}
+MEDIA_TYPES = IMAGE_TYPES | {".mp4", ".mov", ".webm", ".m4v"}
 MANIFEST_VERSION = 1
 IGNORE_SENTINELS = {"folderframe.ignore", ".frameignore"}
 IGNORED_DIRECTORY_NAMES = {
