@@ -17,6 +17,9 @@ Manage one media library on your host, then open it anywhere — digital photo
 frames, tablets, wall displays, desktop browsers. Each display can use its own
 album and slideshow settings while sharing the same library.
 
+Ready to install? See the official [FolderFrame Deployment repository](https://github.com/The-Grog/FolderFrame-Deployment)
+for Docker, Docker Compose, and Unraid installation options.
+
 ## Live demo
 
 Try the [FolderFrame public demo](https://demo.folderframe.com/). GitHub Pages
