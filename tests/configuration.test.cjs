@@ -1699,6 +1699,62 @@ test('automatic slideshow transitions preserve hidden controls until interaction
     }
 });
 
+test('shuffle navigation replays browser-style history before choosing another random item', async () => {
+    const app = await boot();
+    vm.runInContext(`
+        mediaFiles = ['a.jpg', 'b.jpg', 'c.jpg', 'd.jpg'];
+        shuffleEnabled = true;
+        Math.random = () => 0;
+        enterFullScreenViewer(0);
+        nextMedia();
+        nextMedia();
+    `, app.context);
+    assert.equal(vm.runInContext('mediaFiles[currentIndex]', app.context), 'c.jpg');
+    vm.runInContext('prevMedia()', app.context);
+    assert.equal(vm.runInContext('mediaFiles[currentIndex]', app.context), 'b.jpg');
+    vm.runInContext('nextMedia()', app.context);
+    assert.equal(vm.runInContext('mediaFiles[currentIndex]', app.context), 'c.jpg');
+    assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(shuffleHistory)', app.context)), ['a.jpg', 'b.jpg', 'c.jpg']);
+    vm.runInContext('nextMedia()', app.context);
+    assert.equal(vm.runInContext('mediaFiles[currentIndex]', app.context), 'd.jpg');
+});
+
+test('shuffle history caps at ten, tolerates small libraries, and removes stale paths', async () => {
+    const app = await boot();
+    vm.runInContext(`
+        mediaFiles = Array.from({ length: 12 }, (_, index) => index + '.jpg');
+        shuffleEnabled = true;
+        Math.random = () => 0;
+        enterFullScreenViewer(0);
+        for (let index = 0; index < 11; index++) nextMedia();
+    `, app.context);
+    assert.equal(vm.runInContext('shuffleHistory.length', app.context), 10);
+    assert.equal(vm.runInContext('shuffleHistoryIndex', app.context), 9);
+
+    vm.runInContext(`
+        mediaFiles = ['a.jpg', 'b.jpg'];
+        currentIndex = 0;
+        resetShuffleHistory();
+        nextMedia();
+        nextMedia();
+    `, app.context);
+    assert.equal(vm.runInContext('mediaFiles[currentIndex]', app.context), 'a.jpg');
+    vm.runInContext('prevMedia()', app.context);
+    assert.equal(vm.runInContext('mediaFiles[currentIndex]', app.context), 'b.jpg');
+
+    vm.runInContext(`
+        mediaFiles = ['a.jpg', 'b.jpg', 'c.jpg'];
+        currentIndex = 2;
+        shuffleHistory = ['a.jpg', 'b.jpg', 'c.jpg'];
+        shuffleHistoryIndex = 2;
+        mediaFiles = ['a.jpg', 'c.jpg'];
+        currentIndex = 1;
+        reconcileShuffleHistory();
+    `, app.context);
+    assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(shuffleHistory)', app.context)), ['a.jpg', 'c.jpg']);
+    assert.equal(vm.runInContext('shuffleHistoryIndex', app.context), 1);
+});
+
 test('directory listings honor folderframe.ignore and filter conservative system junk', async () => {
     const app = await boot();
     app.context.DOMParser = class { parseFromString() {

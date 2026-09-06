@@ -367,6 +367,9 @@ let slideshowPlaying = false, slideshowTimer = null, slideshowInterval = 5, slid
 let slideshowAnimationFrame = null, slideshowStartedAt = 0;
 let uiVisible = true, idleTimer = null, imageMode = 'fit', isGridViewActive = true;
 let shuffleEnabled = false, autoRefreshEnabled = true, tvModeEnabled = false;
+const SHUFFLE_HISTORY_LIMIT = 10;
+let shuffleHistory = [];
+let shuffleHistoryIndex = -1;
 let galleryViewMode = 'folders'; // 'folders' or 'all'
 let sortMode = 'filename';
 const GRID_DENSITY_PX = { compact: 130, comfortable: 180, spacious: 240 };
@@ -1543,6 +1546,7 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
         mediaFiles = sorted; subfolders = listing.folderNames;
         const retained = viewed && mediaFiles.includes(viewed);
         currentIndex = retained ? mediaFiles.indexOf(viewed) : Math.min(currentIndex, Math.max(0, mediaFiles.length - 1));
+        reconcileShuffleHistory();
         if (forceCacheClear) clearImageBlobCache();
         showScanFailures(result.failedFolders);
         failedNavigation = null;
@@ -2277,6 +2281,7 @@ function enterFullScreenViewer(index) {
     progressContainer.style.display = 'block';
     helpHint.style.display = 'block';
     showMedia(index);
+    if (openingViewer && shuffleEnabled) resetShuffleHistory();
     if (openingViewer) showUI();
 }
 
@@ -2490,13 +2495,92 @@ function scheduleErrorAdvance() {
     }, 3000);
 }
 
-function nextMedia() { showMedia(currentIndex + 1); }
-function prevMedia() { showMedia(currentIndex - 1); }
-function nextSlideshowMedia() {
-    if (!shuffleEnabled || mediaFiles.length <= 1) return nextMedia();
-    let next = currentIndex;
-    while (next === currentIndex) next = Math.floor(Math.random() * mediaFiles.length);
-    showMedia(next);
+function clearShuffleHistory() {
+    shuffleHistory = [];
+    shuffleHistoryIndex = -1;
+}
+
+function resetShuffleHistory() {
+    const current = mediaFiles[currentIndex];
+    shuffleHistory = current ? [current] : [];
+    shuffleHistoryIndex = current ? 0 : -1;
+}
+
+function reconcileShuffleHistory() {
+    if (!shuffleEnabled || !mediaFiles.length) {
+        clearShuffleHistory();
+        return;
+    }
+    const current = mediaFiles[currentIndex];
+    const available = new Set(mediaFiles);
+    const previousHistory = shuffleHistory;
+    const previousIndex = shuffleHistoryIndex;
+    let retainedIndex = -1;
+    shuffleHistory = previousHistory.filter((file, index) => {
+        if (!available.has(file)) return false;
+        if (index === previousIndex) retainedIndex = index - previousHistory.slice(0, index).filter(entry => !available.has(entry)).length;
+        return true;
+    });
+    if (retainedIndex >= 0) {
+        shuffleHistoryIndex = retainedIndex;
+    } else if (current && shuffleHistory.includes(current)) {
+        shuffleHistoryIndex = shuffleHistory.lastIndexOf(current);
+    } else {
+        resetShuffleHistory();
+    }
+}
+
+function ensureShuffleHistory() {
+    reconcileShuffleHistory();
+    if (shuffleHistory[shuffleHistoryIndex] !== mediaFiles[currentIndex]) resetShuffleHistory();
+}
+
+function showShuffleHistoryEntry() {
+    const file = shuffleHistory[shuffleHistoryIndex];
+    const index = mediaFiles.indexOf(file);
+    if (index >= 0) showMedia(index);
+}
+
+function nextMedia() {
+    if (!shuffleEnabled || mediaFiles.length <= 1) return showMedia(currentIndex + 1);
+    ensureShuffleHistory();
+    if (shuffleHistoryIndex < shuffleHistory.length - 1) {
+        shuffleHistoryIndex++;
+        showShuffleHistoryEntry();
+        return;
+    }
+    const seen = new Set(shuffleHistory);
+    let candidates = mediaFiles.filter(file => file !== mediaFiles[currentIndex] && !seen.has(file));
+    if (!candidates.length) candidates = mediaFiles.filter(file => file !== mediaFiles[currentIndex]);
+    const next = candidates[Math.floor(Math.random() * candidates.length)];
+    if (!next) return;
+    shuffleHistory.push(next);
+    if (shuffleHistory.length > SHUFFLE_HISTORY_LIMIT) shuffleHistory.shift();
+    shuffleHistoryIndex = shuffleHistory.length - 1;
+    showShuffleHistoryEntry();
+}
+
+function prevMedia() {
+    if (!shuffleEnabled || mediaFiles.length <= 1) return showMedia(currentIndex - 1);
+    ensureShuffleHistory();
+    if (shuffleHistoryIndex <= 0) return;
+    shuffleHistoryIndex--;
+    showShuffleHistoryEntry();
+}
+
+function nextSlideshowMedia() { nextMedia(); }
+
+function setShuffleEnabled(enabled) {
+    const changed = shuffleEnabled !== enabled;
+    shuffleEnabled = enabled;
+    if (!enabled) clearShuffleHistory();
+    else if (changed) resetShuffleHistory();
+}
+
+function toggleShuffle() {
+    setShuffleEnabled(!shuffleEnabled);
+    updateControlStates();
+    savePreferences();
 }
 
 function applyTransform() {
@@ -2592,7 +2676,7 @@ function setupEventListeners() {
     });
     btnShowGrid.addEventListener('click', renderGridView);
     btnRefreshGrid.addEventListener('click', () => loadGallery({ preserveView: true, forceCacheClear: true }));
-    btnShuffle.addEventListener('click', () => { shuffleEnabled = !shuffleEnabled; updateControlStates(); savePreferences(); });
+    btnShuffle.addEventListener('click', toggleShuffle);
     btnAutoRefresh.addEventListener('click', () => { autoRefreshEnabled = !autoRefreshEnabled; updateControlStates(); startAutoRefreshTimer(); savePreferences(); });
     btnViewMode.addEventListener('click', async () => {
         scanSession?.abort();
@@ -2684,7 +2768,7 @@ function setupEventListeners() {
         if (e.key === 'ArrowRight') nextMedia();
         if (e.key === ' ') { e.preventDefault(); toggleSlideshow(); }
         if (e.key === 'Enter') { e.preventDefault(); toggleImageMode(); }
-        if (e.key.toLowerCase() === 's') { shuffleEnabled = !shuffleEnabled; updateControlStates(); savePreferences(); }
+        if (e.key.toLowerCase() === 's') toggleShuffle();
         if (e.key.toLowerCase() === 'f') toggleFullscreen();
         if (e.key.toLowerCase() === 't') toggleTvMode();
         if (e.key.toLowerCase() === 'r') rotateImage();
@@ -2736,7 +2820,7 @@ async function toggleTvMode() {
     video.controls = controlsEnabled && !tvModeEnabled;
     if (tvModeEnabled) {
         imageMode = 'fit';
-        shuffleEnabled = true;
+        setShuffleEnabled(true);
         autoRefreshEnabled = true;
         updateControlStates();
         startAutoRefreshTimer();

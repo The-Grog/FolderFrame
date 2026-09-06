@@ -693,6 +693,7 @@ Docker Compose controls are documented in the
 
 -   Click Shuffle to toggle randomized slideshow progression.
 -   Press S while in the full viewer to toggle Shuffle.
+-   While Shuffle is on, Previous walks back through a rolling 10-item history. Next replays that history before choosing another random item.
 -   Manual Previous/Next navigation remains available.
 
 ### Loading feedback
