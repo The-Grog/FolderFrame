@@ -7,6 +7,14 @@ file without using its HTTP cache on each startup.
 The supplied file keeps the main gallery and embed paused in the folder grid.
 The main gallery remembers preferences; the supplied embed profile does not.
 
+`videoTranscodeFallback` accepts `"auto"` (default) or `"off"` under `defaults`,
+`index`, or `embed`, with the same profile precedence as other settings. The URL
+option `?videoTranscodeFallback=off` overrides the profile. It is not a saved
+browser preference. Auto first tries the original video, then checks the optional
+same-origin Docker service only on a decode/format error. Ordinary static hosts
+need no API configuration and retain their normal unsupported-video handling.
+See [Apple media compatibility](docs/APPLE_MEDIA.md).
+
 ## Start the embed playing automatically
 
 Replace the `embed` section in the supplied file with:

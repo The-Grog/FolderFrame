@@ -24,7 +24,8 @@
     "showCopyButton": true,
     "showButtonLabels": false,
     "rememberPreferences": true,
-    "gridDensity": "comfortable"
+    "gridDensity": "comfortable",
+    "videoTranscodeFallback": "auto"
   },
   "index": {
     "refreshInterval": 120

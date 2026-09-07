@@ -42,7 +42,8 @@ Keep the files arranged like this:
     ├── resilience.js
     ├── settings.js
     ├── folderframe.config.json
-    ├── heic2any.min.js
+    ├── vendor/          (decoder, licenses, corresponding sources)
+    ├── THIRD_PARTY_NOTICES.md
     ├── generate_thumbnails.py  (optional)
     └── photos/
         ├── photo1.jpg
@@ -76,7 +77,7 @@ photos/Family/image.jpg maps to thumbnails/Family/image.jpg.webp.
 Missing previews fall back to the original for browser-native images.
 HEIC/HEIF grid tiles and album covers use generated previews only; a missing
 or broken preview keeps the HEIC or folder placeholder instead of running
-heic2any for every visible tile. Opening the item still uses the full viewer
+heic-to for every visible tile. Opening the item still uses the full viewer
 HEIC and QuickTime reclassification path.
 When an album contains only folders, FolderFrame performs a bounded descendant
 search and flows the first usable image up as its cover. It stops after four
@@ -206,7 +207,8 @@ The web root should contain:
     resilience.js
     settings.js
     folderframe.config.json
-    heic2any.min.js
+    vendor/  (copy the complete directory)
+    THIRD_PARTY_NOTICES.md
     generate_thumbnails.py  (optional)
     photos/
 
@@ -290,10 +292,9 @@ rebuilding anything.
 
 HEIC / HEIF SUPPORT
 
-The gallery includes the local heic2any.min.js decoder.
-
-For genuine HEIC/HEIF files, the browser can convert the image to JPEG
-for display when native browser rendering is unavailable.
+FolderFrame first attempts native HEIC/HEIF display, then lazily loads bundled
+heic-to 1.5.2 when native decoding fails. Copy the complete vendor/ directory
+and THIRD_PARTY_NOTICES.md, including separate licenses and corresponding sources.
 
 The gallery also performs content-aware handling for files whose
 extension does not match their actual contents. For example, a file
@@ -307,15 +308,17 @@ rather than incorrectly being sent through the HEIC decoder.
 Some Apple Live Photo motion components are QuickTime/HEVC videos even when
 their files are named .heic (this can occur in exported or mounted Immich
 libraries). FolderFrame detects the real container from downloaded bytes and
-uses the video viewer instead of heic2any. Safari and other HEVC-capable
+uses the video viewer instead of heic-to. Safari and other HEVC-capable
 environments may play the clip; Chrome, Firefox, and some Windows systems may
 show a specific unsupported Live Photo motion message. Open original or use
 the matching still image in that case. FolderFrame does not automatically pair
 Live Photo stills and motion clips.
 
-HEIC decoding is more CPU- and memory-intensive than displaying normal
-JPEG, PNG, or WebP images. Large collections of genuine HEIC files may
-therefore take longer to populate than JPEG-based galleries.
+HEIC conversion happens in the viewer only; grid tiles and covers use generated
+thumbnails or placeholders. Videos always try the original first. Official
+Docker deployments can stream a compatibility fallback through FFmpeg without
+writing converted movies to media or appdata. Static hosting needs no backend.
+Transcoded playback is sequential without arbitrary seeking. See docs/APPLE_MEDIA.md.
 
 GALLERY CONTROLS
 
@@ -767,7 +770,8 @@ If FolderFrame is useful to you, you can support its continued development:
 
 LICENSE
 
-FolderFrame is available under the MIT License. See LICENSE for details.
+FolderFrame application code is MIT. The separate decoder uses LGPL terms;
+see LICENSE and THIRD_PARTY_NOTICES.md for licenses and corresponding sources.
 
 ## Refresh frequency and long slideshows
 

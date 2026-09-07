@@ -6,7 +6,7 @@
         shuffle: false, autoRefresh: true, refreshInterval: 120, tvMode: false,
         autoplay: false, rememberPreferences: true, controls: true, showFilenames: true,
         showDownloadButton: true, showCopyButton: true, showButtonLabels: false,
-        gridDensity: 'comfortable'
+        gridDensity: 'comfortable', videoTranscodeFallback: 'auto'
     });
     const GRID_DENSITIES = ['compact', 'comfortable', 'spacious'];
     const BOOLEAN_KEYS = ['shuffle', 'autoRefresh', 'tvMode', 'autoplay', 'rememberPreferences', 'controls', 'showFilenames',
@@ -42,6 +42,8 @@
                 if (!['newest', 'oldest', 'filename'].includes(item)) throw new Error('sort must be newest, oldest, or filename');
             } else if (key === 'imageMode') {
                 if (!['fit', 'original'].includes(item)) throw new Error('imageMode must be fit or original');
+            } else if (key === 'videoTranscodeFallback') {
+                if (!['auto', 'off'].includes(item)) throw new Error('videoTranscodeFallback must be auto or off');
             } else if (key === 'gridDensity') {
                 if (!GRID_DENSITIES.includes(item)) throw new Error('gridDensity must be compact, comfortable, or spacious');
             } else if (key === 'refreshInterval') {
@@ -134,7 +136,8 @@
         const aliases = { source: 'source', album: 'album', view: 'view', sort: 'sort', interval: 'interval',
             imageMode: 'imageMode', shuffle: 'shuffle', autorefresh: 'autoRefresh',
             tv: 'tvMode', autoplay: 'autoplay', remember: 'rememberPreferences', controls: 'controls', showFilenames: 'showFilenames',
-            download: 'showDownloadButton', copy: 'showCopyButton', buttonLabels: 'showButtonLabels', density: 'gridDensity' };
+            download: 'showDownloadButton', copy: 'showCopyButton', buttonLabels: 'showButtonLabels', density: 'gridDensity',
+            videoTranscodeFallback: 'videoTranscodeFallback' };
         const layer = {};
         for (const [param, key] of Object.entries(aliases)) {
             if (!params.has(param)) continue;

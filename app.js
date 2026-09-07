@@ -47,6 +47,10 @@ function stopViewerSession() {
     viewerSession.controller.abort();
     clearTimeout(viewerSession.timer);
     viewerSession = null;
+    // Cancel the browser request too, including a streamed server transcode.
+    video.pause();
+    video.onended = video.onerror = video.onpause = null;
+    clearMediaSource(video);
 }
 function stopGridSession() {
     stopAlbumPreviews();
@@ -71,6 +75,34 @@ let rememberPreferences = true;
 let controlsEnabled = true;
 let showDownloadButton = true;
 let showCopyButton = true;
+let videoTranscodeFallback = 'auto';
+let videoCapabilitiesPromise = null;
+
+function videoCapabilities() {
+    if (!videoCapabilitiesPromise) videoCapabilitiesPromise = resilience.request(
+        new URL('/folderframe-api/capabilities', location.href).href,
+        { timeout: 3000, body: 'json' }
+    ).then(value => value?.videoTranscode === true ? value : null).catch(() => null);
+    return videoCapabilitiesPromise;
+}
+
+async function videoFallbackUrl(filepath, signal) {
+    if (videoTranscodeFallback === 'off') return null;
+    const source = new URL(filepath, location.href);
+    if (source.origin !== new URL(location.href).origin || source.search || source.hash) return null;
+    const capability = await videoCapabilities();
+    if (signal.aborted || !capability || capability.mediaPath !== '/photos/' ||
+        !source.pathname.startsWith(capability.mediaPath)) return null;
+    // Error 4 can also mean a 403/404 or an unreachable source. Confirm HTTP
+    // availability before asking the optional server to spend CPU on decoding.
+    try {
+        await resilience.request(source.href, { signal, method: 'HEAD', timeout: 8000, body: 'text' });
+    } catch { return null; }
+    if (signal.aborted) return null;
+    const url = new URL('/folderframe-api/transcode', location.href);
+    url.searchParams.set('path', decodeURIComponent(source.pathname.slice(capability.mediaPath.length)));
+    return url.href;
+}
 let swipeStart = null;
 let gridReturn = null;
 let albumPreviewSession = null;
@@ -852,6 +884,7 @@ async function loadConfiguration() {
     controlsEnabled = startupSettings.controls;
     showDownloadButton = startupSettings.showDownloadButton;
     showCopyButton = startupSettings.showCopyButton;
+    videoTranscodeFallback = startupSettings.videoTranscodeFallback;
     btnDownload.hidden = !showDownloadButton;
     btnCopyLink.hidden = !showCopyButton || !imageClipboardAvailable();
     if (btnCopyFilename) btnCopyFilename.hidden = btnCopyLink.hidden;
@@ -1144,15 +1177,15 @@ async function makeThumbnail(blob) {
 }
 let heicDecoderPromise = null;
 function loadHeicDecoder() {
-    if (typeof globalThis.heic2any === 'function') return Promise.resolve(globalThis.heic2any);
+    if (typeof globalThis.HeicTo === 'function') return Promise.resolve(globalThis.HeicTo);
     if (heicDecoderPromise) return heicDecoderPromise;
 
     heicDecoderPromise = new Promise((resolve, reject) => {
         const script = document.createElement('script');
-        script.src = 'heic2any.min.js';
+        script.src = 'vendor/heic-to-1.5.2/heic-to.js';
         script.async = true;
-        script.onload = () => typeof globalThis.heic2any === 'function'
-            ? resolve(globalThis.heic2any)
+        script.onload = () => typeof globalThis.HeicTo === 'function'
+            ? resolve(globalThis.HeicTo)
             : reject(new Error('HEIC decoder library did not initialize'));
         script.onerror = () => reject(new Error('HEIC decoder library did not load'));
         document.head.appendChild(script);
@@ -1163,17 +1196,20 @@ function loadHeicDecoder() {
     });
     return heicDecoderPromise;
 }
+async function decodeHeic(blob) {
+    const decoder = await loadHeicDecoder();
+    return decoder({ blob, type: 'image/jpeg', quality: 0.92 });
+}
 function getImagePool() {
     if (!specialImagePool) specialImagePool = resilience.createImagePool({
-        download: (file, signal) => resilience.request(file, { signal, timeout: MEDIA_TIMEOUT, body: 'arrayBuffer', cache: 'no-store' }),
+        // Permit HTTP-cache reuse of bytes requested by the native image attempt.
+        download: (file, signal) => resilience.request(file, { signal, timeout: MEDIA_TIMEOUT, body: 'arrayBuffer' }),
         decode: async data => {
             const format = detectContainer(data);
             if (['jpeg', 'png', 'webp', 'gif', 'avif'].includes(format)) return new Blob([data], { type: mimeForFormat(format) });
             if (format === 'quicktime') throw reclassifiedContainerError('quicktime', data);
             if (format !== 'heic') throw new Error('Unknown or corrupt image format');
-            const decodeHeic = await loadHeicDecoder();
-            const result = await decodeHeic({ blob: new Blob([data], { type: 'image/heic' }), toType: 'image/jpeg', quality: 0.92 });
-            return Array.isArray(result) ? result[0] : result;
+            return decodeHeic(new Blob([data], { type: 'image/heic' }));
         },
         thumbnail: makeThumbnail,
         createURL: blob => URL.createObjectURL(blob), revokeURL: url => URL.revokeObjectURL(url)
@@ -2288,7 +2324,8 @@ function enterFullScreenViewer(index) {
 function showMedia(index) {
     if (!mediaFiles.length) return;
     stopViewerSession();
-    const session = { controller: new AbortController(), timer: null, progress: 0 };
+    const session = { controller: new AbortController(), timer: null, progress: 0,
+        videoMode: 'original', videoFallbackAttempted: false, heicFallbackAttempted: false };
     viewerSession = session;
     const loadId = ++mediaLoadId;
     const isCurrent = () => loadId === mediaLoadId && !isGridViewActive && !session.controller.signal.aborted;
@@ -2343,9 +2380,29 @@ function showMedia(index) {
         video.onwaiting = video.onstalled = () => { if (isCurrent() && !mediaFailed && !video.paused) { setMediaLoading('Buffering video…'); watch(); } };
         video.onpause = clearWatchdog;
         video.oncanplay = video.onplaying = () => { if (isCurrent() && !mediaFailed) { clearWatchdog(); setMediaLoading(); } };
-        video.onerror = () => { if (isCurrent()) showMediaError(livePhoto ? 'live-photo' : 'video', filepath, video.error); };
+        video.onerror = async () => {
+            if (!isCurrent()) return;
+            const error = video.error;
+            if (session.videoMode === 'original' && !session.videoFallbackAttempted && [3, 4].includes(error?.code)) {
+                session.videoFallbackAttempted = true;
+                clearWatchdog();
+                let fallback = null;
+                try { fallback = await videoFallbackUrl(filepath, session.controller.signal); } catch { /* Normal error UI below. */ }
+                if (!isCurrent()) return;
+                if (fallback) {
+                    session.videoMode = 'transcoded';
+                    playVideoSource(fallback, livePhoto);
+                    setMediaLoading('Preparing compatible video…');
+                    return;
+                }
+            }
+            if (isCurrent()) showMediaError(livePhoto ? 'live-photo' : 'video', filepath, error);
+        };
         video.play().catch(err => {
-            if (isCurrent() && !mediaFailed && err.name !== 'AbortError') showMediaError(livePhoto ? 'live-photo' : 'video', filepath, err);
+            // Format errors are handled by MediaError, never inferred from a
+            // rejected play() promise (which can simply be autoplay denial).
+            if (isCurrent() && !mediaFailed && err.name !== 'AbortError' && err.name !== 'NotSupportedError' &&
+                (!session.videoFallbackAttempted || err.name === 'NotAllowedError')) showMediaError(livePhoto ? 'live-photo' : 'video', filepath, err);
         });
         video.onended = () => { if (isCurrent() && slideshowPlaying) nextSlideshowMedia(); };
         video.ontimeupdate = () => {
@@ -2379,6 +2436,27 @@ function showMedia(index) {
         };
         img.onerror = async () => {
             if (!isCurrent()) return;
+            if (isHeicFile(filepath)) {
+                if (session.heicFallbackAttempted) return showMediaError('heic', filepath);
+                session.heicFallbackAttempted = true;
+                clearWatchdog();
+                setMediaLoading('Preparing HEIC image…');
+                try {
+                    // The pool downloads once, sniffs those same bytes, and
+                    // converts only a genuine still. No extra range request.
+                    const url = await getSpecialImageURL(filepath, session.controller.signal);
+                    if (isCurrent()) queueNativeImageSource(img, url, session.controller.signal, {
+                        priority: NATIVE_IMAGE_PRIORITY.viewer, onStart: watch
+                    });
+                } catch (error) {
+                    if (!isCurrent() || error.name === 'AbortError') return;
+                    if (isQuickTimeReclassification(error)) {
+                        const url = URL.createObjectURL(new Blob([error.data], { type: 'video/quicktime' }));
+                        playVideoSource(url, true, url);
+                    } else showMediaError('heic', filepath, error);
+                }
+                return;
+            }
             const sniffed = await sniffContainer(filepath, session.controller.signal).catch(error => {
                 if (error.name !== 'AbortError') console.warn('FolderFrame: media sniff failed.', filepath, error);
                 return null;
@@ -2388,29 +2466,10 @@ function showMedia(index) {
             else showMediaError('image', filepath);
         };
 
-        if (isHeicFile(filepath)) {
-            mediaTitle.textContent = `${displayName} (Preparing…)`;
-            getSpecialImageURL(filepath, session.controller.signal)
-                .then(url => {
-                    if (isCurrent()) queueNativeImageSource(img, url, session.controller.signal, {
-                        priority: NATIVE_IMAGE_PRIORITY.viewer, onStart: watch
-                    });
-                })
-                .catch(err => {
-                    if (!isCurrent() || err.name === 'AbortError') return;
-                    if (isQuickTimeReclassification(err)) {
-                        const objectUrl = URL.createObjectURL(new Blob([err.data], { type: 'video/quicktime' }));
-                        playVideoSource(objectUrl, true, objectUrl);
-                        return;
-                    }
-                    console.error('HEIC/HEIF image handling failed:', err);
-                    if (isCurrent()) showMediaError('heic', filepath, err);
-                });
-        } else {
-            queueNativeImageSource(img, filepath, session.controller.signal, {
-                priority: NATIVE_IMAGE_PRIORITY.viewer, onStart: watch
-            });
-        }
+        // Actual native loading is the capability test, including HEIC/HEIF.
+        queueNativeImageSource(img, filepath, session.controller.signal, {
+            priority: NATIVE_IMAGE_PRIORITY.viewer, onStart: watch
+        });
     } else {
         playVideoSource(filepath);
     }
@@ -2442,7 +2501,7 @@ function showMediaError(kind, filepath, error) {
         guidance = 'Try opening the original in your photo app and exporting a JPEG or PNG copy. Your original file is unchanged.';
         if (error?.message === 'HEIC decoder library did not load') {
             message = 'The HEIC decoder is unavailable.';
-            guidance = 'Reload the page. If this continues, check that heic2any.min.js is hosted beside index.html and is not blocked.';
+            guidance = 'Reload the page. If this continues, check that vendor/heic-to-1.5.2/heic-to.js is hosted with the app and is not blocked.';
         } else if (/HTTP|fetch|network/i.test(error?.message || '')) {
             message = 'The image could not be downloaded.';
             guidance = 'Check your connection and that the file is still available, then retry.';

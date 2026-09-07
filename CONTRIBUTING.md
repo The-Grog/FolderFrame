@@ -85,7 +85,7 @@ include screenshots without private content or browser address bars.
 Fork the repository, create a branch, and keep the change focused. Preserve
 the static-server workflow and explain any proposed new dependencies. Update
 README.md and folderframe-instructions.txt when user-facing behavior changes.
-Avoid editing the bundled heic2any.min.js for unrelated changes.
+Avoid editing the bundled vendor/heic-to-1.5.2/heic-to.js for unrelated changes.
 
 Review your diff and run `git diff --check`. In the pull request, explain what
 changed, why, how it was tested, and any limitations. Do not bundle unrelated
@@ -104,4 +104,6 @@ FolderFrame releases and container publishing are separate:
 Do not copy uncommitted app files directly into deployment releases or mix
 container-only changes into an app pull request.
 
-FolderFrame uses the [MIT License](LICENSE).
+FolderFrame application code uses the [MIT License](LICENSE). The separate
+heic-to decoder and embedded codecs use LGPL terms; preserve the full `vendor/`
+directory and [third-party notices](THIRD_PARTY_NOTICES.md) when packaging.

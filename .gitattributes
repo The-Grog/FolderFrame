@@ -1,0 +1,2 @@
+# Preserve third-party release bytes, hashes, and upstream license formatting.
+vendor/heic-to-1.5.2/** -text -whitespace

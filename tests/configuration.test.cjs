@@ -456,7 +456,9 @@ test('HEIC grid uses generated thumbnails without conversion and cleans up offsc
     observer.callback([{ target, isIntersecting: true }]);
     await Promise.resolve();
     vm.runInContext('enterFullScreenViewer(0)', app.context);
-    assert.equal(conversions, 1, 'opening the viewer still performs HEIC conversion');
+    assert.equal(conversions, 0, 'opening the viewer first tries native HEIC');
+    await app.get('gallery-image').onerror();
+    assert.equal(conversions, 1, 'native failure still performs viewer HEIC conversion');
     assert.equal(observer.disconnected, true);
 });
 
@@ -1340,6 +1342,103 @@ test('thumbnail watchdog preserves the replacement source started by its error f
     assert.equal(app.context.timeoutImage.src, 'original.jpg');
 });
 
+test('native HEIC success uses the original and never requests a decoder', async () => {
+    const app = await boot();
+    vm.runInContext("mediaFiles = ['https://example.test/frame/photos/photo.heic']; enterFullScreenViewer(0)", app.context);
+    assert.equal(app.get('gallery-image').src, 'https://example.test/frame/photos/photo.heic');
+    app.get('gallery-image').onload();
+    assert.equal(app.context.document.head.children.length, 0);
+    assert.equal(vm.runInContext('specialImagePool', app.context), null);
+});
+
+test('native HEIC failure converts once and retains normal error recovery', async () => {
+    const app = await boot();
+    app.context.fetch = async () => ({ ok: true, arrayBuffer: async () => bmff('heic', ['mif1']) });
+    vm.runInContext("mediaFiles = ['https://example.test/frame/photos/photo.heic']; enterFullScreenViewer(0)", app.context);
+    const failed = app.get('gallery-image').onerror();
+    for (let i = 0; i < 20 && !app.context.document.head.children.length; i++) await Promise.resolve();
+    const script = app.context.document.head.children[0];
+    assert.ok(script);
+    let calls = 0;
+    app.context.HeicTo = async ({ type }) => { calls++; assert.equal(type, 'image/jpeg'); return new Blob(['jpeg']); };
+    script.onload();
+    await failed;
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    assert.match(app.get('gallery-image').src, /^blob:/);
+    assert.equal(calls, 1);
+    await app.get('gallery-image').onerror();
+    assert.equal(calls, 1);
+    assert.equal(app.get('video-error-overlay').style.display, 'flex');
+});
+
+test('video fallback is lazy, checks original availability, and transitions only once', async () => {
+    const app = await boot();
+    const requests = [];
+    app.context.fetch = async (url, options) => {
+        requests.push([url, options.method]);
+        return { ok: true, json: async () => ({ videoTranscode: true, mediaPath: '/photos/' }), text: async () => '' };
+    };
+    vm.runInContext("mediaFiles = ['https://example.test/photos/nested/Apple%20clip.mov']; enterFullScreenViewer(0)", app.context);
+    const video = app.get('gallery-video');
+    video.oncanplay();
+    assert.equal(requests.length, 0);
+    assert.match(video.src, /Apple%20clip.mov$/);
+    video.error = { code: 4 };
+    await video.onerror();
+    assert.match(video.src, /folderframe-api\/transcode\?path=nested%2FApple\+clip.mov$/);
+    assert.equal(requests.length, 2);
+    assert.equal(requests[1][1], 'HEAD');
+    await video.onerror();
+    assert.equal(requests.length, 2);
+    assert.equal(app.get('video-error-overlay').style.display, 'flex');
+});
+
+test('unavailable originals and services, network errors, and autoplay denial do not transcode', async () => {
+    for (const failure of ['missing', 'service', 'network', 'autoplay', 'off']) {
+        const app = await boot();
+        const requests = [];
+        app.context.fetch = async (url, options) => {
+            requests.push(url);
+            return { ok: failure !== 'service' && !(failure === 'missing' && options.method === 'HEAD'), status: 404,
+                json: async () => ({ videoTranscode: true, mediaPath: '/photos/' }), text: async () => '' };
+        };
+        const video = app.get('gallery-video');
+        if (failure === 'autoplay') video.play = () => Promise.reject({ name: 'NotAllowedError' });
+        vm.runInContext("mediaFiles = ['https://example.test/photos/clip.mp4']; enterFullScreenViewer(0)", app.context);
+        if (failure === 'off') vm.runInContext("videoTranscodeFallback = 'off'", app.context);
+        if (failure === 'autoplay') await Promise.resolve();
+        else { video.error = { code: failure === 'network' ? 2 : 4 }; await video.onerror(); }
+        assert.equal(vm.runInContext('viewerSession?.videoMode', app.context), undefined);
+        assert.equal(app.get('video-error-overlay').style.display, 'flex');
+        if (['network', 'autoplay', 'off'].includes(failure)) assert.equal(requests.length, 0);
+    }
+});
+
+test('navigation cancels pending fallback and clears an active video request', async () => {
+    const app = await boot();
+    let release;
+    app.context.fetch = () => new Promise(resolve => { release = resolve; });
+    vm.runInContext("mediaFiles = ['https://example.test/photos/clip.mov', 'https://example.test/photos/a.jpg']; enterFullScreenViewer(0)", app.context);
+    const video = app.get('gallery-video');
+    let resets = 0;
+    video.load = () => { resets++; };
+    video.error = { code: 3 };
+    const pending = video.onerror();
+    vm.runInContext('nextMedia()', app.context);
+    release({ ok: true, json: async () => ({ videoTranscode: true, mediaPath: '/photos/' }) });
+    await pending;
+    assert.equal(app.get('gallery-image').src, 'https://example.test/photos/a.jpg');
+    assert.ok(resets > 0);
+});
+
+test('video fallback setting honors defaults, profile, and URL without an always mode', () => {
+    const config = normalize({ defaults: { videoTranscodeFallback: 'off' }, embed: { videoTranscodeFallback: 'auto' } });
+    assert.equal(api.resolveSettings(config, '').settings.videoTranscodeFallback, 'off');
+    assert.equal(api.resolveSettings(config, '?profile=embed').settings.videoTranscodeFallback, 'auto');
+    assert.equal(api.resolveSettings(config, '?profile=embed&videoTranscodeFallback=off').settings.videoTranscodeFallback, 'off');
+    assert.throws(() => normalize({ defaults: { videoTranscodeFallback: 'always' } }));
+});
+
 test('HEIC decoder loads only when requested and concurrent callers share one script', async () => {
     const app = await boot();
     const head = app.context.document.head;
@@ -1348,10 +1447,10 @@ test('HEIC decoder loads only when requested and concurrent callers share one sc
     const first = vm.runInContext('loadHeicDecoder()', app.context);
     const second = vm.runInContext('loadHeicDecoder()', app.context);
     assert.equal(head.children.length, 1);
-    assert.equal(head.children[0].src, 'heic2any.min.js');
+    assert.equal(head.children[0].src, 'vendor/heic-to-1.5.2/heic-to.js');
 
     const decoder = async () => new Blob();
-    app.context.heic2any = decoder;
+    app.context.HeicTo = decoder;
     head.children[0].onload();
     assert.equal(await first, decoder);
     assert.equal(await second, decoder);
@@ -1421,14 +1520,14 @@ test('container detection distinguishes AVIF, genuine HEIC, QuickTime, ordinary 
     }
 });
 
-test('special-image decode keeps AVIF native, sends genuine HEIC to heic2any, and reclassifies QuickTime', async () => {
+test('special-image decode keeps AVIF native, sends genuine HEIC to heic-to, and reclassifies QuickTime', async () => {
     const app = await boot();
     vm.runInContext(`window.FolderFrameResilience.createImagePool = options => {
         globalThis.capturedImagePoolOptions = options;
         return { acquire() { throw new Error('not used'); }, invalidate() {} };
     }; specialImagePool = null; getImagePool();`, app.context);
     let decoderCalls = 0;
-    app.context.heic2any = async () => { decoderCalls++; return new Blob(['jpeg'], { type: 'image/jpeg' }); };
+    app.context.HeicTo = async () => { decoderCalls++; return new Blob(['jpeg'], { type: 'image/jpeg' }); };
     app.context.sampleContainer = bmff('heic', ['mif1', 'hvc1']);
     const still = await vm.runInContext('capturedImagePoolOptions.decode(sampleContainer)', app.context);
     assert.equal(still.type, 'image/jpeg');
@@ -1474,6 +1573,7 @@ test('mislabeled HEIC becomes a Live Photo video without a second download and h
     vm.runInContext(`getSpecialImageURL = async () => {
         throw reclassifiedContainerError('quicktime', motionBytes);
     }; mediaFiles = ['https://example.test/IMG_1211.heic']; enterFullScreenViewer(0);`, app.context);
+    await app.get('gallery-image').onerror();
     await Promise.resolve(); await Promise.resolve();
     const video = app.get('gallery-video');
     assert.match(video.src, /^blob:/);
@@ -1481,7 +1581,7 @@ test('mislabeled HEIC becomes a Live Photo video without a second download and h
     assert.equal(vm.runInContext('isPhotoActive()', app.context), false);
     assert.equal(app.get('btn-copy-link').disabled, true);
     video.error = { code: 4 };
-    video.onerror();
+    await video.onerror();
     assert.match(app.get('media-error-title').textContent, /Apple Live Photo motion clip/);
     assert.match(app.get('video-error-text').textContent, /HEVC/);
     assert.match(app.get('video-error-ffmpeg').textContent, /matching still/);
@@ -2161,7 +2261,7 @@ test('controls-free mode opens viewer, disables photo gestures and mutes video',
     assert.equal(app.get('gallery-video').controls, false);
     assert.equal(app.get('gallery-video').muted, true);
     app.get('gallery-video').error = { code: 3 };
-    app.get('gallery-video').onerror();
+    await app.get('gallery-video').onerror();
     assert.equal(app.state().slideshowPlaying, true);
     assert.notEqual(vm.runInContext('slideshowTimer', app.context), null);
 });
@@ -2205,7 +2305,7 @@ test('video errors distinguish network, decoding, and blocked autoplay', async (
     assert.match(app.get('video-error-text').textContent, /network/);
     app.get('btn-retry-media-error').listeners.click();
     video.error = { code: 3 };
-    video.onerror();
+    await video.onerror();
     assert.match(app.get('video-error-text').textContent, /decode/);
     video.play = () => Promise.reject({ name: 'NotAllowedError' });
     app.get('btn-retry-media-error').listeners.click();
@@ -2217,7 +2317,7 @@ test('video errors distinguish network, decoding, and blocked autoplay', async (
 test('HEIC guidance distinguishes decoder and download errors', async () => {
     const app = await boot();
     vm.runInContext("showMediaError('heic', 'https://example.test/a.heic', new Error('HEIC decoder library did not load'))", app.context);
-    assert.match(app.get('video-error-ffmpeg').textContent, /heic2any.min.js/);
+    assert.match(app.get('video-error-ffmpeg').textContent, /heic-to\.js/);
     vm.runInContext("showMediaError('heic', 'https://example.test/a.heic', new Error('HTTP 404'))", app.context);
     assert.match(app.get('video-error-text').textContent, /downloaded/);
     vm.runInContext("showMediaError('heic', 'https://example.test/a.heic', new Error('conversion failed'))", app.context);
@@ -2228,14 +2328,20 @@ test('late HEIC results cannot replace a newer image or reopen a closed viewer',
     const app = await boot();
     let resolve;
     app.context.pendingImage = new Promise(done => { resolve = done; });
-    vm.runInContext("getSpecialImageURL = () => pendingImage; mediaFiles = ['https://example.test/a.heic', 'https://example.test/b.jpg']; enterFullScreenViewer(0); nextMedia()", app.context);
+    vm.runInContext("getSpecialImageURL = () => pendingImage; mediaFiles = ['https://example.test/a.heic', 'https://example.test/b.jpg']; enterFullScreenViewer(0);", app.context);
+    const decoding = app.get('gallery-image').onerror();
+    vm.runInContext('nextMedia()', app.context);
     resolve('blob:stale');
+    await decoding;
     await Promise.resolve();
     assert.equal(app.get('gallery-image').src, 'https://example.test/b.jpg');
     let reject;
     app.context.pendingImage = new Promise((_, fail) => { reject = fail; });
-    vm.runInContext('showMedia(0); renderGridView()', app.context);
+    vm.runInContext('showMedia(0)', app.context);
+    const failing = app.get('gallery-image').onerror();
+    vm.runInContext('renderGridView()', app.context);
     reject(new Error('late failure'));
+    await failing;
     await Promise.resolve();
     await Promise.resolve();
     assert.equal(app.get('video-error-overlay').style.display, 'none');

@@ -7,6 +7,17 @@ and the existing assets. No configuration migration is needed.
 
 ## Limits and behavior
 
+HEIC first uses the existing native viewer queue; only a failed native load
+enters the bounded HEIC pool and lazily loads heic-to 1.5.2. Decoder timeouts
+still retain occupied slots until work settles. See [Apple media](docs/APPLE_MEDIA.md)
+and [third-party notices](THIRD_PARTY_NOTICES.md).
+
+Optional Docker video fallback permits one original-to-transcoded transition
+per viewer generation, after MediaError 3/4 and successful original HEAD.
+Capability lookup is lazy, cached for the page session, and bounded to 3 seconds;
+the HEAD check is bounded to 8 seconds. Static hosts require no service.
+Navigation resets the video element with `load()` so the old stream disconnects.
+
 | Work | Limit |
 | --- | --- |
 | Directory listing, including body | 15 seconds per request |
@@ -29,7 +40,7 @@ not additional JSON settings.
 
 For HEIC/HEIF libraries, generated WebP previews are the only HEIC image source
 used by grid tiles and album covers. Missing or broken previews leave the existing
-placeholder and do not trigger `heic2any`; opening the item still uses the full
+placeholder and do not trigger `heic-to`; opening the item still uses the full
 viewer HEIC and QuickTime reclassification path.
 
 An ignored subtree is terminated when its directory listing contains
@@ -206,7 +217,7 @@ Queued work loses its final consumer only after a 250 ms grace window. Orphaned
 downloads are aborted immediately. Already-running decoding is governed solely
 by its processing deadline and can be rejoined before timeout.
 
-**Decoder limitation:** heic2any does not expose reliable cancellation of an active
+**Decoder limitation:** heic-to does not expose reliable cancellation of an active
 decode. On timeout, consumers fail and a console warning is emitted, but the slot
 remains occupied until the actual job settles. If both slots are stuck, pending
 HEIC requests fail promptly with reload guidance. Ordinary images/videos continue.
@@ -214,8 +225,9 @@ Reload to recover permanently stuck decoders; this is not hard worker terminatio
 
 FolderFrame sniffs downloaded ISO-BMFF data before HEIC conversion. A QuickTime
 container mislabeled `.heic` is reclassified as an Apple Live Photo motion clip
-and reuses the downloaded bytes in the video viewer, so `heic2any` is never called
-and the viewer does not download the file twice. Browser codec support still
+and reuses the downloaded bytes in the video viewer, so `heic-to` is never called
+without an additional video download after sniffing. Native image attempts may
+already have fetched bytes; HTTP cache reuse depends on host headers. Browser codec support still
 applies: HEVC may play in Safari but fail in Chrome, Firefox, or Windows setups.
 For an ordinary image extension that fails native decoding, one best-effort
 64-byte Range request performs the same sniff. A server that ignores Range is

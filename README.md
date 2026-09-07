@@ -309,7 +309,8 @@ Keep the files arranged like this:
     ├── resilience.js
     ├── settings.js
     ├── folderframe.config.json
-    ├── heic2any.min.js
+    ├── vendor/          # Decoder, license texts, corresponding sources
+    ├── THIRD_PARTY_NOTICES.md
     ├── generate_thumbnails.py  # Optional helper
     └── photos/
         ├── photo1.jpg
@@ -377,7 +378,9 @@ The web root should contain:
     resilience.js
     settings.js
     folderframe.config.json
-    heic2any.min.js
+    vendor/heic-to-1.5.2/heic-to.js
+    vendor/heic-to-1.5.2/licenses/ and source/ (copy the whole vendor directory)
+    THIRD_PARTY_NOTICES.md
     docs/images/folderframe-logo.png
     photos/
 
@@ -462,10 +465,10 @@ rebuilding anything.
 
 ### HEIC / HEIF support
 
-The gallery includes the local heic2any.min.js decoder.
-
-For genuine HEIC/HEIF files, the browser can convert the image to JPEG
-for display when native browser rendering is unavailable.
+FolderFrame first attempts native HEIC/HEIF display. Browsers without compatible
+native support fall back to the bundled heic-to 1.5.2 decoder, loaded only when
+needed. Copy the entire `vendor/` directory and `THIRD_PARTY_NOTICES.md` when
+installing the app; it contains the separate decoder, licenses, and sources.
 
 The gallery also performs content-aware handling for files whose
 extension does not match their actual contents. For example, a file
@@ -479,15 +482,21 @@ rather than incorrectly being sent through the HEIC decoder.
 Some Apple Live Photo motion components are QuickTime/HEVC videos even when
 their files are named `.heic` (this can occur in exported or mounted Immich
 libraries). FolderFrame detects the container from bytes it already downloads
-and routes that file through the video viewer instead of `heic2any`. Safari and
+and routes that file through the video viewer instead of `heic-to`. Safari and
 other HEVC-capable environments may play it; Chrome, Firefox, and some Windows
 systems may show a specific unsupported Live Photo motion message. Open original
-or use the matching still image in that case. FolderFrame does not automatically
+or use the matching still image if optional video fallback is unavailable. FolderFrame does not automatically
 pair Live Photo stills and motion clips.
 
-HEIC decoding is more CPU- and memory-intensive than displaying normal
-JPEG, PNG, or WebP images. Large collections of genuine HEIC files may
-therefore take longer to populate than JPEG-based galleries.
+HEIC conversion happens in the viewer only. Grid tiles and album covers use
+generated thumbnails or placeholders, avoiding full-image conversion while scrolling.
+
+Videos always try the original first. Official Docker deployments can stream
+unsupported video through FFmpeg as H.264/AAC without modifying originals or
+permanently storing converted movies in the media library or appdata. Static
+hosting remains supported without that optional service. Transcoded playback
+is sequential; arbitrary seeking is not supported. See [Apple media details](docs/APPLE_MEDIA.md)
+for failure triggers, configuration, resource usage, and current limitations.
 
 ## Gallery controls
 
@@ -640,7 +649,7 @@ FolderFrame maps `photos/Family/image.jpg` to
 `thumbnails/Family/image.jpg.webp`. Generated previews are used only in the
 grid and for album covers. Missing or invalid previews fall back to the original
 for browser-native images. HEIC/HEIF tiles instead keep their HEIC or album
-placeholder so large libraries do not run `heic2any` for every visible tile.
+placeholder so large libraries do not run `heic-to` for every visible tile.
 Opening a HEIC/HEIF file still performs the full viewer conversion and container
 reclassification path.
 
@@ -1033,4 +1042,6 @@ If FolderFrame is useful to you, you can support its continued development:
 
 ## License
 
-FolderFrame is available under the MIT License. See LICENSE for details.
+FolderFrame application code is available under the MIT License. See LICENSE.
+The separate heic-to/libheif/libde265 decoder has LGPL terms; the complete
+distribution is not solely MIT. See [third-party notices](THIRD_PARTY_NOTICES.md).
