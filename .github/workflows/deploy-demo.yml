@@ -123,7 +123,16 @@ jobs:
                       outline-offset: 2px;
                   }
               </style>
-              <a class="demo-return-link" href="https://www.folderframe.com/">Return to FolderFrame.com</a>
+              <a class="demo-return-link" href="https://www.folderframe.com/" hidden>Return to FolderFrame.com</a>
+              <script>
+                  (() => {
+                      const link = document.querySelector(".demo-return-link");
+                      const isEmbed = new URLSearchParams(window.location.search).get("profile") === "embed"
+                          || window.self !== window.top;
+                      if (isEmbed) link.remove();
+                      else link.hidden = false;
+                  })();
+              </script>
           """
           demo_page.write_text(
               demo_html.replace("</body>", demo_return + "\n</body>"),
@@ -159,6 +168,9 @@ jobs:
           assert not list(Path("_site/demo-photos").rglob("index.html"))
           demo_html = Path("_site/index.html").read_text()
           assert demo_html.count('class="demo-return-link"') == 1
+          assert 'href="https://www.folderframe.com/" hidden' in demo_html
+          assert 'new URLSearchParams(window.location.search).get("profile") === "embed"' in demo_html
+          assert 'window.self !== window.top' in demo_html
           assert 'href="https://www.folderframe.com/"' in demo_html
           assert "Return to FolderFrame.com" in demo_html
           PY
