@@ -8,17 +8,24 @@
   </a>
 </h1>
 
-[**FolderFrame**](https://www.folderframe.com/) is a self-hosted photo and video gallery that works standalone
-or embedded. Drop it into any page with a standard iframe, including a
-controls-free slideshow mode for kiosks and displays. No database, no PHP, no
-build step.
+[**FolderFrame**](https://www.folderframe.com/) is a self-hosted photo and video
+gallery that turns folders into albums—no database, no PHP, no build step. Use
+it standalone or embed it in any page with a standard iframe, including a
+controls-free slideshow mode for kiosks and displays.
 
-Manage one media library on your host, then open it anywhere — digital photo
-frames, tablets, wall displays, desktop browsers. Each display can use its own
-album and slideshow settings while sharing the same library.
+Mount one or more media libraries on your host, then open them anywhere—digital
+photo frames, tablets, wall displays, or desktop browsers. Each display can use
+its own album and slideshow settings while sharing the same media.
 
-Ready to install? See the official [FolderFrame Deployment repository](https://github.com/The-Grog/FolderFrame-Deployment)
-for Docker, Docker Compose, and Unraid installation options.
+Run FolderFrame with Docker or Unraid, or publish it with a static manifest to
+GitHub Pages or Cloudflare Pages.
+
+[Live demo](https://demo.folderframe.com/) ·
+[folderframe.com](https://www.folderframe.com/)
+
+Ready to install? See the official
+[FolderFrame Deployment](https://github.com/The-Grog/FolderFrame-Deployment)
+repository for Docker, Docker Compose, and Unraid options.
 
 ## Live demo
 
