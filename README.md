@@ -672,6 +672,11 @@ background, skips current previews, safely prunes old cache entries after a
 complete scan, and keeps the mounted originals read-only. Plain Docker and
 Docker Compose controls are documented in the
 [FolderFrame Deployment repository](https://github.com/The-Grog/FolderFrame-Deployment).
+Thumbnail failures are cached by relative path, size, and modification time, so
+an unchanged corrupt or unsupported image is not retried every scan. Replacing
+or modifying the source automatically makes it eligible for another attempt.
+Preview failures are warnings: a successfully written media manifest remains a
+successful scan.
 
 -   The site opens in the thumbnail grid by default; configured autoplay opens the viewer.
 -   Click a photo or video to open the full viewer.

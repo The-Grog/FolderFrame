@@ -15,7 +15,6 @@ manual checks; automated tests do not verify browser layout or codecs.
   - [x] **Progressive directory discovery** — Recursive All Pics scans now use a deadlock-free five-worker pool over a shared directory frontier, with determinate top-level subtree progress. Automated coverage verifies deep/wide completion, the concurrency ceiling, cancellation, partial-failure isolation, and completion accounting; live Immich device validation remains pending.
   - [x] **Sub-folder exclusions** — `folderframe.ignore` (plus `.frameignore` when exposed) excludes a complete subtree across live listings, album-cover discovery, recursive scans, browser caches, generated thumbnails, and published manifests. Conservative OS/NAS junk rules are shared by browser and generator paths; automated coverage passes.
   - [x] **Incremental progressive-scan grid updates** — Progressive publishes now extend the current DOM and virtual-grid spacers in place when the rendered prefix remains unchanged. Filename-sort insertions, stale sessions, and other unsafe cases retain the full-rebuild fallback. Existing tile nodes and decoded thumbnails survive append-only updates; large-library device validation remains pending. See RESILIENCE.md.
-- [ ] **Validate automatic Docker/Unraid thumbnails** — The main CA, Docker, and Compose implementation provides persistent appdata previews, sequential background generation, HEIC/HEIF support, safe delayed pruning, and read-only originals. Verify the released deployment documentation and complete real Unraid device testing.
 
 ### Browser and device testing
 
@@ -24,6 +23,12 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ## Completed
 
+- [x] **Cached thumbnail failures and accurate worker status** — Thumbnail failures are persisted by relative path, size, and modification time, unchanged failures are skipped, and changed sources retry automatically. Preview failures now produce a successful scan-with-warnings result while scanner or manifest failures remain failures. Structured worker status and regression coverage are included.
+- [x] **Automatic Docker/Unraid thumbnails validated** — The scheduled thumbnail and manifest worker, persistent appdata, generated previews, read-only originals, manifest refresh, upgrades, and recovery were exercised on the live Unraid deployment.
+- [x] **Browser-style Shuffle history** — Shuffle keeps a rolling ten-item history with a cursor, so Previous and Next replay already viewed media before selecting another random item. Stale entries are pruned and error skipping follows the same navigation path.
+- [x] **Additional media mounts and multiple sources** — FolderFrame supports distinct configured sources and additional Docker/Unraid media mounts under unique `/media/` paths, with installation examples in the deployment documentation.
+- [x] **Working public demo** — Published an approved static demo with sample media and manifest-backed navigation while keeping personal library content out of the public fixture set.
+- [x] **Deployment install link and overview** — The main README introduces FolderFrame and links directly to the deployment repository for Docker and Unraid installation options.
 - [x] **Native-first Apple media compatibility** — HEIC/HEIF first attempts browser display, then bundled heic-to 1.5.2 with preserved QuickTime reclassification. Optional Docker video fallback streams on decode failure without persistent converted files. Automated and isolated browser validation are recorded separately; Safari/device coverage remains pending.
 
 - [x] **Separate native viewer and thumbnail decode queues** — Full-resolution viewer images use a two-slot queue while grid and album thumbnails use a twelve-slot queue with album-over-grid priority. Navigation and scroll cancellation remain intact, and HEIC processing remains isolated in its existing pool.
@@ -72,5 +77,5 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 - User tested and approved the swipe, filename visibility, and grid-return update.
 - User tested and approved the mobile double-tap and pinch-flicker fixes.
-- Current regression suite: 128 automated app/settings/cache and resilience tests. Run both tests/configuration.test.cjs and tests/resilience.test.cjs.
+- Current regression suite: 139 automated app/settings/cache and resilience tests, plus focused Python thumbnail-worker and failure-cache tests. Run both tests/configuration.test.cjs and tests/resilience.test.cjs.
 - User visually tested and approved the long-filename desktop layout. Node tests do not validate CSS layout.

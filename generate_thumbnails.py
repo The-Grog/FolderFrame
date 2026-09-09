@@ -13,6 +13,7 @@ from typing import Optional
 IMAGE_TYPES = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp", ".heic", ".heif"}
 MEDIA_TYPES = IMAGE_TYPES | {".mp4", ".mov", ".webm", ".m4v"}
 MANIFEST_VERSION = 1
+FAILURE_CACHE_VERSION = 1
 IGNORE_SENTINELS = {"folderframe.ignore", ".frameignore"}
 IGNORED_DIRECTORY_NAMES = {
     "@eadir", "#recycle", "@recycle", "$recycle.bin", ".trash", ".trashes",
@@ -61,7 +62,29 @@ def read_json(path: Path):
         return None
 
 
-def generate(media_root: Path, thumb_root: Path, size: int, quality: int) -> tuple[int, int, int, set]:
+def read_failure_cache(path: Optional[Path]) -> dict:
+    payload = read_json(path) if path else None
+    if not isinstance(payload, dict) or payload.get("version") != FAILURE_CACHE_VERSION:
+        return {}
+    failures = payload.get("failures")
+    return failures if isinstance(failures, dict) else {}
+
+
+def write_failure_cache(path: Optional[Path], failures: dict) -> None:
+    if path is None:
+        return
+    try:
+        atomic_json(path, {
+            "version": FAILURE_CACHE_VERSION,
+            "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "failures": failures,
+        })
+    except OSError as error:
+        print(f"Could not update thumbnail failure cache {path}: {error}")
+
+
+def generate(media_root: Path, thumb_root: Path, size: int, quality: int,
+        failure_cache_path: Optional[Path] = None) -> dict:
     try:
         from PIL import Image, ImageOps
     except ImportError as error:
@@ -72,8 +95,10 @@ def generate(media_root: Path, thumb_root: Path, size: int, quality: int) -> tup
     except ImportError:
         pass
 
-    created = current = failed = 0
+    created = current = failed = skipped_failures = 0
     changed_directories = set()
+    cached_failures = read_failure_cache(failure_cache_path)
+    retained_failures = {}
     for root, directories, filenames in os.walk(media_root):
         directory = Path(root)
         if has_ignore_sentinel(directory):
@@ -84,9 +109,30 @@ def generate(media_root: Path, thumb_root: Path, size: int, quality: int) -> tup
             source = directory / filename
             if ignored_file_name(filename) or source.suffix.lower() not in IMAGE_TYPES:
                 continue
-            target = thumb_root / (source.relative_to(media_root).as_posix() + ".webp")
-            if target.exists() and target.stat().st_mtime >= source.stat().st_mtime:
+            relative = source.relative_to(media_root).as_posix()
+            target = thumb_root / (relative + ".webp")
+            try:
+                source_stat = source.stat()
+            except OSError as error:
+                failed += 1
+                print(f"Preview failed for {relative}: {error}")
+                continue
+            signature = {"size": source_stat.st_size, "mtimeNs": source_stat.st_mtime_ns}
+            try:
+                target_is_current = target.exists() and target.stat().st_mtime_ns >= source_stat.st_mtime_ns
+            except OSError as error:
+                failed += 1
+                retained_failures[relative] = signature
+                changed_directories.add(source.parent.relative_to(media_root).as_posix()
+                    if source.parent != media_root else "")
+                print(f"Preview failed for {relative}: {error}")
+                continue
+            if target_is_current:
                 current += 1
+                continue
+            if cached_failures.get(relative) == signature:
+                skipped_failures += 1
+                retained_failures[relative] = signature
                 continue
             try:
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -103,8 +149,18 @@ def generate(media_root: Path, thumb_root: Path, size: int, quality: int) -> tup
                     if source.parent != media_root else "")
             except Exception as error:
                 failed += 1
-                print(f"Skipped {source}: {error}")
-    return created, current, failed, changed_directories
+                retained_failures[relative] = signature
+                changed_directories.add(source.parent.relative_to(media_root).as_posix()
+                    if source.parent != media_root else "")
+                print(f"Preview failed for {relative}: {error}")
+    write_failure_cache(failure_cache_path, retained_failures)
+    return {
+        "created": created,
+        "current": current,
+        "failed": failed,
+        "skippedFailures": skipped_failures,
+        "changedDirectories": changed_directories,
+    }
 
 
 def directory_record(media_root: Path, relative: str, old_record, thumb_root: Optional[Path], counters: dict,
@@ -123,6 +179,7 @@ def directory_record(media_root: Path, relative: str, old_record, thumb_root: Op
             if isinstance(entry, dict) and not ignored_file_name(Path(entry.get("path", "")).name)]
         if len(reusable_folders) == len(old_record["folders"]) and len(reusable_files) == len(old_record["files"]):
             counters["reused"] += 1
+            counters["files"] += len(reusable_files)
             return old_record
 
     files, folders = [], []
@@ -152,6 +209,7 @@ def directory_record(media_root: Path, relative: str, old_record, thumb_root: Op
     files.sort(key=lambda item: natural_key(item["path"]))
     folders.sort(key=natural_key)
     counters["listed"] += 1
+    counters["files"] += len(files)
     return {"path": relative, "mtimeNs": mtime_ns, "files": files, "folders": folders}
 
 
@@ -180,7 +238,7 @@ def write_manifest(media_root: Path, thumb_root: Optional[Path], manifest_path: 
     else:
         print("Loaded persistent manifest; checking directory mtimes for changes.")
 
-    counters = {"listed": 0, "reused": 0, "errors": []}
+    counters = {"listed": 0, "reused": 0, "files": 0, "errors": []}
     old_root = old_index.get("root") if isinstance(old_index, dict) else None
     changed_thumbnail_dirs = changed_thumbnail_dirs or set()
     root_record = directory_record(media_root, "", old_root, thumb_root, counters,
@@ -243,6 +301,10 @@ def main() -> int:
     parser.add_argument("--quality", type=int, default=80, help="WebP quality 1-100 (default: 80)")
     parser.add_argument("--manifest", type=Path, help="Write a persistent manifest index to this JSON file")
     parser.add_argument("--manifest-only", action="store_true", help="Skip thumbnail generation and update only the manifest")
+    parser.add_argument("--failure-cache", type=Path,
+        help="Cache unchanged thumbnail failures in this JSON file")
+    parser.add_argument("--status-file", type=Path,
+        help="Write structured scan results to this JSON file")
     args = parser.parse_args()
     if not args.media.is_dir():
         parser.error("media must be an existing directory")
@@ -255,17 +317,64 @@ def main() -> int:
 
     media_root = args.media.resolve()
     thumb_root = args.output.resolve() if args.output else None
-    failed = 0
+    thumbnail_result = {
+        "created": 0,
+        "current": 0,
+        "failed": 0,
+        "skippedFailures": 0,
+        "changedDirectories": set(),
+    }
     changed_thumbnail_dirs = set()
     if not args.manifest_only:
-        created, current, failed, changed_thumbnail_dirs = generate(media_root, thumb_root, args.size, args.quality)
-        print(f"Generated {created}; already current {current}; failed {failed}")
+        failure_cache_path = args.failure_cache.resolve() if args.failure_cache else None
+        thumbnail_result = generate(media_root, thumb_root, args.size, args.quality, failure_cache_path)
+        changed_thumbnail_dirs = thumbnail_result["changedDirectories"]
+        print(
+            f"Thumbnails generated {thumbnail_result['created']}; "
+            f"already current {thumbnail_result['current']}; "
+            f"preview failures {thumbnail_result['failed']}; "
+            f"unchanged failures skipped {thumbnail_result['skippedFailures']}"
+        )
+    manifest_result = {"listed": 0, "reused": 0, "files": 0, "errors": []}
     if args.manifest:
-        counters = write_manifest(media_root, thumb_root, args.manifest.resolve(), changed_thumbnail_dirs)
-        print(f"Manifest updated; listed {counters['listed']} changed directories; reused {counters['reused']}; errors {len(counters['errors'])}")
-        if counters["errors"]:
-            failed += len(counters["errors"])
-    return 1 if failed else 0
+        manifest_result = write_manifest(media_root, thumb_root, args.manifest.resolve(), changed_thumbnail_dirs)
+        print(
+            f"Manifest updated; media files {manifest_result['files']}; "
+            f"listed {manifest_result['listed']} changed directories; "
+            f"reused {manifest_result['reused']}; errors {len(manifest_result['errors'])}"
+        )
+
+    outcome = "failed" if manifest_result["errors"] else (
+        "complete_with_warnings"
+        if thumbnail_result["failed"] or thumbnail_result["skippedFailures"]
+        else "complete"
+    )
+    status = {
+        "version": 1,
+        "completedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "outcome": outcome,
+        "mediaFiles": manifest_result["files"] if args.manifest else None,
+        "thumbnailsGenerated": thumbnail_result["created"],
+        "thumbnailsCurrent": thumbnail_result["current"],
+        "previewFailures": thumbnail_result["failed"],
+        "unchangedFailuresSkipped": thumbnail_result["skippedFailures"],
+        "manifestDirectoriesListed": manifest_result["listed"],
+        "manifestDirectoriesReused": manifest_result["reused"],
+        "manifestErrors": len(manifest_result["errors"]),
+    }
+    if args.status_file:
+        try:
+            atomic_json(args.status_file.resolve(), status)
+        except OSError as error:
+            print(f"Could not update scan status {args.status_file}: {error}")
+    summary_prefix = "Scan failed" if outcome == "failed" else "Scan complete"
+    print(
+        f"{summary_prefix} — {status['mediaFiles'] if status['mediaFiles'] is not None else 'manifest disabled'} media files"
+        f" · {status['thumbnailsGenerated']} thumbnails generated"
+        f" · {status['previewFailures']} preview failures"
+        f" · {status['unchangedFailuresSkipped']} unchanged failures skipped"
+    )
+    return 1 if outcome == "failed" else 0
 
 
 if __name__ == "__main__":
