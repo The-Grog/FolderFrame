@@ -404,6 +404,7 @@ let shuffleHistory = [];
 let shuffleHistoryIndex = -1;
 let galleryViewMode = 'folders'; // 'folders' or 'all'
 let sortMode = 'filename';
+let sortDateSource = 'mtime';
 const GRID_DENSITY_PX = { compact: 130, comfortable: 180, spacious: 240 };
 let gridDensity = 'comfortable';
 let gridTileMinPx = GRID_DENSITY_PX.comfortable;
@@ -422,6 +423,7 @@ const SCAN_MANIFEST_DIRECTORY_LIMIT = 5000;
 const PERSISTENT_MANIFEST_VERSION = 1;
 let persistentManifestState = null;
 const persistentThumbnailUrls = new Map();
+const persistentExifUrls = new Map();
 let manifestFailureNotice = false;
 
 function isManifestOnlySource() {
@@ -457,6 +459,7 @@ function resetPersistentManifest({ cacheBust = false } = {}) {
             cacheBustToken: cacheBust ? `${Date.now()}-${Math.random().toString(36).slice(2)}` : null, chunks: new Map() }
         : null;
     persistentThumbnailUrls.clear();
+    persistentExifUrls.clear();
 }
 
 function safeManifestPath(value, { allowEmpty = false } = {}) {
@@ -472,6 +475,17 @@ function manifestAssetUrl(relative) {
     if (!path) return null;
     try {
         return new URL(path.split('/').map(encodeURIComponent).join('/'), activeSource.thumbnailUrl).href;
+    } catch { return null; }
+}
+
+function manifestSidecarUrl(relative) {
+    if (!activeSource.manifestUrl) return null;
+    const path = safeManifestPath(relative);
+    if (!path) return null;
+    try {
+        const base = new URL('./', activeSource.manifestUrl);
+        const url = new URL(path.split('/').map(encodeURIComponent).join('/'), base);
+        return url.origin === base.origin && url.pathname.startsWith(base.pathname) ? url.href : null;
     } catch { return null; }
 }
 
@@ -509,11 +523,16 @@ function listingFromManifest(record, expectedPath) {
         const file = mediaUrlFor(name, folder);
         modifiedDateCache.set(file, {
             date: Number.isFinite(entry.mtime) ? entry.mtime : null,
+            captureDate: Number.isFinite(entry.captureDate) ? entry.captureDate : null,
             size: Number.isFinite(entry.size) ? entry.size : null,
             checked: now
         });
         const thumbnail = entry.thumbnailPath ? manifestAssetUrl(entry.thumbnailPath) : null;
         if (thumbnail) persistentThumbnailUrls.set(file, thumbnail);
+        else persistentThumbnailUrls.delete(file);
+        const exif = entry.exifPath ? manifestSidecarUrl(entry.exifPath) : null;
+        if (exif) persistentExifUrls.set(file, exif);
+        else persistentExifUrls.delete(file);
         return file;
     });
     return { filePaths, folderNames: [...valid.folders] };
@@ -692,7 +711,9 @@ function trimDateCache(now = Date.now()) {
     for (const [file, entry] of modifiedDateCache) {
         if (!entry || !Number.isFinite(entry.checked) || entry.checked > now ||
             now - entry.checked >= DATE_CACHE_TTL ||
-            (entry.date !== null && !Number.isFinite(entry.date))) modifiedDateCache.delete(file);
+            (entry.date !== null && !Number.isFinite(entry.date)) ||
+            (entry.captureDate !== null && entry.captureDate !== undefined &&
+                !Number.isFinite(entry.captureDate))) modifiedDateCache.delete(file);
     }
     const oldest = [...modifiedDateCache].sort((a, b) => a[1].checked - b[1].checked);
     for (const [file] of oldest.slice(0, Math.max(0, oldest.length - DATE_CACHE_LIMIT))) modifiedDateCache.delete(file);
@@ -711,7 +732,12 @@ function loadDateCache() {
             const [file, value] = entry;
             // Cached metadata must never introduce URLs outside the selected source.
             if (!file.startsWith(activeSource.url) || !value || typeof value !== 'object') continue;
-            modifiedDateCache.set(file, { date: value.date, size: value.size ?? null, checked: value.checked });
+            modifiedDateCache.set(file, {
+                date: value.date,
+                captureDate: Number.isFinite(value.captureDate) ? value.captureDate : null,
+                size: value.size ?? null,
+                checked: value.checked
+            });
         }
         trimDateCache();
     } catch (error) {
@@ -894,6 +920,7 @@ async function loadConfiguration() {
     currentFolder = startupSettings.album;
     galleryViewMode = startupSettings.view;
     sortMode = startupSettings.sort;
+    sortDateSource = startupSettings.sortDateSource;
     slideshowInterval = startupSettings.interval;
     imageMode = startupSettings.imageMode;
     shuffleEnabled = startupSettings.shuffle;
@@ -925,7 +952,10 @@ async function loadConfiguration() {
 function updateControlStates() {
     const sortLabels = { newest: 'Newest', oldest: 'Oldest', filename: 'Filename' };
     $('sort-label').textContent = sortLabels[sortMode];
-    $('btn-sort').title = `Sorting: ${sortLabels[sortMode]}. Click to cycle Newest, Oldest, Filename.`;
+    const dateSourceDescription = sortDateSource === 'capture'
+        ? 'image capture date with file modification date fallback'
+        : 'file modification date';
+    $('btn-sort').title = `Sorting: ${sortLabels[sortMode]}${sortMode === 'filename' ? '' : ` by ${dateSourceDescription}`}. Click to cycle Newest, Oldest, Filename.`;
     $('btn-sort').setAttribute('aria-label', `Sort: ${sortLabels[sortMode]}. Change sorting`);
     const densityLabels = { compact: 'Compact', comfortable: 'Comfortable', spacious: 'Spacious' };
     const densityButton = $('btn-grid-density');
@@ -1278,6 +1308,7 @@ async function scanDirectory(folder = currentFolder, options = {}) {
             files: filePaths.map(path => {
                 const metadata = modifiedDateCache.get(path);
                 return { path, mtime: metadata?.date ?? null, size: metadata?.size ?? null,
+                    captureDate: metadata?.captureDate ?? null,
                     thumbnailPath: persistentThumbnailUrl(path) };
             }),
             folders: folderNames, ignored
@@ -1399,13 +1430,15 @@ async function sortMediaFiles(files, mode, refreshDates = false, signal) {
     let cursor = 0;
     const now = Date.now();
     const dates = new Map();
+    const effectiveDate = (file, metadata) => sortDateSource === 'capture' && !isVideoFile(file) &&
+        Number.isFinite(metadata?.captureDate) ? metadata.captureDate : metadata?.date;
     try {
         const worker = async () => {
             while (cursor < files.length) {
                 const file = files[cursor++];
                 const cached = modifiedDateCache.get(file);
                 if (!refreshDates && cached && now - cached.checked < DATE_CACHE_TTL) {
-                    dates.set(file, cached.date);
+                    dates.set(file, effectiveDate(file, cached));
                     continue;
                 }
                 if (controller.signal.aborted) { dates.set(file, null); continue; }
@@ -1418,15 +1451,24 @@ async function sortMediaFiles(files, mode, refreshDates = false, signal) {
                 } catch (error) {
                     // No metadata (including unsupported HEAD/CORS): keep the file, sorted last.
                 }
-                dates.set(file, date);
-                if (!controller.signal.aborted) modifiedDateCache.set(file, { date, checked: now });
+                const updated = {
+                    date,
+                    captureDate: Number.isFinite(cached?.captureDate) ? cached.captureDate : null,
+                    size: cached?.size ?? null,
+                    checked: now
+                };
+                dates.set(file, effectiveDate(file, updated));
+                if (!controller.signal.aborted) modifiedDateCache.set(file, updated);
             }
         };
         await Promise.all(Array.from({ length: Math.min(4, files.length) }, worker));
     } finally { clearTimeout(timeout); signal?.removeEventListener('abort', cancel); saveDateCache(); }
     if (signal?.aborted) throw resilience.abortError();
     const missing = files.filter(file => dates.get(file) == null).length;
-    $('btn-sort').title = `Sorting: ${mode === 'newest' ? 'Newest' : 'Oldest'} by file modification date. ${missing} files without dates sort last by filename. Click to change sorting.`;
+    const sourceDescription = sortDateSource === 'capture'
+        ? 'image capture date with file modification date fallback'
+        : 'file modification date';
+    $('btn-sort').title = `Sorting: ${mode === 'newest' ? 'Newest' : 'Oldest'} by ${sourceDescription}. ${missing} files without usable dates sort last by filename. Click to change sorting.`;
     return [...files].sort((a, b) => {
         const left = dates.get(a), right = dates.get(b);
         if (left == null && right != null) return 1;
@@ -2052,6 +2094,7 @@ function renderGridView() {
                     const response = await fetch(file, { method: 'HEAD', cache: 'no-store', signal: controller.signal });
                     if (response.status === 404 || response.status === 410) {
                         persistentThumbnailUrls.delete(file);
+                        persistentExifUrls.delete(file);
                         modifiedDateCache.delete(file);
                         mediaFiles = mediaFiles.filter(candidate => candidate !== file);
                         setScanStatus(`Removed unavailable file: ${filename}`, true);

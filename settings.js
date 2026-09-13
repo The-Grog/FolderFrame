@@ -2,7 +2,7 @@
 (function (root) {
     'use strict';
     const DEFAULTS = Object.freeze({
-        album: '', view: 'folders', sort: 'filename', interval: 5, imageMode: 'fit',
+        album: '', view: 'folders', sort: 'filename', sortDateSource: 'mtime', interval: 5, imageMode: 'fit',
         shuffle: false, autoRefresh: true, refreshInterval: 120, tvMode: false,
         autoplay: false, rememberPreferences: true, controls: true, showFilenames: true,
         showDownloadButton: true, showCopyButton: true, showButtonLabels: false,
@@ -40,6 +40,8 @@
                 if (!['all', 'folders'].includes(item)) throw new Error('view must be all or folders');
             } else if (key === 'sort') {
                 if (!['newest', 'oldest', 'filename'].includes(item)) throw new Error('sort must be newest, oldest, or filename');
+            } else if (key === 'sortDateSource') {
+                if (!['mtime', 'capture'].includes(item)) throw new Error('sortDateSource must be mtime or capture');
             } else if (key === 'imageMode') {
                 if (!['fit', 'original'].includes(item)) throw new Error('imageMode must be fit or original');
             } else if (key === 'videoTranscodeFallback') {
@@ -133,7 +135,7 @@
     }
 
     function urlSettings(params, sources, warnings) {
-        const aliases = { source: 'source', album: 'album', view: 'view', sort: 'sort', interval: 'interval',
+        const aliases = { source: 'source', album: 'album', view: 'view', sort: 'sort', sortDate: 'sortDateSource', interval: 'interval',
             imageMode: 'imageMode', shuffle: 'shuffle', autorefresh: 'autoRefresh',
             tv: 'tvMode', autoplay: 'autoplay', remember: 'rememberPreferences', controls: 'controls', showFilenames: 'showFilenames',
             download: 'showDownloadButton', copy: 'showCopyButton', buttonLabels: 'showButtonLabels', density: 'gridDensity',

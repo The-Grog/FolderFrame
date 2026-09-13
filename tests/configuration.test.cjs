@@ -701,6 +701,41 @@ test('date sorts use Last-Modified, tie by filename, and keep missing dates last
     assert.equal(calls.length, 4, 'filename sort makes no metadata requests');
 });
 
+test('capture-date sorting prefers image capture dates with mtime and video fallback', async () => {
+    const app = await boot({ config: { defaults: { sortDateSource: 'capture' } } });
+    const root = 'https://example.test/frame/photos/';
+    const files = ['capture-new.jpg', 'capture-old.jpg', 'fallback.jpg', 'movie.mp4', 'missing.jpg'].map(name => root + name);
+    const now = Date.now();
+    vm.runInContext('loadDateCache()', app.context);
+    const values = {
+        'capture-new.jpg': { date: 100, captureDate: 500, checked: now },
+        'capture-old.jpg': { date: 900, captureDate: 200, checked: now },
+        'fallback.jpg': { date: 400, captureDate: null, checked: now },
+        'movie.mp4': { date: 300, captureDate: 1000, checked: now },
+        'missing.jpg': { date: null, captureDate: null, checked: now }
+    };
+    app.context.captureEntries = Object.entries(values).map(([name, value]) => [root + name, value]);
+    vm.runInContext('for (const [file, value] of captureEntries) modifiedDateCache.set(file, value)', app.context);
+    app.context.captureFiles = files;
+    const newest = await vm.runInContext("sortMediaFiles(captureFiles, 'newest')", app.context);
+    assert.deepEqual(Array.from(newest, url => url.split('/').pop()),
+        ['capture-new.jpg', 'fallback.jpg', 'movie.mp4', 'capture-old.jpg', 'missing.jpg']);
+    assert.match(app.get('btn-sort').title, /capture date with file modification date fallback/);
+});
+
+test('HEAD refresh preserves manifest capture date and size when mtime is unavailable', async () => {
+    const app = await boot({ config: { defaults: { sortDateSource: 'capture' } } });
+    const file = 'https://example.test/frame/photos/photo.jpg';
+    vm.runInContext('loadDateCache()', app.context);
+    app.context.captureFile = file;
+    vm.runInContext('modifiedDateCache.set(captureFile, { date: 100, captureDate: 500, size: 1234, checked: Date.now() })', app.context);
+    app.context.fetch = async () => { throw new Error('HEAD unavailable'); };
+    const result = await vm.runInContext("sortMediaFiles([captureFile], 'newest', true)", app.context);
+    assert.deepEqual(Array.from(result), [file]);
+    assert.equal(vm.runInContext('modifiedDateCache.get(captureFile).captureDate', app.context), 500);
+    assert.equal(vm.runInContext('modifiedDateCache.get(captureFile).size', app.context), 1234);
+});
+
 test('sort button cycles current label and saves choice without changing source or folder', async () => {
     const app = await boot({ search: '?album=Family' });
     assert.equal(app.get('sort-label').textContent, 'Filename');
@@ -761,6 +796,7 @@ test('date cache persists across reloads and manual refresh replaces stored date
     app.context.sortFiles = ['https://example.test/frame/photos/a.jpg'];
     app.context.fetch = async () => ({ ok: true, headers: { get: () => 'Thu, 01 Jan 2026 00:00:00 GMT' } });
     await vm.runInContext("sortMediaFiles(sortFiles, 'newest')", app.context);
+    vm.runInContext('modifiedDateCache.get(sortFiles[0]).captureDate = 1700000000000; saveDateCache()', app.context);
     const key = vm.runInContext('dateCacheKey', app.context);
     const stored = app.saved.get(key);
     assert.equal(JSON.parse(stored).length, 1);
@@ -771,9 +807,11 @@ test('date cache persists across reloads and manual refresh replaces stored date
     reload.context.fetch = async () => { calls++; return { ok: true, headers: { get: () => 'Fri, 02 Jan 2026 00:00:00 GMT' } }; };
     await vm.runInContext("sortMediaFiles(sortFiles, 'oldest')", reload.context);
     assert.equal(calls, 0);
+    assert.equal(vm.runInContext('modifiedDateCache.get(sortFiles[0]).captureDate', reload.context), 1700000000000);
     await vm.runInContext("sortMediaFiles(sortFiles, 'oldest', true)", reload.context);
     assert.equal(calls, 1);
     assert.equal(JSON.parse(reload.saved.get(key))[0][1].date, Date.parse('2026-01-02T00:00:00Z'));
+    assert.equal(JSON.parse(reload.saved.get(key))[0][1].captureDate, 1700000000000);
 });
 
 test('date cache expires after 24 hours and evicts oldest checked entries', async () => {
@@ -982,6 +1020,23 @@ test('HEIC album covers use generated previews only and never fall back to conve
     assert.equal(app.context.albumItem.children.length, 1);
 });
 
+test('sort date source defaults to mtime and supports profile and URL overrides', () => {
+    const config = normalize({
+        defaults: { sortDateSource: 'capture' },
+        index: { sortDateSource: 'mtime' },
+        embed: { sortDateSource: 'capture' }
+    });
+    assert.equal(api.resolveSettings(normalize({}), '').settings.sortDateSource, 'mtime');
+    assert.equal(api.resolveSettings(config, '').settings.sortDateSource, 'mtime');
+    assert.equal(api.resolveSettings(config, '?profile=embed').settings.sortDateSource, 'capture');
+    assert.equal(api.resolveSettings(config, '?sortDate=capture').settings.sortDateSource, 'capture');
+    assert.equal(api.resolveSettings(config, '?sortDate=mtime').settings.sortDateSource, 'mtime');
+    assert.equal(api.resolveSettings(config, '', () => JSON.stringify({ sortDateSource: 'capture' })).settings.sortDateSource, 'mtime',
+        'date-source policy is not a saved user preference');
+    assert.throws(() => normalize({ defaults: { sortDateSource: 'taken' } }), /sortDateSource must/);
+    assert.ok(api.resolveSettings(config, '?sortDate=taken').warnings.length);
+});
+
 test('album cover queue limits concurrent lookups and cancels queued work', async () => {
     const app = await boot();
     const pending = [];
@@ -1089,7 +1144,8 @@ test('persistent manifest supplies listings, dates, sizes, and generated thumbna
         version: 1, root: '2026', directories: {
             '2026': { path: '2026', mtimeNs: 2, folders: [], files: [{
                 path: '2026/photo.jpg', mtime: 1788177600000, size: 12345,
-                thumbnailPath: '2026/photo.jpg.webp'
+                captureDate: 1788000000000, thumbnailPath: '2026/photo.jpg.webp',
+                exifPath: 'exif.d/2026/photo.jpg.json'
             }] }
         }
     };
@@ -1105,8 +1161,33 @@ test('persistent manifest supplies listings, dates, sizes, and generated thumbna
     });
     assert.equal(directoryRequests, 0);
     assert.equal(vm.runInContext("modifiedDateCache.get('https://example.test/frame/photos/2026/photo.jpg').size", app.context), 12345);
+    assert.equal(vm.runInContext("modifiedDateCache.get('https://example.test/frame/photos/2026/photo.jpg').captureDate", app.context), 1788000000000);
     assert.equal(vm.runInContext("persistentThumbnailUrl('https://example.test/frame/photos/2026/photo.jpg')", app.context),
         'https://example.test/frame/thumbs/2026/photo.jpg.webp');
+    assert.equal(vm.runInContext("persistentExifUrls.get('https://example.test/frame/photos/2026/photo.jpg')", app.context),
+        'https://example.test/frame/folderframe-data/exif.d/2026/photo.jpg.json');
+    assert.equal(directoryRequests, 0, 'sidecar URLs are recorded but never fetched');
+
+    app.context.replacementRecord = {
+        path: '2026', folders: [], files: [{ path: '2026/photo.jpg', mtime: 1788177600000, size: 12345 }]
+    };
+    vm.runInContext("listingFromManifest(replacementRecord, '2026')", app.context);
+    assert.equal(vm.runInContext("modifiedDateCache.get('https://example.test/frame/photos/2026/photo.jpg').captureDate", app.context), null);
+    assert.equal(vm.runInContext("persistentExifUrls.has('https://example.test/frame/photos/2026/photo.jpg')", app.context), false);
+});
+
+test('manifest EXIF sidecar URLs are manifest-relative, encoded, and reject unsafe paths', async () => {
+    const app = await boot({ config: normalizeConfigCopy({ manifestPath: 'folderframe-data/library.json' }) });
+    app.context.sidecarRecord = {
+        path: '', folders: [], files: [
+            { path: 'snow #100% 日本.jpg', exifPath: 'exif.d/snow #100% 日本.jpg.json' },
+            { path: 'unsafe.jpg', exifPath: '../private.json' }
+        ]
+    };
+    vm.runInContext("listingFromManifest(sidecarRecord, '')", app.context);
+    assert.equal(vm.runInContext("persistentExifUrls.get('https://example.test/frame/photos/snow%20%23100%25%20%E6%97%A5%E6%9C%AC.jpg')", app.context),
+        'https://example.test/frame/folderframe-data/exif.d/snow%20%23100%25%20%E6%97%A5%E6%9C%AC.jpg.json');
+    assert.equal(vm.runInContext("persistentExifUrls.has('https://example.test/frame/photos/unsafe.jpg')", app.context), false);
 });
 
 test('auto discovery falls back from an invalid manifest and refresh revalidates it', async () => {

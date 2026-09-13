@@ -12,6 +12,7 @@
     "album": "",
     "view": "folders",
     "sort": "filename",
+    "sortDateSource": "mtime",
     "interval": 5,
     "imageMode": "fit",
     "shuffle": false,

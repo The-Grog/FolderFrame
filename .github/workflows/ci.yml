@@ -33,4 +33,7 @@ jobs:
           node --test tests/configuration.test.cjs
           node --test tests/resilience.test.cjs
       - name: Validate thumbnail generator
-        run: python -m py_compile generate_thumbnails.py
+        run: |
+          python -m py_compile generate_thumbnails.py
+          python tests/thumbnail_failure_cache.test.py
+          python tests/exif_metadata.test.py

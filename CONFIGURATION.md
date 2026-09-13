@@ -261,6 +261,7 @@ Omitted settings retain the lower-priority value.
 | `album` | `""` (source root) | Folder path within that source, e.g. `"Family/2026"` |
 | `view` | `"folders"` | `"folders"` or `"all"` |
 | `sort` | `"filename"` | `"newest"`, `"oldest"`, or `"filename"` |
+| `sortDateSource` | `"mtime"` | `"mtime"`, or `"capture"` to prefer EXIF capture date with mtime fallback |
 | `autoplay` | `false` | Boolean: start slideshow and enter viewer |
 | `controls` | `true` | Boolean: false opens a controls-free viewer; pair with autoplay for a slideshow |
 | `showFilenames` | `true` | Boolean: show viewer filename and grid media captions |
@@ -340,6 +341,7 @@ or tv=1 URLs still apply on reload; use tv=0 to override them.
 | `album=Family/2026` | Select an album within the source |
 | `view=folders` or `view=all` | Album browsing or recursive media view |
 | `sort=newest`, `sort=oldest`, or `sort=filename` | Media order; default filename |
+| `sortDate=mtime` or `sortDate=capture` | Date source used by Newest/Oldest |
 | `autoplay=1` or `autoplay=0` | Start playing or paused |
 | `controls=1` or `controls=0` | Show controls or use the controls-free viewer |
 | `showFilenames=1` or `showFilenames=0` | Show or hide viewer filenames and media captions |
@@ -378,9 +380,19 @@ Merge these settings into your existing file to retain any custom sources.
 Saved preferences override config when enabled; use `?remember=0` to test
 defaults, or `?sort=newest` for an explicit override.
 
-Newest/Oldest use the server's HTTP Last-Modified timestamp, not EXIF capture
-time or creation time. Files without valid dates sort last by filename in
-both date modes; ties also use natural filename order (2 before 10).
+`sortDateSource: "capture"` uses optional `captureDate` values from the
+persistent manifest for images. Videos, images without usable EXIF dates, and
+directory-only sources fall back to file modification time. The setting is
+configuration/URL policy and is not stored in remembered preferences. Generate
+the manifest with Pillow installed to backfill EXIF dates; `--manifest-only`
+also extracts metadata. Add `--include-gps` only when generated sidecars should
+contain coordinates—GPS extraction is off by default and never alters originals.
+
+Newest/Oldest use the server's HTTP Last-Modified timestamp in the default
+`"mtime"` date-source mode. Capture mode prefers manifest EXIF capture time
+for images and uses Last-Modified as its fallback. Files without valid effective
+dates sort last by filename in both modes; ties also use natural filename order
+(2 before 10).
 Album folders stay first, sorted by name; album cover selection stays
 filename-based. Non-shuffled slideshows follow the selected media order.
 

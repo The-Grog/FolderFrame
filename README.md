@@ -161,6 +161,7 @@ and starts the embed as a controls-free slideshow including subfolders:
     "album": "",
     "view": "folders",
     "sort": "filename",
+    "sortDateSource": "mtime",
     "interval": 5,
     "imageMode": "fit",
     "shuffle": false,
@@ -211,6 +212,7 @@ Put settings in `defaults` for both profiles or in `index`/`embed` to override t
 | `album` | `""` | Path within the source, e.g. `"Friends/2026"` |
 | `view` | `"folders"` | `"folders"` or `"all"` (recursive) |
 | `sort` | `"filename"` | `"newest"`, `"oldest"`, or `"filename"` |
+| `sortDateSource` | `"mtime"` | `"mtime"`, or `"capture"` to prefer image capture dates with mtime fallback |
 | `interval` | `5` | Seconds: 3, 5, 10, 15, 30, 60, 300, 900, 3600 |
 | `imageMode` | `"fit"` | `"fit"` or `"original"` |
 | `gridDensity` | `"comfortable"` | `"compact"`, `"comfortable"`, or `"spacious"` — grid thumbnail size |
@@ -515,17 +517,22 @@ viewer, Shuffle means shuffle is enabled and Shuffle Off means it is disabled.
 
 ### Sorting
 
-The sorting button beside By Folder shows the current sorting.
-Click it to cycle Newest, Oldest, Filename. Filename is the default.
-Newest/Oldest use the server's file modification date (HTTP Last-Modified),
-not when the photo was taken. Files with missing dates sort last by filename;
-equal dates use natural filename order. Folders remain first and alphabetical.
-Non-shuffled slideshows follow the selected order.
+The sorting button beside By Folder shows the current sorting. Click it to cycle
+Newest, Oldest, Filename. Filename is the default. Newest/Oldest use file
+modification time by default. Set `"sortDateSource": "capture"` to prefer an
+image's EXIF capture date, falling back to file modification time for videos,
+images without a capture date, and sources without a generated persistent
+manifest. Files missing both usable dates sort last by filename; equal dates use
+natural filename order. Folders remain first and alphabetical. Non-shuffled
+slideshows follow the selected order.
 
 Set "sort": "newest", "oldest", or "filename" in folderframe.config.json under
 defaults, index, or embed. Shared defaults apply to both; profile settings
 override them. Saved preferences win when enabled; ?sort=filename explicitly
 overrides them, and ?remember=0 lets you test config defaults.
+Use `?sortDate=mtime` or `?sortDate=capture` to override the configured date
+source. This policy is not saved as a user preference; configuration and the URL
+remain authoritative.
 Date lookups use bounded HEAD requests and cache results for 24 hours in localStorage.
 The cache is capped at 2,000 entries per app/source, evicting oldest checked
 entries first. It survives reloads and browser restarts when storage is available;
@@ -577,10 +584,58 @@ Or update only the index:
 python generate_thumbnails.py photos --manifest folderframe-data/library.json --manifest-only
 ```
 
-The helper stores path, modification time, size, and optional thumbnail path,
-with one chunk per top-level folder. Later runs stat known directories and only
-re-list subtrees whose directory mtime changed. The manifest and its adjacent
-`library.d/` directory must be served as static files.
+The helper stores path, modification time, size, and optional thumbnail,
+`captureDate`, and `exifPath` fields, with one chunk per top-level folder.
+Capture dates are integer Unix milliseconds. Full allowlisted EXIF summaries
+stay in `exif.d/` beside the manifest rather than being inlined:
+
+```json
+{
+  "cameraMake": "Example",
+  "cameraModel": "Camera X",
+  "lensModel": "Prime 50",
+  "exposureTime": 0.008,
+  "fNumber": 2.8,
+  "iso": 200,
+  "focalLength": 50,
+  "imageWidth": 4032,
+  "imageHeight": 3024,
+  "orientation": 1,
+  "captureDate": 1789221600000,
+  "captureDateDetails": {
+    "source": "DateTimeOriginal",
+    "raw": "2026:09:12 14:00:00",
+    "timezoneOffsetRaw": "-04:00",
+    "timezoneOffset": "-04:00",
+    "utcAssumed": false
+  },
+  "gps": { "latitude": 40.7, "longitude": -74.0 }
+}
+```
+
+Missing fields are omitted. A sidecar is written only when usable allowlisted
+EXIF exists; original dimensions alone do not qualify. Date priority is
+DateTimeOriginal, DateTimeDigitized, then DateTime. Valid matching offset and
+subsecond tags are honored. Without a usable offset, camera wall-clock time is
+interpreted as UTC solely for deterministic sorting and `utcAssumed` is
+recorded.
+
+The first run backfills metadata even for current thumbnails. Later runs reuse
+a private path/size/mtime signature cache, including remembered no-EXIF results,
+and repair missing sidecars without reopening unchanged originals.
+`--manifest-only` also performs metadata extraction when Pillow is installed;
+without Pillow it reports that EXIF is unavailable and still produces an
+mtime-only manifest.
+
+GPS is never decoded by default. Pass `--include-gps` explicitly to include
+coordinates in generated sidecars. Returning to the default removes generated
+GPS metadata on the next complete run; it does not strip or modify EXIF in the
+original media. The client currently validates and records sidecar URLs for a
+future information panel but does not fetch sidecars yet.
+
+Later runs stat known directories and only re-list subtrees whose directory
+mtime or generated metadata changed. The manifest and its adjacent `library.d/`
+and `exif.d/` directories must be served as static files.
 
 `"auto"` mode reports an unusable index in the console and falls back to normal
 directory scanning. `"manifest"` mode instead shows a clear published-index error
@@ -591,7 +646,7 @@ continues to work normally.
 
 In strict manifest mode the control reads **Reload Library**. It cache-busts and
 reloads the published index, but new media appears only after regenerating and
-redeploying `library.json` and `library.d/`. The browser never writes server
+redeploying `library.json`, `library.d/`, and `exif.d/`. The browser never writes server
 appdata itself; run the helper manually or on a schedule.
 
 ```text
@@ -603,7 +658,8 @@ FolderFrame/
 ├── thumbnails/              # optional
 └── folderframe-data/
     ├── library.json
-    └── library.d/*.json
+    ├── library.d/*.json
+    └── exif.d/**/*.json
 ```
 
 The sticky gallery header keeps navigation available while the grid scrolls. A
