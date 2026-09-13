@@ -671,8 +671,12 @@ test('photo information stays open and refreshes for arrow-key and arrow-button 
     assert.equal(app.get('photo-info-content').children[0].children[1].textContent, 'Second');
 
     app.get('nav-left').listeners.click();
+    const navLeftIcon = {
+        closest: selector => selector.split(',').map(part => part.trim()).includes('#nav-left') ? app.get('nav-left') : null
+    };
+    app.windowListeners.click({ target: navLeftIcon });
     await new Promise(resolve => setImmediate(resolve));
-    assert.equal(app.get('photo-info-panel').hidden, false);
+    assert.equal(app.get('photo-info-panel').hidden, false, 'a bubbled click from the arrow SVG keeps the panel open');
     assert.equal(vm.runInContext('currentIndex', app.context), 0);
     assert.equal(app.get('photo-info-content').children[0].children[1].textContent, 'First');
 

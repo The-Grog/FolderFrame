@@ -3223,7 +3223,7 @@ function setupEventListeners() {
     });
     window.addEventListener('click', event => {
         if (!event.target?.closest?.('#viewer-options')) setViewerOptionsOpen(false);
-        if (!photoInfoPanel.hidden && !event.target?.closest?.('#photo-info-panel, #btn-photo-info, #viewer-options')) {
+        if (!photoInfoPanel.hidden && !event.target?.closest?.('#photo-info-panel, #btn-photo-info, #viewer-options, #nav-left, #nav-right')) {
             closePhotoInfo();
         }
         if (!event.target?.closest?.('#grid-options')) setGridOptionsOpen(false);
