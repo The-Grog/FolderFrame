@@ -772,8 +772,6 @@ const EXIF_CACHE_LIMIT = 40;
 const exifSummaryCache = new Map();
 let exifRequest = null;
 let exifPanelFile = null;
-let exifPanelPlayback = null;
-let slideshowIntentVersion = 0;
 
 // Cache only object URLs we create ourselves. Normal HTTP URLs are never revoked.
 let specialImagePool = null;
@@ -1227,7 +1225,12 @@ function normalizeExifSummary(payload, includeGps = showGps) {
         const longitude = exifNumber(payload.gps.longitude, -180, 180, { includeMin: true });
         if (latitude !== null && longitude !== null) {
             const coordinate = (value, positive, negative) => `${Math.abs(value).toFixed(6)}° ${value < 0 ? negative : positive}`;
-            add('Location', `${coordinate(latitude, 'N', 'S')}, ${coordinate(longitude, 'E', 'W')}`);
+            const params = new URLSearchParams({ api: '1', query: `${latitude},${longitude}` });
+            rows.push({
+                label: 'Location',
+                value: `${coordinate(latitude, 'N', 'S')}, ${coordinate(longitude, 'E', 'W')}`,
+                href: `https://www.google.com/maps/search/?${params.toString()}`
+            });
         }
     }
     return rows;
@@ -1246,7 +1249,19 @@ function renderPhotoInfoRows(rows) {
     list.className = 'photo-info-list';
     rows.forEach(row => {
         const term = document.createElement('dt'); term.textContent = row.label;
-        const value = document.createElement('dd'); value.textContent = row.value;
+        const value = document.createElement('dd');
+        if (row.href) {
+            const link = document.createElement('a');
+            link.className = 'photo-info-link';
+            link.href = row.href;
+            link.textContent = row.value;
+            link.setAttribute('title', 'Open location on Google Maps');
+            link.setAttribute('aria-label', 'Open location on Google Maps');
+            link.setAttribute('target', '_blank');
+            link.setAttribute('rel', 'noopener noreferrer');
+            link.addEventListener('click', event => event.stopPropagation());
+            value.appendChild(link);
+        } else value.textContent = row.value;
         if (row.secondary) {
             const detail = document.createElement('span'); detail.className = 'photo-info-secondary';
             detail.textContent = row.secondary; value.appendChild(detail);
@@ -1302,7 +1317,6 @@ function openPhotoInfo() {
     if (!photoInfoEligible()) return;
     setViewerOptionsOpen(false);
     exifPanelFile = mediaFiles[currentIndex];
-    exifPanelPlayback = { wasPlaying: slideshowPlaying, intentVersion: slideshowIntentVersion };
     cancelSlideshowTimer();
     photoInfoPanel.hidden = false;
     btnPhotoInfo.setAttribute('aria-expanded', 'true');
@@ -1319,9 +1333,7 @@ function closePhotoInfo({ restoreFocus = false, resume = true } = {}) {
     photoInfoPanel.hidden = true;
     btnPhotoInfo.setAttribute('aria-expanded', 'false');
     exifPanelFile = null;
-    const playback = exifPanelPlayback;
-    exifPanelPlayback = null;
-    if (resume && playback?.wasPlaying && slideshowPlaying && playback.intentVersion === slideshowIntentVersion &&
+    if (resume && slideshowPlaying &&
         !isGridViewActive && isPhotoActive() && imageReady) startSlideshowTimer();
     if (restoreFocus) (mobileViewerControls() ? btnViewerOptions : btnPhotoInfo).focus?.();
     if (!isGridViewActive) resetIdleTimer();
@@ -2640,9 +2652,13 @@ function enterFullScreenViewer(index) {
     if (openingViewer) showUI();
 }
 
-function showMedia(index) {
+function showMedia(index, { preservePhotoInfo = false } = {}) {
     if (!mediaFiles.length) return;
-    closePhotoInfo({ resume: false });
+    const keepPhotoInfoOpen = preservePhotoInfo && !photoInfoPanel.hidden;
+    if (keepPhotoInfoOpen) {
+        exifRequest?.controller.abort();
+        exifRequest = null;
+    } else closePhotoInfo({ resume: false });
     stopViewerSession();
     const session = { controller: new AbortController(), timer: null, progress: 0,
         videoMode: 'original', videoFallbackAttempted: false, heicFallbackAttempted: false };
@@ -2680,6 +2696,11 @@ function showMedia(index) {
     img.alt = filename;
     mediaIndex.textContent = `${currentIndex + 1} / ${mediaFiles.length}`;
     updateMediaActions(filepath, filename);
+    if (keepPhotoInfoOpen && !photoInfoPanel.hidden) {
+        exifPanelFile = filepath;
+        renderPhotoInfoState('Loading photo information…');
+        loadPhotoInfo();
+    }
 
     const playVideoSource = (source, livePhoto = false, objectUrl = null) => {
         if (!isCurrent()) { if (objectUrl) URL.revokeObjectURL(objectUrl); return; }
@@ -2783,7 +2804,24 @@ function showMedia(index) {
             });
             if (!isCurrent()) return;
             if (sniffed?.container === 'quicktime') playVideoSource(filepath, true);
-            else showMediaError('image', filepath);
+            else if (sniffed?.container === 'heic') {
+                if (session.heicFallbackAttempted) return showMediaError('heic', filepath);
+                session.heicFallbackAttempted = true;
+                clearWatchdog();
+                setMediaLoading('Preparing HEIC image…');
+                try {
+                    const url = await getSpecialImageURL(filepath, session.controller.signal);
+                    if (isCurrent()) queueNativeImageSource(img, url, session.controller.signal, {
+                        priority: NATIVE_IMAGE_PRIORITY.viewer, onStart: watch
+                    });
+                } catch (error) {
+                    if (!isCurrent() || error.name === 'AbortError') return;
+                    if (isQuickTimeReclassification(error)) {
+                        const url = URL.createObjectURL(new Blob([error.data], { type: 'video/quicktime' }));
+                        playVideoSource(url, true, url);
+                    } else showMediaError('heic', filepath, error);
+                }
+            } else showMediaError('image', filepath);
         };
 
         // Actual native loading is the capability test, including HEIC/HEIF.
@@ -2915,18 +2953,18 @@ function ensureShuffleHistory() {
     if (shuffleHistory[shuffleHistoryIndex] !== mediaFiles[currentIndex]) resetShuffleHistory();
 }
 
-function showShuffleHistoryEntry() {
+function showShuffleHistoryEntry({ preservePhotoInfo = false } = {}) {
     const file = shuffleHistory[shuffleHistoryIndex];
     const index = mediaFiles.indexOf(file);
-    if (index >= 0) showMedia(index);
+    if (index >= 0) showMedia(index, { preservePhotoInfo });
 }
 
-function nextMedia() {
-    if (!shuffleEnabled || mediaFiles.length <= 1) return showMedia(currentIndex + 1);
+function nextMedia({ preservePhotoInfo = false } = {}) {
+    if (!shuffleEnabled || mediaFiles.length <= 1) return showMedia(currentIndex + 1, { preservePhotoInfo });
     ensureShuffleHistory();
     if (shuffleHistoryIndex < shuffleHistory.length - 1) {
         shuffleHistoryIndex++;
-        showShuffleHistoryEntry();
+        showShuffleHistoryEntry({ preservePhotoInfo });
         return;
     }
     const seen = new Set(shuffleHistory);
@@ -2937,15 +2975,15 @@ function nextMedia() {
     shuffleHistory.push(next);
     if (shuffleHistory.length > SHUFFLE_HISTORY_LIMIT) shuffleHistory.shift();
     shuffleHistoryIndex = shuffleHistory.length - 1;
-    showShuffleHistoryEntry();
+    showShuffleHistoryEntry({ preservePhotoInfo });
 }
 
-function prevMedia() {
-    if (!shuffleEnabled || mediaFiles.length <= 1) return showMedia(currentIndex - 1);
+function prevMedia({ preservePhotoInfo = false } = {}) {
+    if (!shuffleEnabled || mediaFiles.length <= 1) return showMedia(currentIndex - 1, { preservePhotoInfo });
     ensureShuffleHistory();
     if (shuffleHistoryIndex <= 0) return;
     shuffleHistoryIndex--;
-    showShuffleHistoryEntry();
+    showShuffleHistoryEntry({ preservePhotoInfo });
 }
 
 function nextSlideshowMedia() { nextMedia(); }
@@ -3068,8 +3106,8 @@ function setupEventListeners() {
         savePreferences();
     });
     btnTvMode.addEventListener('click', toggleTvMode);
-    navLeft.addEventListener('click', prevMedia);
-    navRight.addEventListener('click', nextMedia);
+    navLeft.addEventListener('click', () => prevMedia({ preservePhotoInfo: true }));
+    navRight.addEventListener('click', () => nextMedia({ preservePhotoInfo: true }));
     btnRotate.addEventListener('click', rotateImage);
     btnResetZoom.addEventListener('click', resetZoomAndPan);
     btnImageMode.addEventListener('click', toggleImageMode);
@@ -3149,8 +3187,8 @@ function setupEventListeners() {
         e.preventDefault();
         if (e.repeat && key !== 'arrowleft' && key !== 'arrowright') return;
         const browsingWithArrows = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
-        if (e.key === 'ArrowLeft') prevMedia();
-        if (e.key === 'ArrowRight') nextMedia();
+        if (e.key === 'ArrowLeft') prevMedia({ preservePhotoInfo: true });
+        if (e.key === 'ArrowRight') nextMedia({ preservePhotoInfo: true });
         if (e.key === ' ') { e.preventDefault(); toggleSlideshow(); }
         if (e.key === 'Enter') { e.preventDefault(); toggleImageMode(); }
         if (e.key.toLowerCase() === 's') toggleShuffle();
@@ -3384,7 +3422,6 @@ function handleTouchEnd(e) {
 function toggleSlideshow() { setSlideshowPlaying(!slideshowPlaying); }
 function setSlideshowPlaying(value) {
     const next = Boolean(value);
-    if (slideshowPlaying !== next) slideshowIntentVersion++;
     slideshowPlaying = next;
     syncPlayButton();
     if (mediaFailed) {

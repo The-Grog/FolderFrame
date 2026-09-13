@@ -89,17 +89,17 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     top:76px;
     right:max(12px, env(safe-area-inset-right));
     z-index:9;
-    width:min(320px, calc(100vw - 24px));
+    width:min(420px, calc(100vw - 24px));
     max-height:calc(100dvh - 96px - env(safe-area-inset-bottom));
     display:flex;
     flex-direction:column;
     overflow:hidden;
-    border:1px solid rgba(255,255,255,.14);
-    border-radius:10px;
-    background:rgba(12,12,12,.96);
-    box-shadow:0 12px 35px rgba(0,0,0,.65);
-    backdrop-filter:blur(12px);
-    -webkit-backdrop-filter:blur(12px);
+    border:1px solid rgba(255,255,255,.3);
+    border-radius:12px;
+    background:rgba(12,12,12,.88);
+    box-shadow:0 14px 40px rgba(0,0,0,.68);
+    backdrop-filter:blur(18px);
+    -webkit-backdrop-filter:blur(18px);
     animation:photo-info-open .14s ease-out;
 }
 .photo-info-heading {
@@ -107,17 +107,46 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     align-items:center;
     justify-content:space-between;
     gap:12px;
-    padding:9px 9px 7px 14px;
+    padding:12px 12px 10px 18px;
     border-bottom:1px solid rgba(255,255,255,.09);
 }
-.photo-info-heading h2 { font-size:14px; font-weight:600; color:#fff; }
-.photo-info-heading .btn { width:34px; min-width:34px; height:34px; padding:0; }
-.photo-info-content { flex:1 1 auto; min-height:0; overflow:auto; padding:12px 14px 14px; }
+.photo-info-heading h2 {
+    font-size:13px;
+    font-weight:600;
+    color:var(--ff-accent-bright, #60a5fa);
+    letter-spacing:.04em;
+    text-transform:uppercase;
+}
+.photo-info-heading .ff-btn.btn {
+    width:34px;
+    min-width:34px;
+    height:34px;
+    padding:0;
+    border:0;
+    background:transparent;
+    box-shadow:none;
+    color:#aaa;
+}
+.photo-info-heading .ff-btn.btn:hover:not(:disabled) { border:0; background:var(--ff-glow-hover); color:#fff; box-shadow:none; }
+.photo-info-heading .ff-btn.btn:active:not(:disabled) { background:var(--ff-glow-active); }
+.photo-info-content { flex:1 1 auto; min-height:0; overflow:auto; padding:4px 18px 14px; }
 .photo-info-state { color:#aaa; font-size:12px; line-height:1.45; }
 .photo-info-retry { margin-top:10px; }
-.photo-info-list { display:grid; grid-template-columns:minmax(86px, auto) minmax(0, 1fr); gap:8px 12px; font-size:12px; line-height:1.35; }
-.photo-info-list dt { color:#888; }
-.photo-info-list dd { min-width:0; color:#eee; overflow-wrap:anywhere; user-select:text; -webkit-user-select:text; }
+.photo-info-list { display:grid; grid-template-columns:minmax(112px, auto) minmax(0, 1fr); column-gap:16px; font-size:13px; line-height:1.35; }
+.photo-info-list dt,
+.photo-info-list dd { padding:9px 0; border-bottom:1px solid rgba(255,255,255,.12); }
+.photo-info-list dt { color:rgba(255,255,255,.68); }
+.photo-info-list dd { min-width:0; color:rgba(255,255,255,.94); overflow-wrap:anywhere; user-select:text; -webkit-user-select:text; }
+.photo-info-link {
+    color:var(--ff-accent-bright, #60a5fa);
+    text-decoration:underline;
+    text-decoration-color:rgba(96,165,250,.65);
+    text-underline-offset:3px;
+}
+.photo-info-link:hover { color:#93c5fd; text-decoration-color:currentColor; }
+.photo-info-link:focus-visible { outline:2px solid var(--ff-accent-bright, #60a5fa); outline-offset:3px; border-radius:2px; }
+.photo-info-list dt:nth-last-of-type(1),
+.photo-info-list dd:nth-last-of-type(1) { border-bottom:0; }
 .photo-info-secondary { display:block; margin-top:2px; color:#888; font-size:11px; }
 @keyframes photo-info-open { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
 @media (prefers-reduced-motion:reduce) { .photo-info-panel { animation:none; } }
@@ -491,7 +520,9 @@ button, select, .media-error-actions a { touch-action:manipulation; }
 
 /* Icon-only viewer controls pack into compact rows on phones and thin windows. */
 @media (max-width:900px) {
-    .photo-info-panel { right:max(6px, env(safe-area-inset-right)); width:min(320px, calc(100vw - 12px)); }
+    .photo-info-panel { right:max(6px, env(safe-area-inset-right)); width:min(340px, calc(100vw - 12px)); }
+    .photo-info-content { padding-inline:14px; }
+    .photo-info-list { grid-template-columns:minmax(90px, auto) minmax(0, 1fr); column-gap:12px; font-size:12px; }
     .hide-viewer-button-labels #overlay-header {
         flex-direction:column;
         align-items:stretch;

@@ -243,6 +243,100 @@ class ExifMetadataTests(unittest.TestCase):
             self.assertIn("captureDate", record)
             self.assertNotIn("exifPath", record)
 
+    def test_thumbnail_failure_preserves_extracted_metadata_and_cache(self):
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            media = root / "media"
+            thumbs = root / "thumbs"
+            manifest = root / "data" / "library.json"
+            failures = root / "data" / "thumbnail-failures.json"
+            media.mkdir()
+            source = media / "photo.jpg"
+            exif = Image.Exif()
+            exif[36867] = "2026:09:12 10:00:00"
+            Image.new("RGB", (32, 24), "red").save(source, exif=exif)
+
+            with mock.patch("PIL.Image.Image.save", side_effect=OSError("thumbnail write failed")):
+                first = GENERATOR.generate(media, thumbs, 480, 80, failures, manifest, False, True)
+            record = first["metadataRecords"]["photo.jpg"]
+            sidecar = manifest.parent / "exif.d" / "photo.jpg.json"
+            self.assertEqual(first["failed"], 1)
+            self.assertEqual(first["metadataWarnings"], 0)
+            self.assertIn("captureDate", record)
+            self.assertEqual(json.loads(sidecar.read_text(encoding="utf-8"))["captureDate"], record["captureDate"])
+
+            with mock.patch.object(GENERATOR, "extract_metadata") as extract_again:
+                second = GENERATOR.generate(media, thumbs, 480, 80, failures, manifest, False, True)
+            extract_again.assert_not_called()
+            self.assertEqual(second["skippedFailures"], 1)
+            self.assertIn("captureDate", second["metadataRecords"]["photo.jpg"])
+            self.assertEqual(json.loads(sidecar.read_text(encoding="utf-8"))["captureDate"], record["captureDate"])
+
+    def test_sidecar_availability_transitions_invalidate_root_and_nested_records(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            media = root / "media"
+            manifest = root / "data" / "library.json"
+            media.mkdir()
+            nested = media / "album"
+            nested.mkdir()
+            (media / "root.jpg").write_bytes(b"image")
+            (nested / "nested.jpg").write_bytes(b"image")
+            opens = []
+            exif = FakeExif(exif={36867: "2026:09:12 10:00:00"})
+            fake_pil = types.ModuleType("PIL")
+            fake_pil.Image = types.SimpleNamespace(open=lambda path: opens.append(path) or FakeImage(exif))
+            fake_pil.ImageOps = object()
+            original_atomic = GENERATOR.atomic_json
+
+            def fail_sidecars(path, payload):
+                if "exif.d" in path.parts and path.name != ".metadata-cache.json":
+                    raise OSError("read only")
+                return original_atomic(path, payload)
+
+            with mock.patch.dict(sys.modules, {"PIL": fake_pil}), \
+                    mock.patch.object(GENERATOR, "atomic_json", side_effect=fail_sidecars):
+                first = GENERATOR.generate(media, None, 480, 80, None, manifest, False, False)
+            GENERATOR.write_manifest(media, None, manifest, first["changedDirectories"], first["metadataRecords"])
+
+            def records():
+                index = json.loads(manifest.read_text(encoding="utf-8"))
+                root_record = next(item for item in index["root"]["files"] if item["path"] == "root.jpg")
+                chunk_path = manifest.parent / index["chunks"]["album"]["file"]
+                chunk = json.loads(chunk_path.read_text(encoding="utf-8"))
+                nested_record = chunk["directories"]["album"]["files"][0]
+                return root_record, nested_record
+
+            for record in records():
+                self.assertIn("captureDate", record)
+                self.assertNotIn("exifPath", record)
+
+            with mock.patch.dict(sys.modules, {"PIL": fake_pil}):
+                recovered = GENERATOR.generate(media, None, 480, 80, None, manifest, False, False)
+            self.assertEqual(len(opens), 2, "cached metadata repairs both sidecars without reopening sources")
+            self.assertEqual(recovered["changedDirectories"], {"", "album"})
+            GENERATOR.write_manifest(
+                media, None, manifest, recovered["changedDirectories"], recovered["metadataRecords"])
+            for record in records():
+                self.assertIn("captureDate", record)
+                self.assertIn("exifPath", record)
+
+            for sidecar in (manifest.parent / "exif.d").rglob("*.json"):
+                if sidecar.name != ".metadata-cache.json":
+                    sidecar.unlink()
+            with mock.patch.dict(sys.modules, {"PIL": fake_pil}), \
+                    mock.patch.object(GENERATOR, "atomic_json", side_effect=fail_sidecars):
+                unavailable = GENERATOR.generate(media, None, 480, 80, None, manifest, False, False)
+            self.assertEqual(len(opens), 2, "failed sidecar repair still reuses cached metadata")
+            self.assertEqual(unavailable["changedDirectories"], {"", "album"})
+            GENERATOR.write_manifest(
+                media, None, manifest, unavailable["changedDirectories"], unavailable["metadataRecords"])
+            for record in records():
+                self.assertIn("captureDate", record)
+                self.assertNotIn("exifPath", record)
+
 
 if __name__ == "__main__":
     unittest.main()

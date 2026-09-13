@@ -368,20 +368,32 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
                 try:
                     with Image.open(source) as image:
                         if needs_metadata:
-                            summary = extract_metadata(image, include_gps)
+                            try:
+                                summary = extract_metadata(image, include_gps)
+                            except Exception as error:
+                                summary = {}
+                                metadata_warnings += 1
+                                print(f"EXIF metadata unavailable for {relative}: {error}")
                             metadata_extracted += 1
                             changed_directories.add(directory_relative)
                         if needs_thumbnail:
-                            target.parent.mkdir(parents=True, exist_ok=True)
-                            image.seek(0)
-                            image.draft("RGB", (size, size))
-                            image = ImageOps.exif_transpose(image)
-                            if image.mode not in ("RGB", "RGBA"):
-                                image = image.convert("RGBA" if "transparency" in image.info else "RGB")
-                            image.thumbnail((size, size), Image.Resampling.LANCZOS)
-                            image.save(target, "WEBP", quality=quality, method=6)
-                            created += 1
-                            changed_directories.add(directory_relative)
+                            try:
+                                target.parent.mkdir(parents=True, exist_ok=True)
+                                image.seek(0)
+                                image.draft("RGB", (size, size))
+                                thumbnail_image = ImageOps.exif_transpose(image)
+                                if thumbnail_image.mode not in ("RGB", "RGBA"):
+                                    thumbnail_image = thumbnail_image.convert(
+                                        "RGBA" if "transparency" in thumbnail_image.info else "RGB")
+                                thumbnail_image.thumbnail((size, size), Image.Resampling.LANCZOS)
+                                thumbnail_image.save(target, "WEBP", quality=quality, method=6)
+                                created += 1
+                                changed_directories.add(directory_relative)
+                            except Exception as error:
+                                failed += 1
+                                retained_failures[relative] = signature
+                                changed_directories.add(directory_relative)
+                                print(f"Preview failed for {relative}: {error}")
                 except Exception as error:
                     if needs_metadata:
                         summary = {}
@@ -399,10 +411,11 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
 
             if metadata_enabled:
                 summary = summary if isinstance(summary, dict) else {}
-                retained_metadata[relative] = {"signature": signature, "metadata": summary}
                 sidecar_relative = f"exif.d/{relative}.json"
                 sidecar_path = manifest_path.parent / sidecar_relative
                 sidecar_ready = False
+                previous_sidecar_ready = cached_entry.get("sidecarReady") if isinstance(cached_entry, dict) and \
+                    isinstance(cached_entry.get("sidecarReady"), bool) else None
                 if summary:
                     expected_sidecars.add(sidecar_path.resolve())
                     if metadata_is_current and sidecar_path.is_file():
@@ -418,6 +431,11 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
                                 sidecar_path.unlink(missing_ok=True)
                             except OSError as cleanup_error:
                                 print(f"Could not remove stale EXIF sidecar {sidecar_path}: {cleanup_error}")
+                if previous_sidecar_ready is None or previous_sidecar_ready != sidecar_ready:
+                    changed_directories.add(directory_relative)
+                retained_metadata[relative] = {
+                    "signature": signature, "metadata": summary, "sidecarReady": sidecar_ready
+                }
                 metadata_records[relative] = metadata_manifest_fields(
                     summary, sidecar_relative if sidecar_ready else None
                 )

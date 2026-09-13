@@ -479,6 +479,7 @@ test('photo information formatting validates the numeric sidecar schema and keep
     assert.equal(rows[2].value, '<script>alert(1)</script>');
     assert.equal(rows[3].value, '1/125 s');
     assert.equal(rows.at(-1).value, '0.000000° N, 0.000000° E');
+    assert.equal(rows.at(-1).href, 'https://www.google.com/maps/search/?api=1&query=0%2C0');
     const known = JSON.parse(vm.runInContext(`JSON.stringify(normalizeExifSummary({
         captureDateDetails: { raw: '2026:09:12 14:30:45', utcAssumed: false, timezoneOffset: '-04:00' },
         cameraMake: 'ACME', cameraModel: 'Camera X', exposureTime: -1, iso: 'ISO 200',
@@ -487,6 +488,40 @@ test('photo information formatting validates the numeric sidecar schema and keep
     assert.equal(known[0].value, '2026-09-12 14:30:45 -04:00');
     assert.equal(known.find(row => row.label === 'Camera').value, 'ACME Camera X');
     assert.equal(known.some(row => ['Exposure', 'ISO', 'Location'].includes(row.label)), false);
+});
+
+test('photo information renders validated GPS as an isolated accessible Google Maps link', async () => {
+    const app = await boot();
+    const rows = vm.runInContext(`normalizeExifSummary({
+        gps: { latitude: 37.477706123, longitude: -77.623847456 }
+    }, true)`, app.context);
+    vm.runInContext('renderPhotoInfoRows(normalizeExifSummary({ gps: { latitude: 37.477706123, longitude: -77.623847456 } }, true))', app.context);
+    const list = app.get('photo-info-content').children[0];
+    const link = list.children[1].children[0];
+    assert.equal(rows[0].href, 'https://www.google.com/maps/search/?api=1&query=37.477706123%2C-77.623847456');
+    assert.equal(link.textContent, '37.477706° N, 77.623847° W');
+    assert.equal(link.href, rows[0].href);
+    assert.equal(link.attributes.title, 'Open location on Google Maps');
+    assert.equal(link.attributes['aria-label'], 'Open location on Google Maps');
+    assert.equal(link.attributes.target, '_blank');
+    assert.equal(link.attributes.rel, 'noopener noreferrer');
+    assert.equal(app.requests.some(url => String(url).startsWith('https://www.google.com/maps/')), false,
+        'rendering the link does not request Google Maps');
+    app.get('photo-info-panel').hidden = false;
+    const originalIndex = vm.runInContext('currentIndex', app.context);
+    let stopped = false;
+    link.listeners.click({ stopPropagation() { stopped = true; } });
+    assert.equal(stopped, true);
+    assert.equal(vm.runInContext('currentIndex', app.context), originalIndex, 'link interaction does not navigate the viewer');
+    assert.equal(app.get('photo-info-panel').hidden, false, 'link interaction does not close the panel');
+    assert.equal(app.state().slideshowPlaying, false, 'link interaction does not toggle playback');
+
+    for (const expression of [
+        "normalizeExifSummary({ gps: { latitude: 0, longitude: 0 } }, false)",
+        "normalizeExifSummary({ gps: { latitude: 91, longitude: 0 } }, true)",
+        "normalizeExifSummary({ gps: { latitude: 0, longitude: Infinity } }, true)",
+        "normalizeExifSummary({ gps: { latitude: '0', longitude: 0 } }, true)"
+    ]) assert.equal(vm.runInContext(expression, app.context).some(row => row.label === 'Location'), false);
 });
 
 test('photo information is lazy, cached, retryable, and invalidated by manifest refresh', async () => {
@@ -568,7 +603,7 @@ test('photo information cache is bounded and availability follows media, setting
     assert.equal(app.get('btn-photo-info').hidden, true);
 });
 
-test('photo information suspends slideshow intent and stale loads cannot replace another image', async () => {
+test('photo information suspends slideshow and navigation aborts stale information loads', async () => {
     const app = await boot();
     vm.runInContext(`
         mediaFiles.push('https://example.test/frame/photos/next.jpg');
@@ -582,13 +617,72 @@ test('photo information suspends slideshow intent and stale loads cannot replace
     vm.runInContext('showMedia(1)', app.context);
     assert.equal(app.context.requestSignal.aborted, true);
     assert.equal(app.get('photo-info-panel').hidden, true);
-    vm.runInContext(`currentIndex = 0; imageReady = true; updatePhotoInfoAvailability(); openPhotoInfo(); setSlideshowPlaying(false); closePhotoInfo()` , app.context);
-    assert.equal(app.state().slideshowPlaying, false);
     assert.equal(vm.runInContext('slideshowAnimationFrame', app.context), null);
-    vm.runInContext(`showExifPanel = true; controlsEnabled = true; currentIndex = 0; imageReady = true;
-        persistentExifUrls.set(mediaFiles[0], 'https://example.test/one.json');
-        resilience.request = async () => ({ cameraModel: 'Camera' }); setSlideshowPlaying(true); openPhotoInfo(); closePhotoInfo()`, app.context);
+});
+
+test('photo information close follows the latest slideshow playback intent', async () => {
+    const app = await boot();
+    vm.runInContext(`persistentExifUrls.set(mediaFiles[0], 'https://example.test/one.json');
+        resilience.request = async () => ({ cameraModel: 'Camera' });
+        enterFullScreenViewer(0); imageReady = true;`, app.context);
+
+    vm.runInContext('setSlideshowPlaying(true); openPhotoInfo()', app.context);
+    assert.equal(vm.runInContext('slideshowAnimationFrame', app.context), null);
+    let frames = app.animationFrames;
+    vm.runInContext('closePhotoInfo()', app.context);
     assert.notEqual(vm.runInContext('slideshowAnimationFrame', app.context), null);
+    assert.equal(app.animationFrames, frames + 1, 'playing close schedules exactly one fresh animation');
+    assert.equal(app.get('progress-bar').style.width, '0%');
+
+    vm.runInContext('setSlideshowPlaying(false); openPhotoInfo(); setSlideshowPlaying(true)', app.context);
+    assert.equal(vm.runInContext('slideshowAnimationFrame', app.context), null);
+    vm.runInContext('closePhotoInfo()', app.context);
+    assert.notEqual(vm.runInContext('slideshowAnimationFrame', app.context), null, 'Play while open starts after close');
+
+    vm.runInContext('setSlideshowPlaying(true); openPhotoInfo(); setSlideshowPlaying(false); closePhotoInfo()', app.context);
+    assert.equal(app.state().slideshowPlaying, false);
+    assert.equal(vm.runInContext('slideshowAnimationFrame', app.context), null, 'Pause while open remains paused');
+
+    vm.runInContext('setSlideshowPlaying(true); openPhotoInfo(); setSlideshowPlaying(false); setSlideshowPlaying(true)', app.context);
+    assert.equal(vm.runInContext('slideshowAnimationFrame', app.context), null);
+    vm.runInContext('closePhotoInfo()', app.context);
+    assert.notEqual(vm.runInContext('slideshowAnimationFrame', app.context), null, 'latest Play intent resumes after close');
+
+    vm.runInContext('openPhotoInfo(); renderGridView()', app.context);
+    assert.equal(app.get('photo-info-panel').hidden, true);
+    assert.equal(vm.runInContext('slideshowAnimationFrame', app.context), null, 'view exit does not restart a stale timer');
+});
+
+test('photo information stays open and refreshes for arrow-key and arrow-button browsing', async () => {
+    const app = await boot();
+    vm.runInContext(`mediaFiles.push('https://example.test/frame/photos/second.jpg');
+        persistentExifUrls.set(mediaFiles[0], 'https://example.test/one.json');
+        persistentExifUrls.set(mediaFiles[1], 'https://example.test/two.json');
+        resilience.request = async url => ({ cameraModel: url.endsWith('one.json') ? 'First' : 'Second' });
+        enterFullScreenViewer(0); imageReady = true; openPhotoInfo();`, app.context);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(app.get('photo-info-content').children[0].children[1].textContent, 'First');
+
+    app.windowListeners.keydown({ key: 'ArrowRight', target: app.get('gallery-image'), preventDefault() {} });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(app.get('photo-info-panel').hidden, false);
+    assert.equal(vm.runInContext('currentIndex', app.context), 1);
+    assert.equal(vm.runInContext('exifPanelFile', app.context), 'https://example.test/frame/photos/second.jpg');
+    assert.equal(app.get('photo-info-content').children[0].children[1].textContent, 'Second');
+
+    app.get('nav-left').listeners.click();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(app.get('photo-info-panel').hidden, false);
+    assert.equal(vm.runInContext('currentIndex', app.context), 0);
+    assert.equal(app.get('photo-info-content').children[0].children[1].textContent, 'First');
+
+    vm.runInContext("persistentExifUrls.delete(mediaFiles[1])", app.context);
+    app.get('nav-right').listeners.click();
+    assert.equal(app.get('photo-info-panel').hidden, true, 'an item without a sidecar closes the unavailable panel');
+
+    vm.runInContext(`currentIndex = 0; persistentExifUrls.set(mediaFiles[1], 'https://example.test/two.json');
+        updatePhotoInfoAvailability(); openPhotoInfo(); nextMedia()`, app.context);
+    assert.equal(app.get('photo-info-panel').hidden, true, 'non-arrow advancement keeps its existing close behavior');
 });
 
 test('HEIC thumbnail resizing caps the long edge at 480 pixels without upscaling', async () => {
@@ -1804,6 +1898,21 @@ test('failed JPEG lazily sniffs QuickTime and retries the original URL as Live P
     await app.get('gallery-image').onerror();
     assert.equal(app.get('gallery-video').src, 'https://example.test/mislabeled.jpg');
     assert.equal(vm.runInContext('reclassifiedVideoActive', app.context), true);
+});
+
+test('failed JPEG with HEIC bytes uses the HEIC viewer fallback once', async () => {
+    const app = await boot();
+    app.context.sniffContainer = async () => ({ container: 'heic', data: bmff('heic', ['mif1']) });
+    vm.runInContext(`specialCalls = 0;
+        getSpecialImageURL = async () => { specialCalls++; return 'blob:mislabeled-heic'; };
+        mediaFiles = ['https://example.test/70+1.jpg']; enterFullScreenViewer(0);`, app.context);
+    await app.get('gallery-image').onerror();
+    await Promise.resolve(); await Promise.resolve();
+    assert.equal(vm.runInContext('specialCalls', app.context), 1);
+    assert.equal(app.get('gallery-image').src, 'blob:mislabeled-heic');
+    await app.get('gallery-image').onerror();
+    assert.equal(vm.runInContext('specialCalls', app.context), 1, 'a failed conversion does not loop');
+    assert.match(app.get('media-error-title').textContent, /HEIC/);
 });
 
 test('range sniffer accepts a server that returns the whole body and preserves aborts', async () => {
