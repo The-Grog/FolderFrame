@@ -6,11 +6,12 @@
         shuffle: false, autoRefresh: true, refreshInterval: 120, tvMode: false,
         autoplay: false, rememberPreferences: true, controls: true, showFilenames: true,
         showDownloadButton: true, showCopyButton: true, showButtonLabels: false,
+        showExifPanel: true, showGps: true,
         gridDensity: 'comfortable', videoTranscodeFallback: 'auto'
     });
     const GRID_DENSITIES = ['compact', 'comfortable', 'spacious'];
     const BOOLEAN_KEYS = ['shuffle', 'autoRefresh', 'tvMode', 'autoplay', 'rememberPreferences', 'controls', 'showFilenames',
-        'showDownloadButton', 'showCopyButton', 'showButtonLabels'];
+        'showDownloadButton', 'showCopyButton', 'showButtonLabels', 'showExifPanel', 'showGps'];
     const SAVED_KEYS = ['album', 'view', 'sort', 'interval', 'imageMode', 'shuffle', 'autoRefresh', 'gridDensity'];
     const INTERVALS = [3, 5, 10, 15, 30, 60, 300, 900, 3600];
 
@@ -138,7 +139,8 @@
         const aliases = { source: 'source', album: 'album', view: 'view', sort: 'sort', sortDate: 'sortDateSource', interval: 'interval',
             imageMode: 'imageMode', shuffle: 'shuffle', autorefresh: 'autoRefresh',
             tv: 'tvMode', autoplay: 'autoplay', remember: 'rememberPreferences', controls: 'controls', showFilenames: 'showFilenames',
-            download: 'showDownloadButton', copy: 'showCopyButton', buttonLabels: 'showButtonLabels', density: 'gridDensity',
+            download: 'showDownloadButton', copy: 'showCopyButton', buttonLabels: 'showButtonLabels',
+            exif: 'showExifPanel', gps: 'showGps', density: 'gridDensity',
             videoTranscodeFallback: 'videoTranscodeFallback' };
         const layer = {};
         for (const [param, key] of Object.entries(aliases)) {

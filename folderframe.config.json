@@ -23,6 +23,8 @@
     "showFilenames": true,
     "showDownloadButton": true,
     "showCopyButton": true,
+    "showExifPanel": true,
+    "showGps": true,
     "showButtonLabels": false,
     "rememberPreferences": true,
     "gridDensity": "comfortable",

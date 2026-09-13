@@ -90,7 +90,7 @@ class ExifMetadataTests(unittest.TestCase):
         self.assertTrue(summary["captureDateDetails"]["utcAssumed"])
         self.assertEqual(summary["captureDateDetails"]["subsecond"], "25")
 
-    def test_gps_is_never_opened_by_default_and_malformed_fields_are_isolated(self):
+    def test_gps_defaults_on_opt_out_skips_ifd_and_malformed_fields_are_isolated(self):
         class BadNumber:
             def __float__(self):
                 raise ValueError("bad")
@@ -100,6 +100,10 @@ class ExifMetadataTests(unittest.TestCase):
             exif={33434: BadNumber()},
             gps={1: "N", 2: (40, 30, 0), 3: "W", 4: (73, 59, 0)},
         )
+        summary = GENERATOR.extract_metadata(FakeImage(exif))
+        self.assertAlmostEqual(summary["gps"]["latitude"], 40.5)
+        self.assertIn(GENERATOR.GPS_IFD, exif.ifd_calls)
+        exif.ifd_calls.clear()
         summary = GENERATOR.extract_metadata(FakeImage(exif), include_gps=False)
         self.assertEqual(summary["cameraMake"], "Valid Make")
         self.assertNotIn("exposureTime", summary)
@@ -108,6 +112,15 @@ class ExifMetadataTests(unittest.TestCase):
         summary = GENERATOR.extract_metadata(FakeImage(exif), include_gps=True)
         self.assertAlmostEqual(summary["gps"]["latitude"], 40.5)
         self.assertAlmostEqual(summary["gps"]["longitude"], -(73 + 59 / 60))
+
+    def test_include_and_exclude_gps_cli_options_are_mutually_exclusive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = pathlib.Path(directory) / "library.json"
+            argv = ["generate_thumbnails.py", directory, "--manifest-only", "--manifest", str(manifest),
+                    "--include-gps", "--exclude-gps"]
+            with mock.patch.object(sys, "argv", argv), self.assertRaises(SystemExit) as raised:
+                GENERATOR.main()
+            self.assertEqual(raised.exception.code, 2)
 
     def test_dimensions_alone_do_not_create_metadata(self):
         self.assertEqual(GENERATOR.extract_metadata(FakeImage(FakeExif())), {})
@@ -169,9 +182,16 @@ class ExifMetadataTests(unittest.TestCase):
                 self.assertNotIn("gps", json.loads(sidecar.read_text(encoding="utf-8")))
                 self.assertIn("captureDate", no_gps["metadataRecords"][relative])
 
+                gps_backfill = GENERATOR.generate(
+                    media, thumbs, 480, 80, manifest_path=manifest, thumbnails=True
+                )
+                self.assertEqual(len(opens), 3, "default-on GPS backfills an opt-out cache")
+                self.assertIn("gps", json.loads(sidecar.read_text(encoding="utf-8")))
+                self.assertIn("captureDate", gps_backfill["metadataRecords"][relative])
+
                 source.write_bytes(b"changed image signature")
                 GENERATOR.generate(media, thumbs, 480, 80, None, manifest, False, True)
-                self.assertEqual(len(opens), 3, "changed source signatures are extracted again")
+                self.assertEqual(len(opens), 4, "changed source signatures are extracted again")
 
                 source.unlink()
                 GENERATOR.generate(media, thumbs, 480, 80, None, manifest, False, True)

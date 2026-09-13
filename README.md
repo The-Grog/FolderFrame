@@ -172,6 +172,8 @@ and starts the embed as a controls-free slideshow including subfolders:
     "showFilenames": true,
     "showDownloadButton": true,
     "showCopyButton": true,
+    "showExifPanel": true,
+    "showGps": true,
     "showButtonLabels": false,
     "gridDensity": "comfortable",
     "rememberPreferences": true
@@ -225,6 +227,8 @@ Put settings in `defaults` for both profiles or in `index`/`embed` to override t
 | `showFilenames` | `true` | Boolean: show viewer filename and grid media captions |
 | `showDownloadButton` | `true` | Boolean: show Download for the original served media |
 | `showCopyButton` | `true` | Boolean: show Copy Image for displayed photos |
+| `showExifPanel` | `true` | Boolean: offer Photo info for images with generated sidecars |
+| `showGps` | `true` | Boolean: show valid sidecar coordinates in Photo info |
 | `showButtonLabels` | `false` | Boolean: show text beside viewer toolbar icons |
 | `rememberPreferences` | Index: `true`; embed: `false` | Boolean: read/write browser preferences |
 
@@ -256,6 +260,15 @@ Primary viewer toolbar buttons are icon-only by default. Interval, Download,
 and Copy Image are grouped under the right-side three-dot options menu. Set
 `showButtonLabels: true` or use `?buttonLabels=1` to display text on the primary
 buttons; `?buttonLabels=0` restores icons only.
+
+Photo info appears as a desktop toolbar button and as an item in the mobile
+three-dot menu. It is available only for an image whose published manifest
+record includes an `exifPath`. The sidecar is fetched only when the panel opens,
+not while browsing or loading thumbnails. Opening the panel suspends automatic
+slideshow advancement; closing it resumes only when playback was previously
+active and was not paused meanwhile. Set `showExifPanel: false` or `?exif=0`
+to hide the action. Set `showGps: false` or `?gps=0` to hide Location without
+removing coordinates from existing sidecars.
 
 An iframe uses the embed profile only when its URL includes `?profile=embed`.
 For example, `?profile=embed&controls=0&autoplay=1&view=all`.
@@ -627,11 +640,19 @@ and repair missing sidecars without reopening unchanged originals.
 without Pillow it reports that EXIF is unavailable and still produces an
 mtime-only manifest.
 
-GPS is never decoded by default. Pass `--include-gps` explicitly to include
-coordinates in generated sidecars. Returning to the default removes generated
-GPS metadata on the next complete run; it does not strip or modify EXIF in the
-original media. The client currently validates and records sidecar URLs for a
-future information panel but does not fetch sidecars yet.
+GPS extraction is enabled by default. Existing libraries need one new scan to
+backfill coordinates. Pass `--exclude-gps` to skip the GPS sub-IFD and remove
+previously generated GPS fields during a successful scan; `--include-gps`
+remains an explicit compatibility alias for the default. Changing this policy
+invalidates the private metadata cache but does not regenerate thumbnails.
+Generator options affect only FolderFrame-owned sidecars and never strip or
+modify EXIF in original media. The viewer's `showGps`/`?gps=` option only hides
+Location and is not a metadata-removal or access-control mechanism.
+
+Photo info displays only validated fields from the sidecar. Camera capture time
+is shown as the recorded wall-clock value. A valid recorded offset is retained;
+offset-free EXIF is labeled **Timezone unknown** rather than being converted to
+the browser timezone. No maps, reverse geocoding, or external requests are made.
 
 Later runs stat known directories and only re-list subtrees whose directory
 mtime or generated metadata changed. The manifest and its adjacent `library.d/`
@@ -934,6 +955,12 @@ Supported options:
 
     buttonLabels=1 or buttonLabels=0
         Show text labels or use icon-only viewer buttons.
+
+    exif=1 or exif=0
+        Show or hide the Photo info action.
+
+    gps=1 or gps=0
+        Show or hide Location in Photo info; sidecar extraction is unchanged.
 
     tv=1 or tv=0
         Enable TV/photo-frame behavior:

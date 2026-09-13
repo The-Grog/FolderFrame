@@ -23,7 +23,7 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ## Completed
 
-- [x] **Capture-date sorting and EXIF sidecars** — Newest/Oldest can prefer EXIF capture dates from the persistent manifest with mtime fallback for videos and missing metadata. The generator performs incremental, signature-cached EXIF extraction, writes allowlisted sidecars with GPS off by default, and the client records safe sidecar URLs without fetching them; an EXIF information panel remains future work.
+- [x] **Capture-date sorting, EXIF sidecars, and Photo info** — Newest/Oldest can prefer EXIF capture dates with mtime fallback. The generator performs incremental, signature-cached EXIF extraction with GPS on by default and an explicit opt-out. Desktop and mobile viewers lazily load validated sidecars into a responsive information panel without delaying browsing.
 - [x] **Cached thumbnail failures and accurate worker status** — Thumbnail failures are persisted by relative path, size, and modification time, unchanged failures are skipped, and changed sources retry automatically. Preview failures now produce a successful scan-with-warnings result while scanner or manifest failures remain failures. Structured worker status and regression coverage are included.
 - [x] **Automatic Docker/Unraid thumbnails validated** — The scheduled thumbnail and manifest worker, persistent appdata, generated previews, read-only originals, manifest refresh, upgrades, and recovery were exercised on the live Unraid deployment.
 - [x] **Browser-style Shuffle history** — Shuffle keeps a rolling ten-item history with a cursor, so Previous and Next replay already viewed media before selecting another random item. Stale entries are pruned and error skipping follows the same navigation path.
@@ -78,5 +78,5 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 - User tested and approved the swipe, filename visibility, and grid-return update.
 - User tested and approved the mobile double-tap and pinch-flicker fixes.
-- Current regression suite: 143 automated app/settings/cache and resilience tests, plus focused Python thumbnail-worker, failure-cache, and EXIF metadata tests. Run both tests/configuration.test.cjs and tests/resilience.test.cjs.
+- Current regression suite: 149 automated app/settings/cache and resilience tests, plus focused Python thumbnail-worker, failure-cache, and EXIF metadata tests. Run both tests/configuration.test.cjs and tests/resilience.test.cjs.
 - User visually tested and approved the long-filename desktop layout. Node tests do not validate CSS layout.

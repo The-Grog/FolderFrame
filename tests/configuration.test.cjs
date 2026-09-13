@@ -462,6 +462,135 @@ test('HEIC grid uses generated thumbnails without conversion and cleans up offsc
     assert.equal(observer.disconnected, true);
 });
 
+test('photo information formatting validates the numeric sidecar schema and keeps strings inert', async () => {
+    const app = await boot();
+    const rows = JSON.parse(vm.runInContext(`JSON.stringify(normalizeExifSummary({
+        captureDate: 1789223445250,
+        captureDateDetails: { raw: '2026:09:12 14:30:45', utcAssumed: true, subsecond: '25' },
+        cameraMake: '<ACME>', cameraModel: '<ACME> Model X', lensModel: '<script>alert(1)</script>',
+        exposureTime: 0.008, fNumber: 1.8, iso: 200, focalLength: 24,
+        imageWidth: 4032, imageHeight: 3024, orientation: 6,
+        gps: { latitude: 0, longitude: 0 }
+    }, true))`, app.context));
+    assert.deepEqual(rows.map(row => row.label), ['Captured', 'Camera', 'Lens', 'Exposure', 'Aperture', 'ISO', 'Focal length', 'Dimensions', 'Orientation', 'Location']);
+    assert.equal(rows[0].value, '2026-09-12 14:30:45.25');
+    assert.equal(rows[0].secondary, 'Timezone unknown');
+    assert.equal(rows[1].value, '<ACME> Model X');
+    assert.equal(rows[2].value, '<script>alert(1)</script>');
+    assert.equal(rows[3].value, '1/125 s');
+    assert.equal(rows.at(-1).value, '0.000000° N, 0.000000° E');
+    const known = JSON.parse(vm.runInContext(`JSON.stringify(normalizeExifSummary({
+        captureDateDetails: { raw: '2026:09:12 14:30:45', utcAssumed: false, timezoneOffset: '-04:00' },
+        cameraMake: 'ACME', cameraModel: 'Camera X', exposureTime: -1, iso: 'ISO 200',
+        gps: { latitude: 91, longitude: 10 }
+    }, true))`, app.context));
+    assert.equal(known[0].value, '2026-09-12 14:30:45 -04:00');
+    assert.equal(known.find(row => row.label === 'Camera').value, 'ACME Camera X');
+    assert.equal(known.some(row => ['Exposure', 'ISO', 'Location'].includes(row.label)), false);
+});
+
+test('photo information is lazy, cached, retryable, and invalidated by manifest refresh', async () => {
+    const app = await boot();
+    vm.runInContext(`
+        persistentExifUrls.set(mediaFiles[0], 'https://example.test/frame/exif.d/photo.jpg.json');
+        globalThis.sidecarCalls = 0;
+        resilience.request = async () => { sidecarCalls++; return { cameraMake: '<b>ACME</b>', imageWidth: 10, imageHeight: 20 }; };
+        enterFullScreenViewer(0);
+    `, app.context);
+    assert.equal(app.context.sidecarCalls, 0);
+    assert.equal(app.get('btn-photo-info').hidden, false);
+    app.get('btn-photo-info').listeners.click();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(app.context.sidecarCalls, 1);
+    assert.equal(app.get('photo-info-panel').hidden, false);
+    const list = app.get('photo-info-content').children[0];
+    assert.equal(list.children[1].textContent, '<b>ACME</b>');
+    assert.equal(list.children[1].innerHTML, '');
+    app.get('btn-close-photo-info').listeners.click();
+    app.get('btn-photo-info').listeners.click();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(app.context.sidecarCalls, 1, 'successful summaries use the bounded memory cache');
+    vm.runInContext('resetPersistentManifest()', app.context);
+    assert.equal(app.get('photo-info-panel').hidden, true);
+    assert.equal(vm.runInContext('exifSummaryCache.size', app.context), 0);
+
+    vm.runInContext(`
+        persistentExifUrls.set(mediaFiles[0], 'https://example.test/frame/exif.d/photo.jpg.json');
+        resilience.request = async () => { sidecarCalls++; throw new Error('temporary'); };
+        updatePhotoInfoAvailability(); openPhotoInfo();
+    `, app.context);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(app.get('photo-info-content').children[1].textContent, 'Retry');
+    vm.runInContext("resilience.request = async () => { sidecarCalls++; return { cameraModel: 'Recovered' }; }", app.context);
+    app.get('photo-info-content').children[1].listeners.click();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(app.get('photo-info-content').children[0].children[1].textContent, 'Recovered');
+});
+
+test('photo information moves into the mobile menu and Escape closes one surface at a time', async () => {
+    const app = await boot({ mobile: true });
+    vm.runInContext(`persistentExifUrls.set(mediaFiles[0], 'https://example.test/exif.json');
+        resilience.request = async () => ({ cameraModel: 'Phone' }); enterFullScreenViewer(0)`, app.context);
+    assert.equal(app.get('btn-photo-info').parentElement, app.get('photo-info-menu-slot'));
+    vm.runInContext("window.matchMedia = () => ({ matches: false }); updatePhotoInfoPlacement()", app.context);
+    assert.equal(app.get('btn-photo-info').parentElement, app.get('photo-info-desktop-slot'));
+    vm.runInContext("window.matchMedia = () => ({ matches: true }); updatePhotoInfoPlacement()", app.context);
+    app.get('btn-viewer-options').listeners.click();
+    app.get('btn-photo-info').listeners.click();
+    assert.equal(app.get('viewer-options-menu').hidden, true);
+    assert.equal(app.get('photo-info-panel').hidden, false);
+    app.get('btn-viewer-options').listeners.click();
+    app.windowListeners.keydown({ key: 'Escape', target: app.get('btn-viewer-options'), preventDefault() {} });
+    assert.equal(app.get('viewer-options-menu').hidden, true);
+    assert.equal(app.get('photo-info-panel').hidden, false);
+    app.windowListeners.keydown({ key: 'Escape', target: app.get('btn-viewer-options'), preventDefault() {} });
+    assert.equal(app.get('photo-info-panel').hidden, true);
+    assert.equal(app.get('btn-viewer-options').focused, true);
+    assert.equal(app.state().isGridViewActive, false);
+});
+
+test('photo information cache is bounded and availability follows media, settings, TV, and controls', async () => {
+    const app = await boot();
+    vm.runInContext("for (let i = 0; i < 45; i++) cacheExifSummary('sidecar-' + i, { cameraModel: String(i) })", app.context);
+    assert.equal(vm.runInContext('exifSummaryCache.size', app.context), 40);
+    assert.equal(vm.runInContext("exifSummaryCache.has('sidecar-0')" , app.context), false);
+    vm.runInContext(`persistentExifUrls.set(mediaFiles[0], 'https://example.test/exif.json'); enterFullScreenViewer(0)`, app.context);
+    assert.equal(app.get('btn-photo-info').hidden, false);
+    vm.runInContext('tvModeEnabled = true; updatePhotoInfoAvailability()', app.context);
+    assert.equal(app.get('btn-photo-info').hidden, true);
+    vm.runInContext('tvModeEnabled = false; controlsEnabled = false; updatePhotoInfoAvailability()', app.context);
+    assert.equal(app.get('btn-photo-info').hidden, true);
+    vm.runInContext("controlsEnabled = true; showExifPanel = false; updatePhotoInfoAvailability()", app.context);
+    assert.equal(app.get('btn-photo-info').hidden, true);
+    vm.runInContext('showExifPanel = true; persistentExifUrls.clear(); updatePhotoInfoAvailability()', app.context);
+    assert.equal(app.get('btn-photo-info').hidden, true, 'installations without sidecars do not show a dead action');
+    vm.runInContext("mediaFiles = ['https://example.test/video.mp4']; persistentExifUrls.set(mediaFiles[0], 'https://example.test/video.json'); currentIndex = 0; updatePhotoInfoAvailability()", app.context);
+    assert.equal(app.get('btn-photo-info').hidden, true);
+});
+
+test('photo information suspends slideshow intent and stale loads cannot replace another image', async () => {
+    const app = await boot();
+    vm.runInContext(`
+        mediaFiles.push('https://example.test/frame/photos/next.jpg');
+        persistentExifUrls.set(mediaFiles[0], 'https://example.test/one.json');
+        persistentExifUrls.set(mediaFiles[1], 'https://example.test/two.json');
+        globalThis.requestSignal = null;
+        resilience.request = (_url, options) => { requestSignal = options.signal; return new Promise(() => {}); };
+        enterFullScreenViewer(0); imageReady = true; setSlideshowPlaying(true); openPhotoInfo();
+    `, app.context);
+    assert.equal(vm.runInContext('slideshowAnimationFrame', app.context), null);
+    vm.runInContext('showMedia(1)', app.context);
+    assert.equal(app.context.requestSignal.aborted, true);
+    assert.equal(app.get('photo-info-panel').hidden, true);
+    vm.runInContext(`currentIndex = 0; imageReady = true; updatePhotoInfoAvailability(); openPhotoInfo(); setSlideshowPlaying(false); closePhotoInfo()` , app.context);
+    assert.equal(app.state().slideshowPlaying, false);
+    assert.equal(vm.runInContext('slideshowAnimationFrame', app.context), null);
+    vm.runInContext(`showExifPanel = true; controlsEnabled = true; currentIndex = 0; imageReady = true;
+        persistentExifUrls.set(mediaFiles[0], 'https://example.test/one.json');
+        resilience.request = async () => ({ cameraModel: 'Camera' }); setSlideshowPlaying(true); openPhotoInfo(); closePhotoInfo()`, app.context);
+    assert.notEqual(vm.runInContext('slideshowAnimationFrame', app.context), null);
+});
+
 test('HEIC thumbnail resizing caps the long edge at 480 pixels without upscaling', async () => {
     const app = await boot();
     const revoked = [];
@@ -1880,6 +2009,22 @@ test('automatic slideshow transitions preserve hidden controls until interaction
     }
 });
 
+test('photo information and GPS display support defaults, profiles, URL overrides, and validation', () => {
+    const config = normalize({ defaults: { showExifPanel: false }, embed: { showExifPanel: true, showGps: false } });
+    const index = api.resolveSettings(config, '').settings;
+    assert.equal(index.showExifPanel, false);
+    assert.equal(index.showGps, true);
+    const embed = api.resolveSettings(config, '?profile=embed').settings;
+    assert.equal(embed.showExifPanel, true);
+    assert.equal(embed.showGps, false);
+    const overridden = api.resolveSettings(config, '?profile=embed&exif=0&gps=1').settings;
+    assert.equal(overridden.showExifPanel, false);
+    assert.equal(overridden.showGps, true);
+    assert.ok(api.resolveSettings(config, '?exif=yes&gps=maybe').warnings.length >= 2);
+    assert.throws(() => normalize({ defaults: { showExifPanel: 'yes' } }), /showExifPanel/);
+    assert.throws(() => normalize({ defaults: { showGps: 1 } }), /showGps/);
+});
+
 test('shuffle navigation replays browser-style history before choosing another random item', async () => {
     const app = await boot();
     vm.runInContext(`
@@ -2456,7 +2601,7 @@ test('slideshow skips errors after a bounded delay and Pause cancels the skip', 
 });
 
 async function boot({ search = '', config = shipped, configFailure = false, storageBlocked = false,
-    empty = false, initialStorage = new Map(), fetchHandler = null } = {}) {
+    empty = false, initialStorage = new Map(), fetchHandler = null, mobile = false } = {}) {
     class Element {
         constructor() { this.style = {}; this.children = []; this.listeners = {}; this.dataset = {}; this.hidden = false; this._innerHTML = ''; this.classList = { add() {}, remove() {}, toggle() {} }; }
         addEventListener(name, fn) { this.listeners[name] = fn; }
@@ -2473,7 +2618,8 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
                 child.children = [];
                 return child;
             }
-            child.parentNode = this; this.children.push(child); return child;
+            if (child.parentNode) child.parentNode.children = child.parentNode.children.filter(item => item !== child);
+            child.parentNode = this; child.parentElement = this; this.children.push(child); return child;
         }
         insertBefore(child, reference) {
             if (!reference) return this.appendChild(child);
@@ -2508,12 +2654,13 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
         }
         remove() {
             if (this.parentNode) this.parentNode.children = this.parentNode.children.filter(child => child !== this);
-            this.parentNode = null;
+            this.parentNode = null; this.parentElement = null;
         }
         set innerHTML(value) { this._innerHTML = value; if (value === '') this.children = []; }
         get innerHTML() { return this._innerHTML; }
         pause() {}
         play() { return Promise.resolve(); }
+        focus() { this.focused = true; }
     }
     const elements = new Map();
     const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
@@ -2531,7 +2678,8 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
         ClipboardItem: class { constructor(items) { this.items = items; } },
         navigator: { clipboard: { writeText: async () => {}, write: async () => {} } },
         console: { warn(...items) { warnings.push(items.map(String).join(' ')); }, info() {}, log() {}, error() {} },
-        window: { FolderFrameSettings: api, isSecureContext: true, addEventListener(name, fn) { listeners[name] = fn; },
+        window: { FolderFrameSettings: api, isSecureContext: true, innerWidth: mobile ? 480 : 1280,
+            matchMedia() { return { matches: mobile }; }, addEventListener(name, fn) { listeners[name] = fn; },
             history: { state: null, pushState(state, title, url) { this.state = state; historyCalls.push.push(String(url)); },
                 replaceState(state, title, url) { this.state = state; historyCalls.replace.push(String(url)); } } },
         document: { getElementById: get, createElement: tag => Object.assign(new Element(), { tagName: String(tag).toUpperCase() }), head: new Element(),

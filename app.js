@@ -75,6 +75,8 @@ let rememberPreferences = true;
 let controlsEnabled = true;
 let showDownloadButton = true;
 let showCopyButton = true;
+let showExifPanel = true;
+let showGps = true;
 let videoTranscodeFallback = 'auto';
 let videoCapabilitiesPromise = null;
 
@@ -454,12 +456,15 @@ function cacheBustedManifestUrl(url, token) {
 }
 
 function resetPersistentManifest({ cacheBust = false } = {}) {
+    clearExifSummaryCache();
+    closePhotoInfo({ resume: false });
     persistentManifestState = usesPublishedManifest()
         ? { key: activeSource.manifestUrl, promise: null, index: null, unavailable: false, error: null,
             cacheBustToken: cacheBust ? `${Date.now()}-${Math.random().toString(36).slice(2)}` : null, chunks: new Map() }
         : null;
     persistentThumbnailUrls.clear();
     persistentExifUrls.clear();
+    updatePhotoInfoAvailability();
 }
 
 function safeManifestPath(value, { allowEmpty = false } = {}) {
@@ -762,6 +767,13 @@ let mediaLoadId = 0;
 let mediaFailed = false;
 let imageReady = false;
 let reclassifiedVideoActive = false;
+const EXIF_REQUEST_TIMEOUT = 8000;
+const EXIF_CACHE_LIMIT = 40;
+const exifSummaryCache = new Map();
+let exifRequest = null;
+let exifPanelFile = null;
+let exifPanelPlayback = null;
+let slideshowIntentVersion = 0;
 
 // Cache only object URLs we create ourselves. Normal HTTP URLs are never revoked.
 let specialImagePool = null;
@@ -781,6 +793,12 @@ const btnCopyLink = $('btn-copy-link');
 const btnCopyFilename = $('btn-copy-filename');
 const btnViewerOptions = $('btn-viewer-options');
 const viewerOptionsMenu = $('viewer-options-menu');
+const btnPhotoInfo = $('btn-photo-info');
+const photoInfoDesktopSlot = $('photo-info-desktop-slot');
+const photoInfoMenuSlot = $('photo-info-menu-slot');
+const photoInfoPanel = $('photo-info-panel');
+const photoInfoContent = $('photo-info-content');
+const btnClosePhotoInfo = $('btn-close-photo-info');
 const imageModeText = $('image-mode-text');
 const btnPlayPause = $('btn-play-pause');
 const playIcon = btnPlayPause.querySelector('.play-icon');
@@ -910,6 +928,8 @@ async function loadConfiguration() {
     controlsEnabled = startupSettings.controls;
     showDownloadButton = startupSettings.showDownloadButton;
     showCopyButton = startupSettings.showCopyButton;
+    showExifPanel = startupSettings.showExifPanel;
+    showGps = startupSettings.showGps;
     videoTranscodeFallback = startupSettings.videoTranscodeFallback;
     btnDownload.hidden = !showDownloadButton;
     btnCopyLink.hidden = !showCopyButton || !imageClipboardAvailable();
@@ -997,6 +1017,7 @@ function updateControlStates() {
     btnTvMode.classList.remove('is-active');
     btnTvMode.setAttribute('aria-pressed', String(tvModeEnabled));
     btnTvMode.querySelector('.button-label').textContent = tvModeEnabled ? 'TV Mode On' : 'TV Mode';
+    updatePhotoInfoAvailability();
     syncPlayButton();
 }
 
@@ -1019,6 +1040,7 @@ function updateMediaActions(filepath, filename, forceVideo = false) {
     btnCopyLink.title = !copyable ? 'Copy Image is unavailable for video'
         : !clipboardAvailable ? 'Copy Image requires HTTPS or a trusted local context'
         : 'Copy displayed image after it loads';
+    updatePhotoInfoAvailability(forceVideo);
 }
 
 function updateGalleryHeaderLayout() {
@@ -1051,6 +1073,258 @@ function setViewerOptionsOpen(open) {
     const expanded = Boolean(open);
     viewerOptionsMenu.hidden = !expanded;
     btnViewerOptions.setAttribute('aria-expanded', String(expanded));
+}
+
+function mobileViewerControls() {
+    return window.matchMedia?.('(max-width: 900px)').matches ?? (window.innerWidth || 1024) <= 900;
+}
+
+function positionPhotoInfoPanel() {
+    if (!photoInfoPanel || photoInfoPanel.hidden) return;
+    const header = $('overlay-header');
+    const bottom = header?.getBoundingClientRect?.().bottom;
+    if (Number.isFinite(bottom)) {
+        const top = Math.max(8, Math.ceil(bottom + 7));
+        photoInfoPanel.style.top = `${top}px`;
+        photoInfoPanel.style.maxHeight = `calc(100dvh - ${top + 12}px - env(safe-area-inset-bottom))`;
+    }
+}
+
+function updatePhotoInfoPlacement() {
+    if (!btnPhotoInfo || !photoInfoDesktopSlot || !photoInfoMenuSlot) return;
+    const mobile = mobileViewerControls();
+    const slot = mobile ? photoInfoMenuSlot : photoInfoDesktopSlot;
+    if (btnPhotoInfo.parentElement !== slot) slot.appendChild(btnPhotoInfo);
+    if (mobile) btnPhotoInfo.setAttribute('role', 'menuitem');
+    else btnPhotoInfo.removeAttribute('role');
+    positionPhotoInfoPanel();
+}
+
+function currentExifSidecar() {
+    const file = mediaFiles[currentIndex];
+    return file ? persistentExifUrls.get(file) || null : null;
+}
+
+function photoInfoEligible(forceVideo = reclassifiedVideoActive) {
+    const file = mediaFiles[currentIndex];
+    return Boolean(showExifPanel && controlsEnabled && !tvModeEnabled && !isGridViewActive && file &&
+        isImageFile(file) && !forceVideo && currentExifSidecar());
+}
+
+function updatePhotoInfoAvailability(forceVideo = reclassifiedVideoActive) {
+    if (!btnPhotoInfo) return;
+    updatePhotoInfoPlacement();
+    const eligible = photoInfoEligible(forceVideo);
+    btnPhotoInfo.hidden = !eligible;
+    if (!eligible && !photoInfoPanel.hidden) closePhotoInfo({ resume: false });
+}
+
+function clearExifSummaryCache() {
+    exifRequest?.controller.abort();
+    exifRequest = null;
+    exifSummaryCache.clear();
+}
+
+function cacheExifSummary(url, summary) {
+    exifSummaryCache.delete(url);
+    exifSummaryCache.set(url, summary);
+    while (exifSummaryCache.size > EXIF_CACHE_LIMIT) exifSummaryCache.delete(exifSummaryCache.keys().next().value);
+}
+
+function exifString(value, limit = 200) {
+    if (typeof value !== 'string') return null;
+    const cleaned = value.replace(/\0/g, '').trim();
+    return cleaned ? cleaned.slice(0, limit) : null;
+}
+
+function exifNumber(value, min, max, { integer = false, includeMin = false } = {}) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value > max || (includeMin ? value < min : value <= min)) return null;
+    if (integer && !Number.isInteger(value)) return null;
+    return value;
+}
+
+function tidyNumber(value, digits = 2) {
+    return Number(value.toFixed(digits)).toString();
+}
+
+function formatExposure(value) {
+    const seconds = exifNumber(value, 0, 86400);
+    if (seconds === null) return null;
+    if (seconds < 1) {
+        const reciprocal = 1 / seconds;
+        if (reciprocal >= 2) {
+            const rounded = reciprocal >= 10 ? Math.round(reciprocal) : Math.round(reciprocal * 10) / 10;
+            if (Math.abs(rounded - reciprocal) / reciprocal <= .025) return `1/${tidyNumber(rounded, 1)} s`;
+        }
+    }
+    return `${tidyNumber(seconds, seconds < .01 ? 4 : seconds < 1 ? 3 : 2)} s`;
+}
+
+function validOffset(value) {
+    const offset = exifString(value, 6);
+    const match = offset?.match(/^([+-])(\d{2}):(\d{2})$/);
+    if (!match || Number(match[2]) > 23 || Number(match[3]) > 59) return null;
+    return offset;
+}
+
+function recordedCaptureTime(summary) {
+    const details = summary.captureDateDetails && typeof summary.captureDateDetails === 'object' && !Array.isArray(summary.captureDateDetails)
+        ? summary.captureDateDetails : {};
+    const raw = exifString(details.raw, 64);
+    const match = raw?.match(/^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/);
+    let value = null;
+    if (match) {
+        const numbers = match.slice(1).map(Number);
+        const probe = new Date(Date.UTC(numbers[0], numbers[1] - 1, numbers[2], numbers[3], numbers[4], numbers[5]));
+        const valid = probe.getUTCFullYear() === numbers[0] && probe.getUTCMonth() === numbers[1] - 1 &&
+            probe.getUTCDate() === numbers[2] && probe.getUTCHours() === numbers[3] &&
+            probe.getUTCMinutes() === numbers[4] && probe.getUTCSeconds() === numbers[5];
+        if (valid) value = `${match[1]}-${match[2]}-${match[3]} ${match[4]}:${match[5]}:${match[6]}`;
+    }
+    const subsecond = exifString(details.subsecond, 12);
+    if (value && subsecond && /^\d+$/.test(subsecond)) value += `.${subsecond}`;
+    const offset = validOffset(details.timezoneOffset) || validOffset(details.timezoneOffsetRaw);
+    if (value) {
+        if (details.utcAssumed === true) return { value, secondary: 'Timezone unknown' };
+        return { value: offset ? `${value} ${offset}` : value };
+    }
+    const captureDate = exifNumber(summary.captureDate, -8640000000000000, 8640000000000000, { includeMin: true });
+    if (captureDate === null) return null;
+    const date = new Date(captureDate);
+    if (!Number.isFinite(date.getTime())) return null;
+    return { value: date.toISOString().replace('T', ' ').replace(/\.000Z$/, ' UTC'), secondary: 'Recorded timezone unavailable' };
+}
+
+function normalizeExifSummary(payload, includeGps = showGps) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Invalid photo information');
+    const rows = [];
+    const add = (label, value, secondary = null) => { if (value) rows.push({ label, value, secondary }); };
+    const captured = recordedCaptureTime(payload);
+    if (captured) add('Captured', captured.value, captured.secondary);
+    const make = exifString(payload.cameraMake);
+    const model = exifString(payload.cameraModel);
+    let camera = model || make;
+    if (make && model && !model.toLocaleLowerCase().startsWith(make.toLocaleLowerCase())) camera = `${make} ${model}`;
+    add('Camera', camera);
+    add('Lens', exifString(payload.lensModel));
+    add('Exposure', formatExposure(payload.exposureTime));
+    const aperture = exifNumber(payload.fNumber, 0, 128);
+    add('Aperture', aperture === null ? null : `ƒ/${tidyNumber(aperture, 2)}`);
+    const iso = exifNumber(payload.iso, 0, 10000000, { integer: true });
+    add('ISO', iso === null ? null : String(iso));
+    const focal = exifNumber(payload.focalLength, 0, 100000);
+    add('Focal length', focal === null ? null : `${tidyNumber(focal, 2)} mm`);
+    const width = exifNumber(payload.imageWidth, 0, 1000000, { integer: true });
+    const height = exifNumber(payload.imageHeight, 0, 1000000, { integer: true });
+    add('Dimensions', width !== null && height !== null ? `${width} × ${height}` : null);
+    const orientations = { 2:'Mirrored horizontally', 3:'Rotated 180°', 4:'Mirrored vertically',
+        5:'Mirrored horizontally and rotated 270°', 6:'Rotated 90°',
+        7:'Mirrored horizontally and rotated 90°', 8:'Rotated 270°' };
+    const orientation = exifNumber(payload.orientation, 1, 8, { integer: true, includeMin: true });
+    add('Orientation', orientation === null || orientation === 1 ? null : orientations[orientation]);
+    if (includeGps && payload.gps && typeof payload.gps === 'object' && !Array.isArray(payload.gps)) {
+        const latitude = exifNumber(payload.gps.latitude, -90, 90, { includeMin: true });
+        const longitude = exifNumber(payload.gps.longitude, -180, 180, { includeMin: true });
+        if (latitude !== null && longitude !== null) {
+            const coordinate = (value, positive, negative) => `${Math.abs(value).toFixed(6)}° ${value < 0 ? negative : positive}`;
+            add('Location', `${coordinate(latitude, 'N', 'S')}, ${coordinate(longitude, 'E', 'W')}`);
+        }
+    }
+    return rows;
+}
+
+function renderPhotoInfoRows(rows) {
+    photoInfoContent.replaceChildren();
+    if (!rows.length) {
+        const empty = document.createElement('p');
+        empty.className = 'photo-info-state';
+        empty.textContent = 'No photo information available';
+        photoInfoContent.appendChild(empty);
+        return;
+    }
+    const list = document.createElement('dl');
+    list.className = 'photo-info-list';
+    rows.forEach(row => {
+        const term = document.createElement('dt'); term.textContent = row.label;
+        const value = document.createElement('dd'); value.textContent = row.value;
+        if (row.secondary) {
+            const detail = document.createElement('span'); detail.className = 'photo-info-secondary';
+            detail.textContent = row.secondary; value.appendChild(detail);
+        }
+        list.appendChild(term); list.appendChild(value);
+    });
+    photoInfoContent.appendChild(list);
+}
+
+function renderPhotoInfoState(message, retry = false) {
+    photoInfoContent.replaceChildren();
+    const status = document.createElement('p'); status.className = 'photo-info-state'; status.textContent = message;
+    photoInfoContent.appendChild(status);
+    if (retry) {
+        const button = document.createElement('button');
+        button.type = 'button'; button.className = 'btn btn-secondary photo-info-retry'; button.textContent = 'Retry';
+        button.addEventListener('click', () => loadPhotoInfo(true));
+        photoInfoContent.appendChild(button);
+    }
+}
+
+async function loadPhotoInfo(force = false) {
+    const file = mediaFiles[currentIndex];
+    const url = currentExifSidecar();
+    if (!file || !url || photoInfoPanel.hidden || exifPanelFile !== file) return;
+    if (!force && exifSummaryCache.has(url)) {
+        const cached = exifSummaryCache.get(url);
+        cacheExifSummary(url, cached);
+        renderPhotoInfoRows(normalizeExifSummary(cached));
+        return;
+    }
+    exifRequest?.controller.abort();
+    const controller = new AbortController();
+    const request = { controller, file, url, loadId: mediaLoadId };
+    exifRequest = request;
+    renderPhotoInfoState('Loading photo information…');
+    try {
+        const payload = await resilience.request(url, { signal: controller.signal, timeout: EXIF_REQUEST_TIMEOUT, body: 'json' });
+        if (exifRequest !== request || controller.signal.aborted || photoInfoPanel.hidden ||
+            exifPanelFile !== file || mediaFiles[currentIndex] !== file || mediaLoadId !== request.loadId) return;
+        const rows = normalizeExifSummary(payload);
+        cacheExifSummary(url, payload);
+        renderPhotoInfoRows(rows);
+    } catch (error) {
+        if (controller.signal.aborted || exifRequest !== request) return;
+        renderPhotoInfoState('Could not load photo information', true);
+    } finally {
+        if (exifRequest === request) exifRequest = null;
+    }
+}
+
+function openPhotoInfo() {
+    if (!photoInfoEligible()) return;
+    setViewerOptionsOpen(false);
+    exifPanelFile = mediaFiles[currentIndex];
+    exifPanelPlayback = { wasPlaying: slideshowPlaying, intentVersion: slideshowIntentVersion };
+    cancelSlideshowTimer();
+    photoInfoPanel.hidden = false;
+    btnPhotoInfo.setAttribute('aria-expanded', 'true');
+    showUI();
+    if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+    positionPhotoInfoPanel();
+    loadPhotoInfo();
+}
+
+function closePhotoInfo({ restoreFocus = false, resume = true } = {}) {
+    if (!photoInfoPanel || photoInfoPanel.hidden) return;
+    exifRequest?.controller.abort();
+    exifRequest = null;
+    photoInfoPanel.hidden = true;
+    btnPhotoInfo.setAttribute('aria-expanded', 'false');
+    exifPanelFile = null;
+    const playback = exifPanelPlayback;
+    exifPanelPlayback = null;
+    if (resume && playback?.wasPlaying && slideshowPlaying && playback.intentVersion === slideshowIntentVersion &&
+        !isGridViewActive && isPhotoActive() && imageReady) startSlideshowTimer();
+    if (restoreFocus) (mobileViewerControls() ? btnViewerOptions : btnPhotoInfo).focus?.();
+    if (!isGridViewActive) resetIdleTimer();
 }
 
 function setGridOptionsOpen(open) {
@@ -1649,6 +1923,7 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
         } else if (!wasGrid) {
             mediaIndex.textContent = `${currentIndex + 1} / ${mediaFiles.length}`;
         }
+        updatePhotoInfoAvailability();
         savePreferences();
         return true;
     } catch (error) {
@@ -1893,6 +2168,7 @@ function updateGridView(previousMediaFiles) {
 }
 
 function renderGridView() {
+    closePhotoInfo({ resume: false });
     setViewerOptionsOpen(false);
     setGridOptionsOpen(false);
     stopViewerSession();
@@ -2366,6 +2642,7 @@ function enterFullScreenViewer(index) {
 
 function showMedia(index) {
     if (!mediaFiles.length) return;
+    closePhotoInfo({ resume: false });
     stopViewerSession();
     const session = { controller: new AbortController(), timer: null, progress: 0,
         videoMode: 'original', videoFallbackAttempted: false, heicFallbackAttempted: false };
@@ -2585,6 +2862,7 @@ function showMediaError(kind, filepath, error) {
 }
 
 function scheduleErrorAdvance() {
+    if (!photoInfoPanel.hidden) return;
     cancelSlideshowTimer();
     $('media-error-status').textContent = slideshowPlaying
         ? (mediaFiles.length > 1 ? 'Slideshow continues: skipping this file in 3 seconds.' : 'Slideshow continues: retrying this file in 3 seconds.')
@@ -2797,6 +3075,11 @@ function setupEventListeners() {
     btnImageMode.addEventListener('click', toggleImageMode);
     btnCopyLink.addEventListener('click', copyCurrentImage);
     btnCopyFilename?.addEventListener('click', copyCurrentFilename);
+    btnPhotoInfo.addEventListener('click', () => {
+        if (photoInfoPanel.hidden) openPhotoInfo();
+        else closePhotoInfo({ restoreFocus: true });
+    });
+    btnClosePhotoInfo.addEventListener('click', () => closePhotoInfo({ restoreFocus: true }));
     btnViewerOptions.addEventListener('click', () => setViewerOptionsOpen(viewerOptionsMenu.hidden));
     btnGridOptions.addEventListener('click', () => setGridOptionsOpen(gridOptionsMenu.hidden));
     viewport.addEventListener('wheel', handleWheel, { passive: false });
@@ -2874,8 +3157,15 @@ function setupEventListeners() {
         if (e.key.toLowerCase() === 'f') toggleFullscreen();
         if (e.key.toLowerCase() === 't') toggleTvMode();
         if (e.key.toLowerCase() === 'r') rotateImage();
-        if (e.key === 'Escape' && !viewerOptionsMenu.hidden) setViewerOptionsOpen(false);
-        else if (e.key.toLowerCase() === 'g' || e.key === 'Escape') renderGridView();
+        if (e.key === 'Escape' && !viewerOptionsMenu.hidden) {
+            setViewerOptionsOpen(false);
+            return;
+        }
+        if (e.key === 'Escape' && !photoInfoPanel.hidden) {
+            closePhotoInfo({ restoreFocus: true });
+            return;
+        }
+        if (e.key.toLowerCase() === 'g' || e.key === 'Escape') renderGridView();
         // Arrow browsing must not keep waking or extending the viewer chrome.
         // Pointer movement remains the normal way to reveal hidden controls.
         if (!browsingWithArrows) resetIdleTimer();
@@ -2888,11 +3178,16 @@ function setupEventListeners() {
         resizeFrame = requestAnimationFrame(() => {
             resizeFrame = null;
             updateGalleryHeaderLayout();
+            updatePhotoInfoPlacement();
+            updatePhotoInfoAvailability();
             if (!isGridViewActive && isPhotoActive()) applyImageRotation();
         });
     });
     window.addEventListener('click', event => {
         if (!event.target?.closest?.('#viewer-options')) setViewerOptionsOpen(false);
+        if (!photoInfoPanel.hidden && !event.target?.closest?.('#photo-info-panel, #btn-photo-info, #viewer-options')) {
+            closePhotoInfo();
+        }
         if (!event.target?.closest?.('#grid-options')) setGridOptionsOpen(false);
         if (!isGridViewActive) resetIdleTimer();
     });
@@ -2918,6 +3213,7 @@ function startAutoRefreshTimer() {
 }
 
 async function toggleTvMode() {
+    closePhotoInfo({ resume: false });
     tvModeEnabled = !tvModeEnabled;
     video.controls = controlsEnabled && !tvModeEnabled;
     if (tvModeEnabled) {
@@ -3087,7 +3383,9 @@ function handleTouchEnd(e) {
 
 function toggleSlideshow() { setSlideshowPlaying(!slideshowPlaying); }
 function setSlideshowPlaying(value) {
-    slideshowPlaying = Boolean(value);
+    const next = Boolean(value);
+    if (slideshowPlaying !== next) slideshowIntentVersion++;
+    slideshowPlaying = next;
     syncPlayButton();
     if (mediaFailed) {
         scheduleErrorAdvance();
@@ -3120,7 +3418,7 @@ function cancelSlideshowTimer() {
 function startSlideshowTimer() {
     if (mediaFailed) { scheduleErrorAdvance(); return; }
     cancelSlideshowTimer();
-    if (!imageReady || mediaFailed || isGridViewActive) return;
+    if (!imageReady || mediaFailed || isGridViewActive || !photoInfoPanel.hidden) return;
     slideProgress = 0;
     progressBar.style.width = '0%';
 
@@ -3191,7 +3489,7 @@ function showUI() {
     resetIdleTimer();
 }
 function hideUI() {
-    if (isGridViewActive || isDragging || isPinching || mediaFailed) return;
+    if (isGridViewActive || isDragging || isPinching || mediaFailed || !photoInfoPanel.hidden) return;
     if (document.activeElement?.matches?.(':focus-visible') &&
         document.activeElement?.closest?.('#overlay-header, .nav-arrow')) return;
     uiVisible = false;
@@ -3213,6 +3511,7 @@ function resetIdleTimer() {
         helpHint.classList.remove('ui-hidden');
         document.body.classList.remove('cursor-hidden');
     }
+    if (!photoInfoPanel.hidden) return;
     idleTimer = setTimeout(hideUI, tvModeEnabled ? 1800 : 3000);
 }
 

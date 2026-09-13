@@ -267,6 +267,8 @@ Omitted settings retain the lower-priority value.
 | `showFilenames` | `true` | Boolean: show viewer filename and grid media captions |
 | `showDownloadButton` | `true` | Boolean: show Download for the original served media |
 | `showCopyButton` | `true` | Boolean: show Copy Image for displayed photos |
+| `showExifPanel` | `true` | Boolean: offer Photo info for images with generated sidecars |
+| `showGps` | `true` | Boolean: show valid sidecar coordinates in Photo info |
 | `showButtonLabels` | `false` | Boolean: show text beside viewer toolbar icons |
 | `interval` | `5` | Seconds: 3, 5, 10, 15, 30, 60, 300, 900, or 3600 |
 | `imageMode` | `"fit"` | `"fit"` or `"original"` |
@@ -330,6 +332,13 @@ and Copy Image stay labeled inside the right-side three-dot options menu. Set
 on the primary buttons. Override it with `?buttonLabels=1` or return to icons
 with `?buttonLabels=0`. Tooltips and accessible names remain available.
 
+Photo info is a desktop toolbar action and a mobile three-dot-menu item. It is
+shown only for images whose manifest record has a validated `exifPath`; the
+sidecar loads on demand when the panel opens. Automatic slideshow advancement
+is suspended while the panel is open. Use `showExifPanel: false` or `?exif=0`
+to hide the action. Use `showGps: false` or `?gps=0` to hide Location. Display
+settings do not remove coordinates from served sidecars.
+
 TV mode is not restored from saved browser preferences. Exiting fullscreen
 turns TV mode off and pauses its slideshow. Explicit config tvMode defaults
 or tv=1 URLs still apply on reload; use tv=0 to override them.
@@ -348,6 +357,8 @@ or tv=1 URLs still apply on reload; use tv=0 to override them.
 | `download=1` or `download=0` | Show or hide the original-media Download button |
 | `copy=1` or `copy=0` | Show or hide the Copy Image button |
 | `buttonLabels=1` or `buttonLabels=0` | Show text labels or use icon-only viewer buttons |
+| `exif=1` or `exif=0` | Show or hide the Photo info action |
+| `gps=1` or `gps=0` | Show or hide Location; does not change extraction |
 | `interval=10` | Slideshow interval in seconds |
 | `imageMode=fit` or `imageMode=original` | Initial image sizing |
 | `density=compact`, `density=comfortable`, or `density=spacious` | Grid thumbnail size |
@@ -385,8 +396,12 @@ persistent manifest for images. Videos, images without usable EXIF dates, and
 directory-only sources fall back to file modification time. The setting is
 configuration/URL policy and is not stored in remembered preferences. Generate
 the manifest with Pillow installed to backfill EXIF dates; `--manifest-only`
-also extracts metadata. Add `--include-gps` only when generated sidecars should
-contain coordinates—GPS extraction is off by default and never alters originals.
+also extracts metadata. GPS extraction is on by default. Use `--exclude-gps` to
+skip the GPS sub-IFD and remove previously generated GPS during a successful
+scan; existing libraries need a new scan to backfill GPS after enabling it.
+`--include-gps` remains accepted as an explicit form of the default. Neither
+option alters EXIF in original media. `showGps:false` hides Location in the
+viewer but does not remove it from sidecars.
 
 Newest/Oldest use the server's HTTP Last-Modified timestamp in the default
 `"mtime"` date-source mode. Capture mode prefers manifest EXIF capture time

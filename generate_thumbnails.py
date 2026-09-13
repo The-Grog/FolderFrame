@@ -169,7 +169,7 @@ def gps_coordinate(values, reference, latitude):
     return coordinate if -limit <= coordinate <= limit else None
 
 
-def extract_metadata(image, include_gps=False):
+def extract_metadata(image, include_gps=True):
     """Return an allowlisted JSON-safe EXIF summary without mutating the image."""
     try:
         original_width, original_height = image.size
@@ -278,7 +278,7 @@ def metadata_manifest_fields(summary: dict, sidecar_relative: Optional[str]) -> 
 
 def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: int,
         failure_cache_path: Optional[Path] = None, manifest_path: Optional[Path] = None,
-        include_gps: bool = False, thumbnails: bool = True) -> dict:
+        include_gps: bool = True, thumbnails: bool = True) -> dict:
     try:
         from PIL import Image, ImageOps
     except ImportError as error:
@@ -594,8 +594,12 @@ def main() -> int:
         help="Cache unchanged thumbnail failures in this JSON file")
     parser.add_argument("--status-file", type=Path,
         help="Write structured scan results to this JSON file")
-    parser.add_argument("--include-gps", action="store_true",
-        help="Include GPS coordinates in generated EXIF sidecars (default: off)")
+    gps = parser.add_mutually_exclusive_group()
+    gps.add_argument("--include-gps", dest="include_gps", action="store_true",
+        help="Include GPS coordinates in generated EXIF sidecars (default)")
+    gps.add_argument("--exclude-gps", dest="include_gps", action="store_false",
+        help="Exclude GPS coordinates and remove previously generated GPS metadata")
+    parser.set_defaults(include_gps=True)
     args = parser.parse_args()
     if not args.media.is_dir():
         parser.error("media must be an existing directory")

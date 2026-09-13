@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Rhodium+Libre&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=20260904-interval-centered">
+<link rel="stylesheet" href="styles.css?v=20260913-photo-info">
 <link rel="icon" type="image/png" href="docs/images/folderframe-icon.png?v=20260828-brand">
 </head>
 <body>
@@ -68,6 +68,15 @@
                     <span class="button-label">Rotate</span>
                 </button>
 
+                <span id="photo-info-desktop-slot" class="photo-info-action-slot">
+                    <button id="btn-photo-info" class="btn btn-secondary ff-btn ff-btn-icon" type="button"
+                            title="Photo info" aria-label="Photo info" aria-expanded="false"
+                            aria-controls="photo-info-panel">
+                        <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path fill="currentColor" d="M11 10h2v7h-2zm0-4h2v2h-2z"/></svg>
+                        <span class="button-label">Photo info</span>
+                    </button>
+                </span>
+
                 <div id="viewer-options" class="viewer-options">
                     <button id="btn-viewer-options" class="btn btn-secondary ff-btn ff-btn-icon" type="button" aria-label="Viewer options" aria-haspopup="true" aria-expanded="false" title="Viewer options">
                         <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="5" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="19" r="2" fill="currentColor"/></svg>
@@ -104,6 +113,7 @@
                                 <option value="3600">60m</option>
                             </select>
                         </div>
+                        <span id="photo-info-menu-slot" class="photo-info-menu-slot"></span>
                         <a id="btn-download" class="btn btn-secondary ff-btn" download rel="noopener" role="menuitem" title="Download original media">
                             <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M11 3h2v10.17l3.59-3.58L18 11l-6 6-6-6 1.41-1.41L11 13.17V3zM5 19h14v2H5v-2z"/></svg>
                             <span class="button-label">Download</span>
@@ -120,6 +130,16 @@
                 </div>
             </div>
         </header>
+
+        <aside id="photo-info-panel" class="photo-info-panel" aria-labelledby="photo-info-title" hidden>
+            <div class="photo-info-heading">
+                <h2 id="photo-info-title">Photo info</h2>
+                <button id="btn-close-photo-info" class="btn btn-secondary ff-btn ff-btn-icon" type="button" aria-label="Close photo info" title="Close photo info">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="m6.4 5 5.6 5.6L17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z"/></svg>
+                </button>
+            </div>
+            <div id="photo-info-content" class="photo-info-content"></div>
+        </aside>
 
         <button id="nav-left" class="nav-arrow" aria-label="Previous media"><svg viewBox="0 0 24 24" width="36" height="36"><path fill="currentColor" d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button>
         <button id="nav-right" class="nav-arrow" aria-label="Next media"><svg viewBox="0 0 24 24" width="36" height="36"><path fill="currentColor" d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button>
@@ -221,7 +241,7 @@
 
     <p id="config-notice" role="status" hidden></p>
     <script src="resilience.js?v=20260831-native-decode-queue"></script>
-    <script src="settings.js?v=20260912-capture-date"></script>
-    <script src="app.js?v=20260912-capture-date"></script>
+<script src="settings.js?v=20260913-photo-info"></script>
+<script src="app.js?v=20260913-photo-info"></script>
 </body>
 </html>

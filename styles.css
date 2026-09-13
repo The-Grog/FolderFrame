@@ -80,6 +80,47 @@ button, select, .media-error-actions a { touch-action:manipulation; }
 .viewer-options-menu .timer-control { justify-content:space-between; }
 .viewer-options-menu .custom-select { width:72px; }
 .viewer-options-menu .btn { width:100%; justify-content:flex-start; }
+.photo-info-action-slot { display:inline-flex; flex:0 0 auto; }
+.photo-info-menu-slot:empty { display:none; }
+.photo-info-menu-slot:not(:empty) { display:block; }
+.photo-info-menu-slot .btn { width:100%; justify-content:flex-start; }
+.photo-info-panel {
+    position:absolute;
+    top:76px;
+    right:max(12px, env(safe-area-inset-right));
+    z-index:9;
+    width:min(320px, calc(100vw - 24px));
+    max-height:calc(100dvh - 96px - env(safe-area-inset-bottom));
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+    border:1px solid rgba(255,255,255,.14);
+    border-radius:10px;
+    background:rgba(12,12,12,.96);
+    box-shadow:0 12px 35px rgba(0,0,0,.65);
+    backdrop-filter:blur(12px);
+    -webkit-backdrop-filter:blur(12px);
+    animation:photo-info-open .14s ease-out;
+}
+.photo-info-heading {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:9px 9px 7px 14px;
+    border-bottom:1px solid rgba(255,255,255,.09);
+}
+.photo-info-heading h2 { font-size:14px; font-weight:600; color:#fff; }
+.photo-info-heading .btn { width:34px; min-width:34px; height:34px; padding:0; }
+.photo-info-content { flex:1 1 auto; min-height:0; overflow:auto; padding:12px 14px 14px; }
+.photo-info-state { color:#aaa; font-size:12px; line-height:1.45; }
+.photo-info-retry { margin-top:10px; }
+.photo-info-list { display:grid; grid-template-columns:minmax(86px, auto) minmax(0, 1fr); gap:8px 12px; font-size:12px; line-height:1.35; }
+.photo-info-list dt { color:#888; }
+.photo-info-list dd { min-width:0; color:#eee; overflow-wrap:anywhere; user-select:text; -webkit-user-select:text; }
+.photo-info-secondary { display:block; margin-top:2px; color:#888; font-size:11px; }
+@keyframes photo-info-open { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+@media (prefers-reduced-motion:reduce) { .photo-info-panel { animation:none; } }
 .hide-viewer-button-labels #overlay-header .viewer-options-menu .button-label { display:inline; }
 .hide-viewer-button-labels #overlay-header .viewer-options-menu .btn {
     width:100%; min-width:0; padding:8px 10px; gap:7px;
@@ -450,6 +491,7 @@ button, select, .media-error-actions a { touch-action:manipulation; }
 
 /* Icon-only viewer controls pack into compact rows on phones and thin windows. */
 @media (max-width:900px) {
+    .photo-info-panel { right:max(6px, env(safe-area-inset-right)); width:min(320px, calc(100vw - 12px)); }
     .hide-viewer-button-labels #overlay-header {
         flex-direction:column;
         align-items:stretch;
