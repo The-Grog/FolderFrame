@@ -2158,17 +2158,17 @@ test('shuffle navigation replays browser-style history before choosing another r
     assert.equal(vm.runInContext('mediaFiles[currentIndex]', app.context), 'd.jpg');
 });
 
-test('shuffle history caps at ten, tolerates small libraries, and removes stale paths', async () => {
+test('shuffle history caps at 100, tolerates small libraries, and removes stale paths', async () => {
     const app = await boot();
     vm.runInContext(`
-        mediaFiles = Array.from({ length: 12 }, (_, index) => index + '.jpg');
+        mediaFiles = Array.from({ length: 102 }, (_, index) => index + '.jpg');
         shuffleEnabled = true;
         Math.random = () => 0;
         enterFullScreenViewer(0);
-        for (let index = 0; index < 11; index++) nextMedia();
+        for (let index = 0; index < 101; index++) nextMedia();
     `, app.context);
-    assert.equal(vm.runInContext('shuffleHistory.length', app.context), 10);
-    assert.equal(vm.runInContext('shuffleHistoryIndex', app.context), 9);
+    assert.equal(vm.runInContext('shuffleHistory.length', app.context), 100);
+    assert.equal(vm.runInContext('shuffleHistoryIndex', app.context), 99);
 
     vm.runInContext(`
         mediaFiles = ['a.jpg', 'b.jpg'];
@@ -2575,6 +2575,11 @@ test('native image context menus remain available without enabling native draggi
     vm.runInContext("imageMode = 'original'; isDragging = false", app.context);
     vm.runInContext('handleMouseDown({ button: 2, clientX: 10, clientY: 10 })', app.context);
     assert.equal(vm.runInContext('isDragging', app.context), false);
+});
+
+test('viewer videos expand to the viewport while preserving their aspect ratio', () => {
+    const css = fs.readFileSync(path.join(__dirname, '../styles.css'), 'utf8');
+    assert.match(css, /#gallery-video\s*\{[^}]*width:100%;[^}]*height:100%;[^}]*object-fit:contain;/);
 });
 
 test('controls config is boolean, profile-scoped, and explicitly overridable', () => {

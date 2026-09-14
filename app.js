@@ -401,7 +401,7 @@ let slideshowPlaying = false, slideshowTimer = null, slideshowInterval = 5, slid
 let slideshowAnimationFrame = null, slideshowStartedAt = 0;
 let uiVisible = true, idleTimer = null, imageMode = 'fit', isGridViewActive = true;
 let shuffleEnabled = false, autoRefreshEnabled = true, tvModeEnabled = false;
-const SHUFFLE_HISTORY_LIMIT = 10;
+const SHUFFLE_HISTORY_LIMIT = 100;
 let shuffleHistory = [];
 let shuffleHistoryIndex = -1;
 let galleryViewMode = 'folders'; // 'folders' or 'all'

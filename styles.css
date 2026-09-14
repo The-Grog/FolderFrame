@@ -35,7 +35,7 @@ button, select, .media-error-actions a { touch-action:manipulation; }
 #media-container.grab-mode { touch-action:none; }
 #gallery-image.mode-original { width:auto; height:auto; max-width:none; max-height:none; object-fit:none; }
 #gallery-image.mode-fit { width:100%; height:100%; max-width:100%; max-height:100%; object-fit:contain; }
-#gallery-video { max-width:100%; max-height:100%; object-fit:contain; z-index:2; pointer-events:auto; }
+#gallery-video { width:100%; height:100%; max-width:100%; max-height:100%; object-fit:contain; z-index:2; pointer-events:auto; }
 .overlay { position:absolute; background:rgba(15,15,15,.78); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,.1); border-radius:12px; padding:12px 20px; z-index:10; transition:opacity .35s,transform .35s; }
 #overlay-header { top:max(10px,env(safe-area-inset-top)); left:max(12px,env(safe-area-inset-left)); right:max(12px,env(safe-area-inset-right)); display:flex; justify-content:space-between; align-items:center; min-height:54px; padding:8px 20px; background:rgba(8,8,8,.34); }
 .header-left,.header-right { display:flex; align-items:center; gap:10px; }
