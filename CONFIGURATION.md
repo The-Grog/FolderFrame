@@ -216,12 +216,14 @@ mode, those failures produce an actionable published-index error and never attem
 a directory scan. Browser `scanCache` is not read or written in strict manifest
 mode; `thumbnailPath` remains independent and continues to supply previews.
 
-The refresh control is labeled **Reload Library** in strict manifest mode. It
+While FolderFrame is actively using a published manifest, the Auto Refresh
+control is hidden and the manual action is labeled **Reload Library**. It
 cache-busts and reloads the published index (including chunks used by the current
-view), but it cannot discover files that are absent from that index. Regenerate
-and redeploy `library.json` plus `library.d/` after changing media. A scheduled
-helper run can keep a served index current; the browser cannot write server
-appdata itself.
+view), but it cannot discover files that are absent from that index. In `"auto"`
+mode, Auto Refresh and the **Refresh Folder** label return if the current scan
+actually falls back to directory listings. Regenerate and redeploy `library.json`
+plus `library.d/` after changing media. A scheduled helper run can keep a served
+index current; the browser cannot write server appdata itself.
 
 A minimal static package has this layout:
 

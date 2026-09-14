@@ -496,10 +496,13 @@ album hierarchy.
 ### Refreshing
 
 Open the gallery’s three-dot menu and choose **Refresh Folder** to scan
-immediately. Strict manifest sources show **Reload Library** instead.
+immediately. While FolderFrame is actively using a published manifest, the
+periodic Auto Refresh control is hidden and the manual action becomes **Reload
+Library**. In `"auto"` discovery mode, Auto Refresh returns if the current scan
+actually falls back to directory listings.
 
 When Auto Refresh is enabled, the current folder is rescanned at the configured refreshInterval
-(default: one minute for index, five minutes for embed). The gallery also rescans when you return to the browser tab.
+(default: two minutes for index, five minutes for embed). The gallery also rescans when you return to the browser tab.
 
 This means newly added or removed media can appear without manually
 rebuilding anything.

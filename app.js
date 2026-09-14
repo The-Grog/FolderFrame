@@ -427,6 +427,7 @@ let persistentManifestState = null;
 const persistentThumbnailUrls = new Map();
 const persistentExifUrls = new Map();
 let manifestFailureNotice = false;
+let runtimeDiscoveryMode = 'directory';
 
 function isManifestOnlySource() {
     return activeSource?.discoveryMode === 'manifest';
@@ -434,6 +435,10 @@ function isManifestOnlySource() {
 
 function usesPublishedManifest() {
     return activeSource?.discoveryMode !== 'directory' && Boolean(activeSource?.manifestUrl);
+}
+
+function isPublishedManifestActive() {
+    return isManifestOnlySource() || (usesPublishedManifest() && runtimeDiscoveryMode !== 'directory');
 }
 
 function persistentManifestError(message, cause = null) {
@@ -921,6 +926,7 @@ async function loadConfiguration() {
     const resolved = settingsApi.resolveSettings(galleryConfig, location.search, key => localStorage.getItem(key));
     const startupSettings = resolved.settings;
     activeSource = resolved.source;
+    runtimeDiscoveryMode = usesPublishedManifest() ? 'pending' : 'directory';
     preferenceKey = resolved.preferenceKey;
     rememberPreferences = startupSettings.rememberPreferences;
     controlsEnabled = startupSettings.controls;
@@ -995,15 +1001,16 @@ function updateControlStates() {
     btnShuffle.querySelector('.shuffle-off-icon').hidden = shuffleEnabled;
     btnShuffle.querySelector('.button-label').textContent = shuffleEnabled ? 'Shuffle' : 'Shuffle Off';
     btnAutoRefresh.title = `Automatically rescan every ${refreshInterval} seconds`;
+    btnAutoRefresh.hidden = isPublishedManifestActive();
     btnAutoRefresh.classList.remove('is-active');
     btnAutoRefresh.setAttribute('aria-pressed', String(autoRefreshEnabled));
     btnAutoRefresh.querySelector('.button-label').textContent = autoRefreshEnabled ? 'Auto Refresh On' : 'Auto Refresh Off';
-    const strictManifest = isManifestOnlySource();
-    $('refresh-grid-label').textContent = strictManifest ? 'Reload Library' : 'Refresh Folder';
-    btnRefreshGrid.title = strictManifest
+    const manifestActive = isPublishedManifestActive();
+    $('refresh-grid-label').textContent = manifestActive ? 'Reload Library' : 'Refresh Folder';
+    btnRefreshGrid.title = manifestActive
         ? 'Reload the published media index. New files appear after the index is regenerated and redeployed.'
         : 'Rescan the current album now';
-    btnRefreshGrid.setAttribute('aria-label', strictManifest ? 'Reload published library index' : 'Refresh current folder');
+    btnRefreshGrid.setAttribute('aria-label', manifestActive ? 'Reload published library index' : 'Refresh current folder');
     btnViewMode.classList.remove('is-active');
     btnViewMode.setAttribute('aria-pressed', String(galleryViewMode === 'all'));
     if (btnCopyFilename) btnCopyFilename.disabled = !mediaFiles.length || isGridViewActive;
@@ -1546,11 +1553,15 @@ async function scanDirectory(folder = currentFolder, options = {}) {
     let directoryMtime = null;
     if (usesPublishedManifest()) {
         const indexed = await persistentDirectoryListing(normalized, options.signal);
-        if (indexed) return indexed;
+        if (indexed) {
+            options.onDiscovery?.('manifest');
+            return indexed;
+        }
     }
     if (isManifestOnlySource()) {
         throw persistentManifestError('The published media index does not contain this folder.');
     }
+    options.onDiscovery?.('directory');
     if (!options.bypassCache && activeSource.scanCache) {
         const manifest = getScanManifest();
         const cached = manifest.directories[normalized];
@@ -1654,7 +1665,9 @@ async function scanDirectoryRecursive(folder = currentFolder, visited = new Set(
             visited.add(normalized);
             let dir;
             try {
-                dir = item.listing || await scanDirectory(normalized, { signal, bypassCache: options.bypassCache });
+                dir = item.listing || await scanDirectory(normalized, {
+                    signal, bypassCache: options.bypassCache, onDiscovery: options.onDiscovery
+                });
             } catch (error) {
                 if (signal?.aborted || error?.name === 'AbortError') throw error;
                 failedFolders.push(normalized);
@@ -1831,17 +1844,26 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
     scanSession = session;
     const folder = currentFolder, mode = galleryViewMode;
     const current = () => scanSession === session && !session.signal.aborted;
+    let usedManifest = false, usedDirectory = false;
+    const noteDiscovery = discovery => {
+        if (discovery === 'manifest') usedManifest = true;
+        if (discovery === 'directory') usedDirectory = true;
+    };
     isScanning = true;
     manifestFailureNotice = false;
     scannedFolders = 0; scannedFiles = 0;
     thumbnailGrid.setAttribute('aria-busy', 'true');
     btnRefreshGrid.disabled = true; $('btn-sort').disabled = true;
     $('scan-loading').hidden = false;
+    runtimeDiscoveryMode = usesPublishedManifest() ? 'pending' : 'directory';
+    updateControlStates();
     if (usesPublishedManifest()) resetPersistentManifest({ cacheBust: forceCacheClear });
     setScanStatus(usesPublishedManifest() ? 'Loading media index…' :
         (mediaFiles.length || subfolders.length ? 'Refreshing folders…' : 'Scanning folders…'));
     try {
-        const listing = await scanDirectory(folder, { signal: session.signal, bypassCache: forceCacheClear });
+        const listing = await scanDirectory(folder, {
+            signal: session.signal, bypassCache: forceCacheClear, onDiscovery: noteDiscovery
+        });
         // Publish a bounded first batch as soon as the current directory is known.
         // Recursive discovery and final sorting continue below; viewer refreshes stay atomic.
         const progressive = mode === 'all' && isGridViewActive && !silent;
@@ -1886,6 +1908,7 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
                 await publishDiscovered(false);
             }, {
                 bypassCache: forceCacheClear,
+                onDiscovery: noteDiscovery,
                 onTopComplete: () => {
                     if (!current() || !totalTopFolders) return;
                     completedTopFolders++;
@@ -1964,6 +1987,11 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
         return false;
     } finally {
         if (scanSession === session) {
+            runtimeDiscoveryMode = isManifestOnlySource() ? 'manifest'
+                : usedDirectory ? 'directory'
+                : usedManifest ? 'manifest'
+                : usesPublishedManifest() ? 'pending' : 'directory';
+            updateControlStates();
             isScanning = false;
             thumbnailGrid.setAttribute('aria-busy', 'false');
             btnRefreshGrid.disabled = false; $('btn-sort').disabled = false;

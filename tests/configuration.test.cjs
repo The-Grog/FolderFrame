@@ -1394,6 +1394,8 @@ test('persistent manifest supplies listings, dates, sizes, and generated thumbna
     assert.equal(vm.runInContext("persistentExifUrls.get('https://example.test/frame/photos/2026/photo.jpg')", app.context),
         'https://example.test/frame/folderframe-data/exif.d/2026/photo.jpg.json');
     assert.equal(directoryRequests, 0, 'sidecar URLs are recorded but never fetched');
+    assert.equal(app.get('btn-auto-refresh').hidden, true);
+    assert.equal(app.get('refresh-grid-label').textContent, 'Reload Library');
 
     app.context.replacementRecord = {
         path: '2026', folders: [], files: [{ path: '2026/photo.jpg', mtime: 1788177600000, size: 12345 }]
@@ -1420,10 +1422,14 @@ test('manifest EXIF sidecar URLs are manifest-relative, encoded, and reject unsa
 test('auto discovery falls back from an invalid manifest and refresh revalidates it', async () => {
     const config = normalizeConfigCopy({ manifestPath: 'folderframe-data/library.json' });
     let manifestRequests = 0, directoryRequests = 0;
+    let manifestValid = false;
+    const validIndex = {
+        version: 1, root: { path: '', files: [], folders: [] }, chunks: {}, errors: []
+    };
     const app = await boot({ config, fetchHandler: async url => {
         if (new URL(url).pathname.endsWith('/folderframe-data/library.json')) {
             manifestRequests++;
-            return { ok: true, json: async () => ({ version: 99 }) };
+            return { ok: true, json: async () => manifestValid ? validIndex : ({ version: 99 }) };
         }
         directoryRequests++;
         return { ok: true, text: async () => '' };
@@ -1431,15 +1437,44 @@ test('auto discovery falls back from an invalid manifest and refresh revalidates
     assert.ok(manifestRequests >= 1);
     assert.ok(directoryRequests >= 1);
     assert.ok(app.warnings.some(message => message.includes('persistent media index unavailable')));
+    assert.equal(app.get('btn-auto-refresh').hidden, false);
+    assert.equal(app.get('refresh-grid-label').textContent, 'Refresh Folder');
     const before = manifestRequests;
     await vm.runInContext("scanDirectory('Nested')", app.context);
     await vm.runInContext("scanDirectory('Nested/Child')", app.context);
     assert.equal(manifestRequests, before);
     await vm.runInContext("scanDirectory('Live', { bypassCache: true })", app.context);
     assert.equal(manifestRequests, before, 'one scan does not retry an already failed manifest');
+    manifestValid = true;
     await app.get('btn-refresh-grid').listeners.click();
     assert.ok(manifestRequests > before, 'explicit refresh starts a new manifest validation');
     assert.ok(directoryRequests >= 3);
+    assert.equal(app.get('btn-auto-refresh').hidden, true, 'manifest recovery hides periodic refresh');
+    assert.equal(app.get('refresh-grid-label').textContent, 'Reload Library');
+});
+
+test('auto discovery restores Auto Refresh when the current manifest subtree falls back to a directory', async () => {
+    const config = normalizeConfigCopy({ manifestPath: 'folderframe-data/library.json' });
+    const index = {
+        version: 1,
+        root: { path: '', files: [], folders: ['2026'] },
+        chunks: {},
+        errors: []
+    };
+    let directoryRequests = 0;
+    const app = await boot({ config, fetchHandler: async url => {
+        if (new URL(url).pathname.endsWith('/folderframe-data/library.json')) {
+            return { ok: true, json: async () => index };
+        }
+        directoryRequests++;
+        return { ok: true, text: async () => '' };
+    } });
+    assert.equal(app.get('btn-auto-refresh').hidden, true);
+    vm.runInContext("currentFolder = '2026'", app.context);
+    await vm.runInContext('loadGallery()', app.context);
+    assert.ok(directoryRequests >= 1);
+    assert.equal(app.get('btn-auto-refresh').hidden, false);
+    assert.equal(app.get('refresh-grid-label').textContent, 'Refresh Folder');
 });
 
 test('manifest discovery rejects an invalid index without attempting directory listings', async () => {
@@ -1460,6 +1495,7 @@ test('manifest discovery rejects an invalid index without attempting directory l
     assert.equal(app.get('warning-title').textContent, 'Published Library Unavailable');
     assert.match(app.get('warning-message').textContent, /Regenerate and redeploy/);
     assert.equal(app.get('refresh-grid-label').textContent, 'Reload Library');
+    assert.equal(app.get('btn-auto-refresh').hidden, true);
     assert.match(app.get('btn-refresh-grid').title, /New files appear after/);
     assert.equal([...app.saved.keys()].some(key => key.includes('scan-manifest')), false,
         'strict manifest mode ignores browser scanCache');
@@ -1495,7 +1531,7 @@ test('directory discovery never requests a configured manifest', async () => {
         manifestPath: 'folderframe-data/library.json', discoveryMode: 'directory'
     });
     let manifestRequests = 0, directoryRequests = 0;
-    await boot({ config, fetchHandler: async url => {
+    const app = await boot({ config, fetchHandler: async url => {
         if (url.includes('/folderframe-data/library.json')) {
             manifestRequests++;
             return { ok: true, json: async () => ({ version: 1 }) };
@@ -1505,6 +1541,8 @@ test('directory discovery never requests a configured manifest', async () => {
     } });
     assert.equal(manifestRequests, 0);
     assert.ok(directoryRequests >= 1);
+    assert.equal(app.get('btn-auto-refresh').hidden, false);
+    assert.equal(app.get('refresh-grid-label').textContent, 'Refresh Folder');
 });
 
 test('manifest discovery treats a missing referenced chunk as a hard index error', async () => {

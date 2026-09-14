@@ -27,6 +27,7 @@ manual checks; automated tests do not verify browser layout or codecs.
 - [x] **Separate native viewer and thumbnail decode queues** — Full-resolution viewer images use a two-slot queue while grid and album thumbnails use a twelve-slot queue with album-over-grid priority. Navigation and scroll cancellation remain intact, and HEIC processing remains isolated in its existing pool.
 - [x] **Reduced-resolution JPEG thumbnail decode** — `generate_thumbnails.py` now calls Pillow's `Image.draft()` before EXIF transpose and final resizing, allowing JPEG decoders to use a cheaper internal DCT scale while remaining a safe no-op for other formats.
 - [x] **Manifest-aware Auto Refresh default** — Sources using a published manifest in either `"manifest"` or `"auto"` discovery default periodic Auto Refresh off. Explicit profile/config, saved, TV-mode, and URL choices still override the source-aware default; directory-only sources remain on by default.
+- [x] **Runtime-aware manifest refresh controls** — Auto Refresh is hidden while the current gallery scan uses a published manifest, the manual action becomes Reload Library, and `"auto"` discovery restores Auto Refresh only after an actual directory-listing fallback.
 - [x] **Viewer `R` shortcut** — `R` invokes the existing 90-degree clockwise Rotate action, and the on-screen shortcut hint documents it.
 - [x] **Home resets the gallery presentation** — Clicking the FolderFrame logo returns to the current source root in By Folder mode without changing Filename/Newest/Oldest sort order, then saves the resulting preference.
 - [x] **Resize layout throttle** — Viewer/grid header layout and rotated-photo fit recalculation now run at most once per animation frame during window resizing.
@@ -70,5 +71,5 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 - User tested and approved the swipe, filename visibility, and grid-return update.
 - User tested and approved the mobile double-tap and pinch-flicker fixes.
-- Current regression suite: 144 application/configuration tests and 10 resilience tests, plus 10 EXIF metadata and 3 thumbnail failure-cache tests. Run `tests/configuration.test.cjs`, `tests/resilience.test.cjs`, `tests/exif_metadata.test.py`, and `tests/thumbnail_failure_cache.test.py`.
+- Current regression suite: 145 application/configuration tests and 10 resilience tests, plus 10 EXIF metadata and 3 thumbnail failure-cache tests. Run `tests/configuration.test.cjs`, `tests/resilience.test.cjs`, `tests/exif_metadata.test.py`, and `tests/thumbnail_failure_cache.test.py`.
 - User visually tested and approved the long-filename desktop layout. Node tests do not validate CSS layout.
