@@ -55,6 +55,25 @@ Configure media paths and separate index/embed startup defaults in
 
 Compact controls put slideshow playback, Shuffle, Fit, fullscreen, and TV Mode within reach. Controls fade during inactivity; mouse, touch, or keyboard activity brings them back.
 
+### Photo information
+
+![FolderFrame Photo Info panel showing capture time, camera, lens, exposure, aperture, ISO, focal length, dimensions, and location](docs/images/folderframe-photo-info.png)
+
+For images with generated EXIF sidecars, the viewer can show capture time,
+camera and lens details, exposure settings, dimensions, and—when available—GPS
+coordinates. Valid coordinates link to Google Maps only after you click them;
+FolderFrame does not embed a map or make a map request while displaying the
+panel. Photo Info remains open and refreshes as you browse with the viewer's
+arrow buttons or keyboard arrow keys, while automatic slideshow advancement is
+suspended until the panel closes.
+
+The Photo Info action is enabled by default with `showExifPanel: true`, but it
+appears only when the current image has an EXIF sidecar in the generated
+manifest. Set `showGps: false` to hide locations without removing GPS data from
+the sidecars. See [Configuration](CONFIGURATION.md#url-overrides) for profile
+and URL overrides, and [Optional generated thumbnails](#optional-generated-thumbnails)
+for sidecar setup.
+
 ### Gallery and album view
 
 ![FolderFrame gallery with album cover previews, Filename sorting, and compact neutral controls](docs/images/folderframe-gallery.png)

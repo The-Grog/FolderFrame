@@ -5,17 +5,6 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ## Remaining work
 
-### Performance and deployment
-
-- [ ] **Large Immich directory support** — Improve scanning, navigation, and rendering for very large media directories exported or mounted from Immich while preserving database-free static hosting.
-  - [x] **Incremental and windowed grid** — Render 100 media tiles initially, retain at most 300 media tiles in the DOM, preserve full scroll geometry/order, support reverse and keyboard scrolling, show a Back to Top control, and hide only confirmed-empty albums. Automated with a 15,633-file regression case; Immich device validation pending.
-  - [x] **Efficient virtual-window updates** — Overlapping tile nodes, image decode state, and observers now survive 100-item window shifts. Normal scrolling removes and adds only the leaving/entering edges; distant Home/End jumps still replace the bounded window while persistent spacers preserve scroll geometry. Automated reuse and cleanup bounds verified; Immich device validation pending.
-  - [x] **Optional persistent media index** — Added a lean appdata-writable, chunked JSON index with directory-mtime reuse, manifest-provided metadata/thumbnail paths, cancellation, live-scan bypass, and safe directory-listing fallback. Automated and generator checks pass; Immich device validation pending.
-  - [x] **Bound ordinary image decoding** — JPEG, PNG, WebP, and GIF source assignment now uses a four-slot cancellable priority queue. Viewer images outrank album covers and grid tiles; virtualized/offscreen unsettled work is cancelled. Automated coverage passes; low-power device validation pending.
-  - [x] **Progressive directory discovery** — Recursive All Pics scans now use a deadlock-free five-worker pool over a shared directory frontier, with determinate top-level subtree progress. Automated coverage verifies deep/wide completion, the concurrency ceiling, cancellation, partial-failure isolation, and completion accounting; live Immich device validation remains pending.
-  - [x] **Sub-folder exclusions** — `folderframe.ignore` (plus `.frameignore` when exposed) excludes a complete subtree across live listings, album-cover discovery, recursive scans, browser caches, generated thumbnails, and published manifests. Conservative OS/NAS junk rules are shared by browser and generator paths; automated coverage passes.
-  - [x] **Incremental progressive-scan grid updates** — Progressive publishes now extend the current DOM and virtual-grid spacers in place when the rendered prefix remains unchanged. Filename-sort insertions, stale sessions, and other unsafe cases retain the full-rebuild fallback. Existing tile nodes and decoded thumbnails survive append-only updates; large-library device validation remains pending. See RESILIENCE.md.
-
 ### Browser and device testing
 
 - [ ] **Final device follow-up** — Confirm the latest slideshow visibility and TV-mode fixes, media failures/loading, and controls-free embeds in the target browsers.
@@ -23,7 +12,10 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ## Completed
 
+- [x] **Large Immich library performance foundation** — Large galleries use a bounded 100/300-tile virtual window, efficient overlapping-window updates, five-worker progressive discovery, append-only progressive publishes, separate viewer/thumbnail decode queues, a chunked persistent manifest, subtree exclusions, and cancellation-safe recovery. Automated coverage includes a 15,633-file library; complete device validation remains tracked above.
 - [x] **Capture-date sorting, EXIF sidecars, and Photo info** — Newest/Oldest can prefer EXIF capture dates with mtime fallback. The generator performs incremental, signature-cached EXIF extraction with GPS on by default and an explicit opt-out. Desktop and mobile viewers lazily load validated sidecars into a responsive information panel without delaying browsing.
+- [x] **EXIF failure recovery and manifest repair** — Successfully extracted EXIF and capture dates survive thumbnail-write failures. Cached metadata can repair a missing sidecar without reopening the source, and sidecar additions/removals invalidate only the affected root or nested manifest records.
+- [x] **Photo Info interaction and documentation polish** — Valid GPS coordinates open an accessible Google Maps search only after a click; the default-on action remains configurable, honors current slideshow intent, and stays open while arrow keys or viewer arrow buttons browse eligible photos. The README includes a dedicated screenshot and setup explanation.
 - [x] **Cached thumbnail failures and accurate worker status** — Thumbnail failures are persisted by relative path, size, and modification time, unchanged failures are skipped, and changed sources retry automatically. Preview failures now produce a successful scan-with-warnings result while scanner or manifest failures remain failures. Structured worker status and regression coverage are included.
 - [x] **Automatic Docker/Unraid thumbnails validated** — The scheduled thumbnail and manifest worker, persistent appdata, generated previews, read-only originals, manifest refresh, upgrades, and recovery were exercised on the live Unraid deployment.
 - [x] **Browser-style Shuffle history** — Shuffle keeps a rolling ten-item history with a cursor, so Previous and Next replay already viewed media before selecting another random item. Stale entries are pruned and error skipping follows the same navigation path.
@@ -31,7 +23,6 @@ manual checks; automated tests do not verify browser layout or codecs.
 - [x] **Working public demo** — Published an approved static demo with sample media and manifest-backed navigation while keeping personal library content out of the public fixture set.
 - [x] **Deployment install link and overview** — The main README introduces FolderFrame and links directly to the deployment repository for Docker and Unraid installation options.
 - [x] **Native-first Apple media compatibility** — HEIC/HEIF first attempts browser display, then bundled heic-to 1.5.2 with preserved QuickTime reclassification. Optional Docker video fallback streams on decode failure without persistent converted files. Automated and isolated browser validation are recorded separately; Safari/device coverage remains pending.
-
 - [x] **Separate native viewer and thumbnail decode queues** — Full-resolution viewer images use a two-slot queue while grid and album thumbnails use a twelve-slot queue with album-over-grid priority. Navigation and scroll cancellation remain intact, and HEIC processing remains isolated in its existing pool.
 - [x] **Reduced-resolution JPEG thumbnail decode** — `generate_thumbnails.py` now calls Pillow's `Image.draft()` before EXIF transpose and final resizing, allowing JPEG decoders to use a cheaper internal DCT scale while remaining a safe no-op for other formats.
 - [x] **Manifest-aware Auto Refresh default** — Sources using a published manifest in either `"manifest"` or `"auto"` discovery default periodic Auto Refresh off. Explicit profile/config, saved, TV-mode, and URL choices still override the source-aware default; directory-only sources remain on by default.
@@ -78,5 +69,5 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 - User tested and approved the swipe, filename visibility, and grid-return update.
 - User tested and approved the mobile double-tap and pinch-flicker fixes.
-- Current regression suite: 149 automated app/settings/cache and resilience tests, plus focused Python thumbnail-worker, failure-cache, and EXIF metadata tests. Run both tests/configuration.test.cjs and tests/resilience.test.cjs.
+- Current regression suite: 143 application/configuration tests and 10 resilience tests, plus 10 EXIF metadata and 3 thumbnail failure-cache tests. Run `tests/configuration.test.cjs`, `tests/resilience.test.cjs`, `tests/exif_metadata.test.py`, and `tests/thumbnail_failure_cache.test.py`.
 - User visually tested and approved the long-filename desktop layout. Node tests do not validate CSS layout.
