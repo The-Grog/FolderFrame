@@ -463,7 +463,11 @@ defaults; the existing controls still change the current session normally.
 `refreshInterval` sets automatic folder rescanning in **seconds**: index defaults
 to 120 (two minutes), embed to 300 (five minutes). Allowed values are integers
 from 1 to 86400. It is a config-only setting, not a saved browser preference
-or URL option. `autoRefresh: false` disables automatic rescanning.
+or URL option. `autoRefresh: false` disables automatic rescanning. Automatic
+refresh is suspended while a published manifest is active (and while discovery
+is pending); if `auto` discovery falls back to directory listings, the saved
+Auto Refresh preference resumes. **Reload Library** remains available for an
+explicit, cache-busted manifest reload.
 
 Set it under `defaults` for both profiles or under `index`/`embed` separately:
 

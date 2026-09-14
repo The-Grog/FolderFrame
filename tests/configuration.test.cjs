@@ -997,7 +997,7 @@ test('automatic refresh uses resolved timing and respects disabled refresh', asy
         const app = await boot({ search, config });
         const delays = [];
         app.context.setInterval = (_callback, delay) => { delays.push(delay); return 1; };
-        vm.runInContext('startAutoRefreshTimer()', app.context);
+        vm.runInContext('clearAutoRefreshTimer(); startAutoRefreshTimer()', app.context);
         assert.deepEqual(delays, [seconds * 1000]);
         vm.runInContext('autoRefreshEnabled = false; startAutoRefreshTimer()', app.context);
         assert.equal(delays.length, 1);
@@ -1475,6 +1475,137 @@ test('auto discovery restores Auto Refresh when the current manifest subtree fal
     assert.ok(directoryRequests >= 1);
     assert.equal(app.get('btn-auto-refresh').hidden, false);
     assert.equal(app.get('refresh-grid-label').textContent, 'Refresh Folder');
+});
+
+test('active manifest suppresses automatic timer, visibility, EXIF interruption, and TV mode refresh', async () => {
+    const config = normalizeConfigCopy({ manifestPath: 'folderframe-data/library.json' });
+    config.defaults.autoRefresh = true;
+    const index = { version: 1, root: { path: '', files: [], folders: [] }, chunks: {}, errors: [] };
+    const app = await boot({ config, trackIntervals: true, fetchHandler: async url => {
+        if (new URL(url).pathname.endsWith('/folderframe-data/library.json')) {
+            return { ok: true, json: async () => index };
+        }
+        throw new Error(`Unexpected directory request: ${url}`);
+    } });
+    assert.equal(app.get('btn-auto-refresh').hidden, true);
+    assert.equal(vm.runInContext('autoRefreshEnabled', app.context), true, 'saved preference remains enabled');
+    assert.equal(app.intervals.size, 0);
+
+    app.get('photo-info-panel').hidden = false;
+    vm.runInContext('globalThis.automaticRefreshCalls = 0; loadGallery = async () => { automaticRefreshCalls++; }', app.context);
+    assert.equal(vm.runInContext('requestAutomaticRefresh()', app.context), false);
+    app.documentListeners.visibilitychange();
+    assert.equal(app.context.automaticRefreshCalls, 0);
+    assert.equal(app.get('photo-info-panel').hidden, false, 'suppressed refresh cannot close Photo info');
+
+    await vm.runInContext('toggleTvMode()', app.context);
+    assert.equal(vm.runInContext('autoRefreshEnabled', app.context), true);
+    assert.equal(app.intervals.size, 0, 'TV mode obeys the manifest refresh policy');
+});
+
+test('directory to manifest transition clears its interval and invalidates a queued callback', async () => {
+    const config = normalizeConfigCopy({ manifestPath: 'folderframe-data/library.json' });
+    config.defaults.autoRefresh = true;
+    let manifestValid = false;
+    const index = { version: 1, root: { path: '', files: [], folders: [] }, chunks: {}, errors: [] };
+    const app = await boot({ config, trackIntervals: true, fetchHandler: async url => {
+        if (new URL(url).pathname.endsWith('/folderframe-data/library.json')) {
+            return { ok: true, json: async () => manifestValid ? index : ({ version: 99 }) };
+        }
+        return { ok: true, text: async () => '' };
+    } });
+    assert.equal(app.intervals.size, 1);
+    const staleTick = [...app.intervals.values()][0].fn;
+
+    manifestValid = true;
+    await app.get('btn-refresh-grid').listeners.click();
+    assert.equal(vm.runInContext('runtimeDiscoveryMode', app.context), 'manifest');
+    assert.equal(app.intervals.size, 0);
+
+    vm.runInContext('globalThis.automaticRefreshCalls = 0; loadGallery = async () => { automaticRefreshCalls++; }', app.context);
+    app.get('photo-info-panel').hidden = false;
+    staleTick();
+    app.documentListeners.visibilitychange();
+    assert.equal(app.context.automaticRefreshCalls, 0);
+    assert.equal(app.get('photo-info-panel').hidden, false);
+});
+
+test('manifest directory fallback reconciles exactly one interval from the saved preference', async () => {
+    for (const enabled of [true, false]) {
+        const config = normalizeConfigCopy({ manifestPath: 'folderframe-data/library.json' });
+        config.defaults.autoRefresh = enabled;
+        const index = {
+            version: 1, root: { path: '', files: [], folders: ['MissingChunk'] }, chunks: {}, errors: []
+        };
+        const app = await boot({ config, trackIntervals: true, fetchHandler: async url => {
+            if (new URL(url).pathname.endsWith('/folderframe-data/library.json')) {
+                return { ok: true, json: async () => index };
+            }
+            return { ok: true, text: async () => '' };
+        } });
+        assert.equal(app.intervals.size, 0);
+        vm.runInContext("currentFolder = 'MissingChunk'", app.context);
+        await vm.runInContext('loadGallery()', app.context);
+        assert.equal(vm.runInContext('runtimeDiscoveryMode', app.context), 'directory');
+        assert.equal(app.intervals.size, enabled ? 1 : 0);
+        vm.runInContext('reconcileAutoRefreshTimer(); reconcileAutoRefreshTimer()', app.context);
+        assert.equal(app.intervals.size, enabled ? 1 : 0, 'reconciliation does not duplicate intervals');
+    }
+});
+
+test('strict manifest failure never schedules automatic refresh', async () => {
+    const config = normalizeConfigCopy({
+        manifestPath: 'folderframe-data/library.json', discoveryMode: 'manifest'
+    });
+    config.defaults.autoRefresh = true;
+    const app = await boot({ config, trackIntervals: true, fetchHandler: async url => {
+        if (new URL(url).pathname.endsWith('/folderframe-data/library.json')) {
+            return { ok: true, json: async () => ({ version: 99 }) };
+        }
+        throw new Error(`Unexpected directory request: ${url}`);
+    } });
+    assert.equal(vm.runInContext('runtimeDiscoveryMode', app.context), 'manifest');
+    assert.equal(vm.runInContext('autoRefreshEnabled', app.context), true);
+    assert.equal(app.intervals.size, 0);
+    assert.equal(vm.runInContext('requestAutomaticRefresh()', app.context), false);
+    app.documentListeners.visibilitychange();
+    assert.equal(app.intervals.size, 0);
+});
+
+test('superseded scans cannot apply stale automatic-refresh policy', async () => {
+    const config = normalizeConfigCopy({ manifestPath: 'folderframe-data/library.json' });
+    config.defaults.autoRefresh = true;
+    const app = await boot({ config, trackIntervals: true, fetchHandler: async url => {
+        if (new URL(url).pathname.endsWith('/folderframe-data/library.json')) {
+            return { ok: true, json: async () => ({ version: 99 }) };
+        }
+        return { ok: true, text: async () => '' };
+    } });
+    assert.equal(app.intervals.size, 1);
+
+    let calls = 0, releaseFirst;
+    app.context.scanDirectory = (folder, options) => {
+        calls++;
+        if (calls === 1) {
+            return new Promise(resolve => {
+                releaseFirst = () => {
+                    options.onDiscovery('manifest');
+                    resolve({ filePaths: [], folderNames: [] });
+                };
+            });
+        }
+        options.onDiscovery('directory');
+        return Promise.resolve({ filePaths: [], folderNames: [] });
+    };
+    const stale = vm.runInContext('loadGallery()', app.context);
+    const current = vm.runInContext('loadGallery()', app.context);
+    await current;
+    assert.equal(vm.runInContext('runtimeDiscoveryMode', app.context), 'directory');
+    assert.equal(app.intervals.size, 1);
+    releaseFirst();
+    await stale;
+    assert.equal(vm.runInContext('runtimeDiscoveryMode', app.context), 'directory');
+    assert.equal(app.intervals.size, 1, 'late manifest result cannot clear the current directory timer');
 });
 
 test('manifest discovery rejects an invalid index without attempting directory listings', async () => {
@@ -2757,7 +2888,7 @@ test('slideshow skips errors after a bounded delay and Pause cancels the skip', 
 });
 
 async function boot({ search = '', config = shipped, configFailure = false, storageBlocked = false,
-    empty = false, initialStorage = new Map(), fetchHandler = null, mobile = false } = {}) {
+    empty = false, initialStorage = new Map(), fetchHandler = null, mobile = false, trackIntervals = false } = {}) {
     class Element {
         constructor() { this.style = {}; this.children = []; this.listeners = {}; this.dataset = {}; this.hidden = false; this._innerHTML = ''; this.classList = { add() {}, remove() {}, toggle() {} }; }
         addEventListener(name, fn) { this.listeners[name] = fn; }
@@ -2821,6 +2952,9 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
     const elements = new Map();
     const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
     const listeners = {};
+    const documentListeners = {};
+    const intervals = new Map();
+    let nextIntervalId = 0;
     const requests = [];
     const saved = new Map(initialStorage);
     const sourceLabels = [new Element(), new Element()];
@@ -2841,7 +2975,7 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
         document: { getElementById: get, createElement: tag => Object.assign(new Element(), { tagName: String(tag).toUpperCase() }), head: new Element(),
             createDocumentFragment: () => { const fragment = new Element(); fragment.isFragment = true; return fragment; },
             querySelectorAll: () => sourceLabels,
-            addEventListener() {}, body: new Element(), documentElement, hidden: false },
+            addEventListener(name, fn) { documentListeners[name] = fn; }, body: new Element(), documentElement, hidden: false },
         location: { href: base + search, search, assign(url) { this.assigned = url; } },
         localStorage: { getItem(key) { if (storageBlocked) throw new Error('Blocked'); return saved.get(key) || null; },
             setItem(key, value) { if (storageBlocked) throw new Error('Blocked'); saved.set(key, value); } },
@@ -2852,7 +2986,9 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
             return { ok: true, url, text: async () => '' };
         },
         DOMParser: class { parseFromString() { return { querySelectorAll: () => empty ? [] : [{ getAttribute: () => 'photo.jpg' }] }; } },
-        setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {},
+        setTimeout: () => 1, clearTimeout() {},
+        setInterval: trackIntervals ? ((fn, delay) => { const id = ++nextIntervalId; intervals.set(id, { fn, delay }); return id; }) : (() => 1),
+        clearInterval: trackIntervals ? (id => intervals.delete(id)) : (() => {}),
         requestAnimationFrame: () => { animationFrames++; return 1; }, cancelAnimationFrame() {}, performance: { now: () => 0 }
     });
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../resilience.js'), 'utf8'), context);
@@ -2860,7 +2996,8 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8'), context);
     await listeners.DOMContentLoaded();
     const state = () => JSON.parse(vm.runInContext('JSON.stringify({ currentFolder, galleryViewMode, imageMode, slideshowInterval, slideshowPlaying, isGridViewActive, mediaFiles, activeSource, rememberPreferences })', context));
-    return { context, get, state, requests, saved, sourceLabels, warnings, historyCalls, windowListeners: listeners, get animationFrames() { return animationFrames; } };
+    return { context, get, state, requests, saved, sourceLabels, warnings, historyCalls,
+        windowListeners: listeners, documentListeners, intervals, get animationFrames() { return animationFrames; } };
 }
 
 test('pinch zoom transitions smoothly to one-finger pan and cancellation clears gestures', async () => {

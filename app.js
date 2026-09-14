@@ -766,6 +766,7 @@ function saveDateCache() {
     }
 }
 let autoRefreshTimer = null;
+let autoRefreshGeneration = 0;
 let isScanning = false;
 let scannedFolders = 0, scannedFiles = 0;
 let mediaLoadId = 0;
@@ -1837,7 +1838,7 @@ function handleMissingFolder(folder) {
     savePreferences();
 }
 
-async function loadGallery({ preserveView = true, forceCacheClear = false, silent = false } = {}) {
+async function loadGallery({ preserveView = true, forceCacheClear = false, silent = false, automatic = false } = {}) {
     if (isScanning && silent) return;
     scanSession?.abort();
     const session = new AbortController();
@@ -1855,10 +1856,10 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
     thumbnailGrid.setAttribute('aria-busy', 'true');
     btnRefreshGrid.disabled = true; $('btn-sort').disabled = true;
     $('scan-loading').hidden = false;
-    runtimeDiscoveryMode = usesPublishedManifest() ? 'pending' : 'directory';
-    updateControlStates();
-    if (usesPublishedManifest()) resetPersistentManifest({ cacheBust: forceCacheClear });
-    setScanStatus(usesPublishedManifest() ? 'Loading media index…' :
+    const retryPublishedManifest = usesPublishedManifest() && (!automatic || runtimeDiscoveryMode !== 'directory');
+    setRuntimeDiscoveryMode(retryPublishedManifest ? 'pending' : 'directory');
+    if (retryPublishedManifest) resetPersistentManifest({ cacheBust: forceCacheClear });
+    setScanStatus(retryPublishedManifest ? 'Loading media index…' :
         (mediaFiles.length || subfolders.length ? 'Refreshing folders…' : 'Scanning folders…'));
     try {
         const listing = await scanDirectory(folder, {
@@ -1987,11 +1988,10 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
         return false;
     } finally {
         if (scanSession === session) {
-            runtimeDiscoveryMode = isManifestOnlySource() ? 'manifest'
+            setRuntimeDiscoveryMode(isManifestOnlySource() ? 'manifest'
                 : usedDirectory ? 'directory'
                 : usedManifest ? 'manifest'
-                : usesPublishedManifest() ? 'pending' : 'directory';
-            updateControlStates();
+                : usesPublishedManifest() ? 'pending' : 'directory');
             isScanning = false;
             thumbnailGrid.setAttribute('aria-busy', 'false');
             btnRefreshGrid.disabled = false; $('btn-sort').disabled = false;
@@ -3266,16 +3266,46 @@ function setupEventListeners() {
         if (gridViewContainer.scrollTo) gridViewContainer.scrollTo({ top: 0, behavior: 'smooth' });
         else gridViewContainer.scrollTop = 0;
     });
-    document.addEventListener('visibilitychange', () => { if (!document.hidden && autoRefreshEnabled) loadGallery({ preserveView: true, silent: true }); });
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) requestAutomaticRefresh();
+    });
+}
+
+function isAutomaticRefreshEffective() {
+    return autoRefreshEnabled && !isPublishedManifestActive();
+}
+
+function clearAutoRefreshTimer() {
+    autoRefreshGeneration++;
+    if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+}
+
+function requestAutomaticRefresh(generation = autoRefreshGeneration) {
+    if (generation !== autoRefreshGeneration || !isAutomaticRefreshEffective()) return false;
+    if (!document.hidden) loadGallery({ preserveView: true, silent: true, automatic: true });
+    return true;
+}
+
+function reconcileAutoRefreshTimer() {
+    if (!isAutomaticRefreshEffective()) {
+        if (autoRefreshTimer) clearAutoRefreshTimer();
+        return;
+    }
+    if (autoRefreshTimer) return;
+    const generation = ++autoRefreshGeneration;
+    autoRefreshTimer = setInterval(() => requestAutomaticRefresh(generation), refreshInterval * 1000);
+}
+
+function setRuntimeDiscoveryMode(mode) {
+    const changed = runtimeDiscoveryMode !== mode;
+    runtimeDiscoveryMode = mode;
+    if (changed) updateControlStates();
+    reconcileAutoRefreshTimer();
 }
 
 function startAutoRefreshTimer() {
-    if (autoRefreshTimer) clearInterval(autoRefreshTimer);
-    autoRefreshTimer = null;
-    if (!autoRefreshEnabled) return;
-    autoRefreshTimer = setInterval(() => {
-        if (!document.hidden) loadGallery({ preserveView: true, silent: true });
-    }, refreshInterval * 1000);
+    reconcileAutoRefreshTimer();
 }
 
 async function toggleTvMode() {
