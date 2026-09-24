@@ -617,6 +617,14 @@ Generate thumbnails and the index together:
 python generate_thumbnails.py photos thumbnails --manifest folderframe-data/library.json
 ```
 
+Thumbnail-only runs store successful path, byte-size, and nanosecond-mtime
+signatures in `thumbnails/.thumbnail-cache.json` by default. Use
+`--thumbnail-cache folderframe-data/thumbnail-cache.json` to place this
+persistent cache elsewhere. This makes reused WebP previews safe when a mount
+is repointed at different media under the same paths. Existing previews with a
+matching trusted metadata signature can seed this cache; other previews are
+reconciled once.
+
 Or update only the index:
 
 ```bash
@@ -665,6 +673,15 @@ and repair missing sidecars without reopening unchanged originals.
 `--manifest-only` also performs metadata extraction when Pillow is installed;
 without Pillow it reports that EXIF is unavailable and still produces an
 mtime-only manifest.
+
+After a complete source walk, the helper removes orphaned generated `.webp`
+previews and empty preview directories beneath the configured thumbnail root.
+It never follows thumbnail symlinks or deletes non-WebP files. Any directory
+enumeration or source-stat error suppresses pruning for that run, retaining
+uncertain previews. Decode failures still report normal preview warnings but do
+not block pruning of unrelated confirmed orphans. Originals remain read-only.
+
+
 
 GPS extraction is enabled by default. Existing libraries need one new scan to
 backfill coordinates. Pass `--exclude-gps` to skip the GPS sub-IFD and remove

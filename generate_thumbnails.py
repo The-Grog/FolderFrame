@@ -2,6 +2,7 @@
 """Generate optional FolderFrame WebP thumbnails and a persistent media manifest."""
 
 import argparse
+import errno
 import hashlib
 import json
 import math
@@ -15,6 +16,8 @@ IMAGE_TYPES = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp", ".heic
 MEDIA_TYPES = IMAGE_TYPES | {".mp4", ".mov", ".webm", ".m4v"}
 MANIFEST_VERSION = 1
 FAILURE_CACHE_VERSION = 1
+THUMBNAIL_CACHE_VERSION = 1
+THUMBNAIL_CACHE_MAX_ENTRIES = 200000
 METADATA_CACHE_VERSION = 1
 METADATA_EXTRACTION_REVISION = 1
 EXIF_IFD = 34665
@@ -239,6 +242,143 @@ def write_failure_cache(path: Optional[Path], failures: dict) -> None:
         print(f"Could not update thumbnail failure cache {path}: {error}")
 
 
+def path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def thumbnail_target_is_safe(target: Path, thumb_root: Path) -> bool:
+    try:
+        return not target.is_symlink() and path_is_within(target, thumb_root)
+    except OSError:
+        return False
+
+
+def thumbnail_cache_record(relative: str, signature: dict, target: Path) -> Optional[dict]:
+    try:
+        thumbnail_mtime_ns = target.stat().st_mtime_ns
+    except OSError:
+        return None
+    return {
+        "path": relative,
+        "signature": signature,
+        "thumbnailMtimeNs": thumbnail_mtime_ns,
+        "success": True,
+    }
+
+
+def thumbnail_cache_entry_is_current(entry, relative: str, signature: dict, target: Path) -> bool:
+    if not isinstance(entry, dict) or entry.get("path") != relative or entry.get("signature") != signature or \
+            entry.get("success") is not True:
+        return False
+    try:
+        return entry.get("thumbnailMtimeNs") == target.stat().st_mtime_ns
+    except OSError:
+        return False
+
+
+def read_thumbnail_cache(path: Optional[Path]) -> dict:
+    payload = read_json(path) if path else None
+    if not isinstance(payload, dict) or payload.get("version") != THUMBNAIL_CACHE_VERSION:
+        return {}
+    entries = payload.get("entries")
+    return entries if isinstance(entries, dict) else {}
+
+
+def write_thumbnail_cache(path: Optional[Path], entries: dict) -> None:
+    if path is None:
+        return
+    bounded_entries = {
+        relative: entries[relative]
+        for relative in sorted(entries)[:THUMBNAIL_CACHE_MAX_ENTRIES]
+    }
+    if len(entries) > len(bounded_entries):
+        print(f"Thumbnail success cache is capped at {THUMBNAIL_CACHE_MAX_ENTRIES} entries.")
+    try:
+        atomic_json(path, {
+            "version": THUMBNAIL_CACHE_VERSION,
+            "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "entries": bounded_entries,
+        })
+    except OSError as error:
+        print(f"Could not update thumbnail success cache {path}: {error}")
+
+
+def remove_stale_thumbnail(target: Path, thumb_root: Path, relative: str) -> bool:
+    if not target.exists() and not target.is_symlink():
+        return True
+    if not thumbnail_target_is_safe(target, thumb_root):
+        print(f"Could not remove unsafe stale thumbnail {relative}.")
+        return False
+    try:
+        target.unlink()
+        return True
+    except OSError as error:
+        print(f"Could not remove stale thumbnail {relative}: {error}")
+        return False
+
+
+def prune_orphan_thumbnails(thumb_root: Path, expected: set[str]) -> tuple[int, int]:
+    if thumb_root.is_symlink():
+        print(f"Could not prune thumbnails because root is a symlink: {thumb_root}")
+        return 0, 1
+    try:
+        root = thumb_root.resolve()
+    except OSError as error:
+        print(f"Could not prepare thumbnail pruning: {error}")
+        return 0, 1
+    if not root.exists():
+        return 0, 0
+    if not root.is_dir():
+        print(f"Could not prune thumbnails because root is unsafe: {root}")
+        return 0, 1
+
+    pruned = warnings = 0
+
+    def walk_error(error):
+        nonlocal warnings
+        warnings += 1
+        print(f"Could not enumerate thumbnails for pruning: {error}")
+
+    for walk_root, _directories, filenames in os.walk(root, topdown=False, followlinks=False, onerror=walk_error):
+        directory = Path(walk_root)
+        if not path_is_within(directory, root) or directory.is_symlink():
+            warnings += 1
+            print(f"Could not prune unsafe thumbnail directory {directory}.")
+            continue
+        for filename in filenames:
+            candidate = directory / filename
+            if candidate.suffix.lower() != ".webp":
+                continue
+            try:
+                relative = candidate.relative_to(root).as_posix()
+            except ValueError:
+                warnings += 1
+                continue
+            if relative in expected:
+                continue
+            if not thumbnail_target_is_safe(candidate, root):
+                warnings += 1
+                print(f"Could not prune unsafe thumbnail {relative}.")
+                continue
+            try:
+                candidate.unlink()
+                pruned += 1
+            except OSError as error:
+                warnings += 1
+                print(f"Could not prune orphaned thumbnail {relative}: {error}")
+        if directory == root:
+            continue
+        try:
+            directory.rmdir()
+        except OSError as error:
+            if error.errno not in (errno.ENOTEMPTY, errno.EEXIST):
+                warnings += 1
+                print(f"Could not remove empty thumbnail directory {directory}: {error}")
+    return pruned, warnings
 def read_metadata_cache(path: Optional[Path], include_gps: bool) -> dict:
     payload = read_json(path) if path else None
     if not isinstance(payload, dict) or payload.get("version") != METADATA_CACHE_VERSION or \
@@ -278,7 +418,8 @@ def metadata_manifest_fields(summary: dict, sidecar_relative: Optional[str]) -> 
 
 def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: int,
         failure_cache_path: Optional[Path] = None, manifest_path: Optional[Path] = None,
-        include_gps: bool = True, thumbnails: bool = True) -> dict:
+        include_gps: bool = True, thumbnails: bool = True,
+        thumbnail_cache_path: Optional[Path] = None) -> dict:
     try:
         from PIL import Image, ImageOps
     except ImportError as error:
@@ -287,6 +428,7 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
         print("EXIF extraction unavailable because Pillow is not installed; writing an mtime-only manifest.")
         return {
             "created": 0, "current": 0, "failed": 0, "skippedFailures": 0,
+            "thumbnailsPruned": 0, "thumbnailPruneWarnings": 0,
             "changedDirectories": set(), "metadataRecords": {}, "metadataExtracted": 0,
             "metadataReused": 0, "metadataWarnings": 1,
         }
@@ -297,10 +439,15 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
         pass
 
     created = current = failed = skipped_failures = 0
+    thumbnails_pruned = thumbnail_prune_warnings = 0
     metadata_extracted = metadata_reused = metadata_warnings = 0
     changed_directories = set()
     cached_failures = read_failure_cache(failure_cache_path)
     retained_failures = {}
+    cached_thumbnails = read_thumbnail_cache(thumbnail_cache_path)
+    retained_thumbnails = {}
+    invalidated_thumbnail_entries = set()
+    expected_thumbnails = set()
     metadata_enabled = manifest_path is not None
     exif_root = manifest_path.parent / "exif.d" if metadata_enabled else None
     metadata_cache_path = exif_root / ".metadata-cache.json" if exif_root else None
@@ -308,11 +455,14 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
     retained_metadata = {}
     metadata_records = {}
     expected_sidecars = set()
-    enumeration_errors = []
+    discovery_errors = []
+    metadata_enumeration_errors = []
 
     def walk_error(error):
-        enumeration_errors.append(str(error))
-        print(f"Metadata enumeration warning: {error}")
+        discovery_errors.append(str(error))
+        if metadata_enabled:
+            metadata_enumeration_errors.append(str(error))
+        print(f"Source enumeration warning: {error}")
 
     for root, directories, filenames in os.walk(media_root, onerror=walk_error):
         directory = Path(root)
@@ -325,14 +475,18 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
             if ignored_file_name(filename) or source.suffix.lower() not in IMAGE_TYPES:
                 continue
             relative = source.relative_to(media_root).as_posix()
+            thumbnail_relative = relative + ".webp"
+            if thumbnails and thumb_root is not None:
+                expected_thumbnails.add(thumbnail_relative)
             try:
                 source_stat = source.stat()
             except OSError as error:
+                discovery_errors.append(relative)
                 if thumbnails:
                     failed += 1
                     print(f"Preview failed for {relative}: {error}")
                 if metadata_enabled:
-                    enumeration_errors.append(relative)
+                    metadata_enumeration_errors.append(relative)
                     print(f"EXIF metadata unavailable for {relative}: {error}")
                 continue
             signature = {"size": source_stat.st_size, "mtimeNs": source_stat.st_mtime_ns}
@@ -343,27 +497,63 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
             summary = cached_entry["metadata"] if metadata_is_current else None
             needs_metadata = metadata_enabled and not metadata_is_current
 
-            target = thumb_root / (relative + ".webp") if thumbnails and thumb_root else None
-            target_is_current = False
-            target_check_failed = False
-            thumbnail_failure_is_current = False
+            target = thumb_root / thumbnail_relative if thumbnails and thumb_root is not None else None
+            target_is_current = target_check_failed = thumbnail_failure_is_current = False
+            target_is_usable = False
             if thumbnails:
-                try:
-                    target_is_current = target.exists() and target.stat().st_mtime_ns >= source_stat.st_mtime_ns
-                except OSError as error:
+                if target is None or not thumbnail_target_is_safe(target, thumb_root):
                     failed += 1
+                    invalidated_thumbnail_entries.add(relative)
                     retained_failures[relative] = signature
                     changed_directories.add(directory_relative)
-                    print(f"Preview failed for {relative}: {error}")
+                    print(f"Preview failed for {relative}: unsafe thumbnail target")
                     target_check_failed = True
+                else:
+                    try:
+                        target_is_usable = target.is_file()
+                        if target_is_usable:
+                            cache_entry = cached_thumbnails.get(relative)
+                            target_is_current = thumbnail_cache_entry_is_current(
+                                cache_entry, relative, signature, target
+                            )
+                            if not target_is_current and metadata_is_current and \
+                                    target.stat().st_mtime_ns >= source_stat.st_mtime_ns:
+                                seeded_entry = thumbnail_cache_record(relative, signature, target)
+                                if seeded_entry is not None:
+                                    retained_thumbnails[relative] = seeded_entry
+                                    target_is_current = True
+                    except OSError as error:
+                        failed += 1
+                        invalidated_thumbnail_entries.add(relative)
+                        retained_failures[relative] = signature
+                        changed_directories.add(directory_relative)
+                        print(f"Preview failed for {relative}: {error}")
+                        target_check_failed = True
                 if target_is_current:
                     current += 1
+                    if relative not in retained_thumbnails:
+                        retained_thumbnails[relative] = cached_thumbnails[relative]
                 elif cached_failures.get(relative) == signature:
                     skipped_failures += 1
                     retained_failures[relative] = signature
+                    invalidated_thumbnail_entries.add(relative)
                     thumbnail_failure_is_current = True
+                    if target_is_usable and not remove_stale_thumbnail(target, thumb_root, relative):
+                        thumbnail_prune_warnings += 1
 
             needs_thumbnail = thumbnails and not target_is_current and not target_check_failed and not thumbnail_failure_is_current
+
+            def record_thumbnail_failure(error):
+                nonlocal failed, thumbnail_prune_warnings
+                failed += 1
+                invalidated_thumbnail_entries.add(relative)
+                retained_failures[relative] = signature
+                changed_directories.add(directory_relative)
+                print(f"Preview failed for {relative}: {error}")
+                if target is not None and thumbnail_target_is_safe(target, thumb_root) and \
+                        not remove_stale_thumbnail(target, thumb_root, relative):
+                    thumbnail_prune_warnings += 1
+
             if needs_metadata or needs_thumbnail:
                 try:
                     with Image.open(source) as image:
@@ -387,13 +577,14 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
                                         "RGBA" if "transparency" in thumbnail_image.info else "RGB")
                                 thumbnail_image.thumbnail((size, size), Image.Resampling.LANCZOS)
                                 thumbnail_image.save(target, "WEBP", quality=quality, method=6)
+                                cache_entry = thumbnail_cache_record(relative, signature, target)
+                                if cache_entry is None:
+                                    raise OSError("could not validate generated thumbnail")
+                                retained_thumbnails[relative] = cache_entry
                                 created += 1
                                 changed_directories.add(directory_relative)
                             except Exception as error:
-                                failed += 1
-                                retained_failures[relative] = signature
-                                changed_directories.add(directory_relative)
-                                print(f"Preview failed for {relative}: {error}")
+                                record_thumbnail_failure(error)
                 except Exception as error:
                     if needs_metadata:
                         summary = {}
@@ -402,10 +593,7 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
                         changed_directories.add(directory_relative)
                         print(f"EXIF metadata unavailable for {relative}: {error}")
                     if needs_thumbnail:
-                        failed += 1
-                        retained_failures[relative] = signature
-                        changed_directories.add(directory_relative)
-                        print(f"Preview failed for {relative}: {error}")
+                        record_thumbnail_failure(error)
             elif metadata_is_current:
                 metadata_reused += 1
 
@@ -439,12 +627,24 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
                 metadata_records[relative] = metadata_manifest_fields(
                     summary, sidecar_relative if sidecar_ready else None
                 )
+
     if thumbnails:
         write_failure_cache(failure_cache_path, retained_failures)
+        cache_to_write = dict(cached_thumbnails) if discovery_errors else {}
+        cache_to_write.update(retained_thumbnails)
+        for relative in invalidated_thumbnail_entries:
+            cache_to_write.pop(relative, None)
+        write_thumbnail_cache(thumbnail_cache_path, cache_to_write)
+        if discovery_errors:
+            print("Thumbnail pruning skipped because source discovery was incomplete.")
+        elif thumb_root is not None:
+            pruned, prune_warnings = prune_orphan_thumbnails(thumb_root, expected_thumbnails)
+            thumbnails_pruned += pruned
+            thumbnail_prune_warnings += prune_warnings
     if metadata_enabled:
         if not write_metadata_cache(metadata_cache_path, include_gps, retained_metadata):
             metadata_warnings += 1
-        if not enumeration_errors and exif_root.exists():
+        if not discovery_errors and exif_root.exists():
             for sidecar in exif_root.rglob("*.json"):
                 if sidecar == metadata_cache_path or sidecar.resolve() in expected_sidecars:
                     continue
@@ -458,14 +658,14 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
         "current": current,
         "failed": failed,
         "skippedFailures": skipped_failures,
+        "thumbnailsPruned": thumbnails_pruned,
+        "thumbnailPruneWarnings": thumbnail_prune_warnings,
         "changedDirectories": changed_directories,
         "metadataRecords": metadata_records,
         "metadataExtracted": metadata_extracted,
         "metadataReused": metadata_reused,
-        "metadataWarnings": metadata_warnings + len(enumeration_errors),
+        "metadataWarnings": metadata_warnings + len(metadata_enumeration_errors),
     }
-
-
 def directory_record(media_root: Path, relative: str, old_record, thumb_root: Optional[Path], counters: dict,
         metadata_records=None, force: bool = False):
     directory = media_root / relative if relative else media_root
@@ -610,6 +810,8 @@ def main() -> int:
     parser.add_argument("--manifest-only", action="store_true", help="Skip thumbnail generation and update only the manifest")
     parser.add_argument("--failure-cache", type=Path,
         help="Cache unchanged thumbnail failures in this JSON file")
+    parser.add_argument("--thumbnail-cache", type=Path,
+        help="Cache successful thumbnail source signatures in this JSON file")
     parser.add_argument("--status-file", type=Path,
         help="Write structured scan results to this JSON file")
     gps = parser.add_mutually_exclusive_group()
@@ -635,6 +837,8 @@ def main() -> int:
         "current": 0,
         "failed": 0,
         "skippedFailures": 0,
+        "thumbnailsPruned": 0,
+        "thumbnailPruneWarnings": 0,
         "changedDirectories": set(),
         "metadataRecords": {},
         "metadataExtracted": 0,
@@ -644,21 +848,27 @@ def main() -> int:
     changed_thumbnail_dirs = set()
     if not args.manifest_only:
         failure_cache_path = args.failure_cache.resolve() if args.failure_cache else None
+        thumbnail_cache_path = args.thumbnail_cache.resolve() if args.thumbnail_cache else (
+            thumb_root / ".thumbnail-cache.json"
+        )
         thumbnail_result = generate(
             media_root, thumb_root, args.size, args.quality, failure_cache_path,
-            args.manifest.resolve() if args.manifest else None, args.include_gps, True
+            args.manifest.resolve() if args.manifest else None, args.include_gps, True,
+            thumbnail_cache_path,
         )
         changed_thumbnail_dirs = thumbnail_result["changedDirectories"]
         print(
             f"Thumbnails generated {thumbnail_result['created']}; "
             f"already current {thumbnail_result['current']}; "
             f"preview failures {thumbnail_result['failed']}; "
-            f"unchanged failures skipped {thumbnail_result['skippedFailures']}"
+            f"unchanged failures skipped {thumbnail_result['skippedFailures']}; "
+            f"pruned {thumbnail_result.get('thumbnailsPruned', 0)}; "
+            f"pruning warnings {thumbnail_result.get('thumbnailPruneWarnings', 0)}"
         )
     elif args.manifest:
         thumbnail_result = generate(
             media_root, None, args.size, args.quality, None,
-            args.manifest.resolve(), args.include_gps, False
+            args.manifest.resolve(), args.include_gps, False,
         )
         changed_thumbnail_dirs = thumbnail_result["changedDirectories"]
     if args.manifest:
@@ -682,6 +892,7 @@ def main() -> int:
     outcome = "failed" if manifest_result["errors"] else (
         "complete_with_warnings"
         if thumbnail_result["failed"] or thumbnail_result["skippedFailures"] or
+            thumbnail_result.get("thumbnailPruneWarnings", 0) or
             thumbnail_result.get("metadataWarnings", 0)
         else "complete"
     )
@@ -692,6 +903,8 @@ def main() -> int:
         "mediaFiles": manifest_result["files"] if args.manifest else None,
         "thumbnailsGenerated": thumbnail_result["created"],
         "thumbnailsCurrent": thumbnail_result["current"],
+        "thumbnailsPruned": thumbnail_result.get("thumbnailsPruned", 0),
+        "thumbnailPruneWarnings": thumbnail_result.get("thumbnailPruneWarnings", 0),
         "previewFailures": thumbnail_result["failed"],
         "unchangedFailuresSkipped": thumbnail_result["skippedFailures"],
         "manifestDirectoriesListed": manifest_result["listed"],
@@ -710,12 +923,11 @@ def main() -> int:
     print(
         f"{summary_prefix} — {status['mediaFiles'] if status['mediaFiles'] is not None else 'manifest disabled'} media files"
         f" · {status['thumbnailsGenerated']} thumbnails generated"
+        f" · {status['thumbnailsPruned']} thumbnails pruned"
         f" · {status['previewFailures']} preview failures"
         f" · {status['unchangedFailuresSkipped']} unchanged failures skipped"
         f" · {status['metadataWarnings']} metadata warnings"
     )
     return 1 if outcome == "failed" else 0
-
-
 if __name__ == "__main__":
     raise SystemExit(main())

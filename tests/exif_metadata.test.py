@@ -37,6 +37,8 @@ class FakeExif(dict):
 
 class FakeImage:
     size = (4032, 3024)
+    mode = "RGB"
+    info = {}
 
     def __init__(self, exif):
         self.exif = exif
@@ -49,6 +51,18 @@ class FakeImage:
 
     def __exit__(self, *_args):
         return False
+
+    def seek(self, _frame):
+        pass
+
+    def draft(self, _mode, _size):
+        pass
+
+    def thumbnail(self, _size, _resample):
+        pass
+
+    def save(self, path, *_args, **_kwargs):
+        pathlib.Path(path).write_bytes(b"thumbnail")
 
 
 class ExifMetadataTests(unittest.TestCase):
@@ -153,7 +167,7 @@ class ExifMetadataTests(unittest.TestCase):
 
             fake_pil = types.ModuleType("PIL")
             fake_pil.Image = ImageModule
-            fake_pil.ImageOps = object()
+            fake_pil.ImageOps = types.SimpleNamespace(exif_transpose=lambda image: image)
             GENERATOR.write_manifest(media, thumbs, manifest)
             self.assertNotIn("captureDate", json.loads(manifest.read_text(encoding="utf-8"))["root"]["files"][0])
             with mock.patch.dict(sys.modules, {"PIL": fake_pil}):
@@ -209,7 +223,7 @@ class ExifMetadataTests(unittest.TestCase):
             fake_pil.Image = types.SimpleNamespace(
                 open=lambda path: opens.append(path) or FakeImage(FakeExif())
             )
-            fake_pil.ImageOps = object()
+            fake_pil.ImageOps = types.SimpleNamespace(exif_transpose=lambda image: image)
             with mock.patch.dict(sys.modules, {"PIL": fake_pil}):
                 first = GENERATOR.generate(media, None, 480, 80, None, manifest, False, False)
                 second = GENERATOR.generate(media, None, 480, 80, None, manifest, False, False)
@@ -228,7 +242,7 @@ class ExifMetadataTests(unittest.TestCase):
             exif = FakeExif(exif={36867: "2026:09:12 10:00:00"})
             fake_pil = types.ModuleType("PIL")
             fake_pil.Image = types.SimpleNamespace(open=lambda _path: FakeImage(exif))
-            fake_pil.ImageOps = object()
+            fake_pil.ImageOps = types.SimpleNamespace(exif_transpose=lambda image: image)
             original_atomic = GENERATOR.atomic_json
 
             def fail_sidecar(path, payload):
@@ -288,7 +302,7 @@ class ExifMetadataTests(unittest.TestCase):
             exif = FakeExif(exif={36867: "2026:09:12 10:00:00"})
             fake_pil = types.ModuleType("PIL")
             fake_pil.Image = types.SimpleNamespace(open=lambda path: opens.append(path) or FakeImage(exif))
-            fake_pil.ImageOps = object()
+            fake_pil.ImageOps = types.SimpleNamespace(exif_transpose=lambda image: image)
             original_atomic = GENERATOR.atomic_json
 
             def fail_sidecars(path, payload):

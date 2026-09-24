@@ -38,4 +38,5 @@ jobs:
         run: |
           python -m py_compile generate_thumbnails.py
           python tests/thumbnail_failure_cache.test.py
+          python tests/thumbnail_pruning_signature.test.py
           python tests/exif_metadata.test.py
