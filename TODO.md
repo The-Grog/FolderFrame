@@ -5,6 +5,10 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ## Remaining work
 
+### Deployment release follow-up
+
+- [ ] **Native ARM64 hardware and browser validation** — The verified multi-architecture `v0.8.3` index now publishes `linux/amd64` and `linux/arm64` after immutable-candidate smoke tests. Record native ARM64 performance and browser playback separately; QEMU smoke success is not device validation. ARM/v7 remains unsupported.
+
 ### Browser and device testing
 
 - [ ] **Final device follow-up** — Confirm the latest slideshow visibility and TV-mode fixes, media failures/loading, and controls-free embeds in the target browsers.
