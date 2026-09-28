@@ -2107,16 +2107,37 @@ function renderWorkerStatus(status, { unavailable = false, newCompletion = false
     if (stateClass) workerStatusButton.classList.add(stateClass);
     $('worker-status-label').textContent = label;
     $('worker-status-summary').textContent = summary;
+    const plural = (count, singular, multiple = `${singular}s`) => `${count} ${count === 1 ? singular : multiple}`;
+    const warningReasons = [];
+    if (status?.previewFailures > 0) {
+        warningReasons.push(plural(status.previewFailures, 'new preview failure in this scan', 'new preview failures in this scan'));
+    }
+    if (status?.unchangedFailuresSkipped > 0) {
+        warningReasons.push(`${plural(status.unchangedFailuresSkipped, 'previously failed thumbnail skipped',
+            'previously failed thumbnails skipped')}. These files were not retried because they have not changed since the previous failure.`);
+    }
+    if (status?.thumbnailPruneWarnings > 0) {
+        warningReasons.push(plural(status.thumbnailPruneWarnings, 'thumbnail cleanup warning'));
+    }
+    if (status?.metadataWarnings > 0) warningReasons.push(plural(status.metadataWarnings, 'metadata warning'));
+    if (status?.outcome === 'failed' && status?.manifestErrors > 0) {
+        warningReasons.push(plural(status.manifestErrors, 'manifest error'));
+    }
+    if (status?.outcome === 'complete_with_warnings' && !warningReasons.length) {
+        warningReasons.push('The server reported warnings without detailed counts. Check the worker logs.');
+    }
+    $('worker-status-warnings').textContent = warningReasons.join(' · ');
+
     const counts = [];
-    const addCount = (key, text) => { if (status?.[key] !== undefined) counts.push(`${status[key]} ${text}`); };
-    addCount('mediaFiles', 'media files');
-    addCount('thumbnailsGenerated', 'thumbnails generated');
-    addCount('thumbnailsCurrent', 'thumbnails reused');
-    addCount('metadataExtracted', 'metadata records extracted');
-    addCount('metadataReused', 'metadata records reused');
-    addCount('previewFailures', 'preview failures');
-    addCount('metadataWarnings', 'metadata warnings');
-    addCount('manifestErrors', 'manifest errors');
+    const addRoutineCount = (key, text) => {
+        if (status?.[key] > 0 || (key === 'mediaFiles' && status?.[key] === 0)) counts.push(`${status[key]} ${text}`);
+    };
+    addRoutineCount('mediaFiles', 'media files');
+    addRoutineCount('thumbnailsGenerated', 'thumbnails generated');
+    addRoutineCount('thumbnailsCurrent', 'thumbnails reused');
+    addRoutineCount('thumbnailsPruned', 'thumbnails pruned');
+    addRoutineCount('metadataExtracted', 'metadata records extracted');
+    addRoutineCount('metadataReused', 'metadata records reused');
     $('worker-status-counts').textContent = counts.join(' · ');
     const completion = workerCompletionKey(status);
     const reloadAvailable = Boolean(workerStatusPendingCompletion &&
@@ -2124,7 +2145,7 @@ function renderWorkerStatus(status, { unavailable = false, newCompletion = false
         isPublishedManifestActive());
     workerStatusReload.hidden = !reloadAvailable;
     workerStatusButton.title = summary;
-    workerStatusButton.setAttribute('aria-label', `${label}. ${summary}`);
+    workerStatusButton.setAttribute('aria-label', `${label}. ${summary}${warningReasons.length ? ` ${warningReasons.join(' ')}` : ''}`);
     if (announcement && announcementKey !== workerStatusLastAnnouncement) {
         $('worker-status-announcer').textContent = announcement;
         workerStatusLastAnnouncement = announcementKey;

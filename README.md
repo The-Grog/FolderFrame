@@ -234,6 +234,10 @@ a valid worker-running record; “Using published library” only describes brow
 discovery. Stale or unavailable status is reported without treating the current
 library as broken. A newly observed completion offers **Reload Library**, which
 remains an explicit browser action and never starts a server scan.
+Expanded warning details distinguish new preview failures from unchanged files
+whose earlier failures were cached and skipped, plus metadata and thumbnail-
+cleanup warnings. Cached failures are retried after the source file's size or
+modification time changes.
 
 Put settings in `defaults` for both profiles or in `index`/`embed` to override them.
 

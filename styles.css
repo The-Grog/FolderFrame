@@ -716,7 +716,10 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     box-shadow:0 12px 35px rgba(0,0,0,.65); pointer-events:auto; white-space:normal; text-align:left;
 }
 .worker-status-summary { font-size:12px; line-height:1.4; }
+.worker-status-warnings { margin-top:8px; color:#fde68a; font-size:12px; line-height:1.45; }
+.worker-status-warnings:empty { display:none; }
 .worker-status-counts { margin-top:7px; color:#9ca3af; font-size:11px; line-height:1.45; }
+.worker-status-counts:empty { display:none; }
 .worker-status-actions { display:flex; justify-content:flex-end; margin-top:9px; }
 .worker-status-actions:empty { display:none; }
 .worker-status-actions .btn { min-height:36px; padding:6px 10px; font-size:12px; }

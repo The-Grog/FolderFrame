@@ -1545,6 +1545,65 @@ test('worker status polls only a configured endpoint and ignores a response canc
         'late status from a stopped lifecycle cannot update the UI');
 });
 
+test('worker warning details separate cached, current-scan, cleanup, and metadata warnings from routine counts', async () => {
+    const app = await boot();
+    const classes = new Set();
+    app.get('worker-status-button').classList = {
+        add: (...names) => names.forEach(name => classes.add(name)),
+        remove: (...names) => names.forEach(name => classes.delete(name)),
+        toggle() {},
+    };
+    vm.runInContext(`
+        activeSource.workerStatusUrl = 'https://example.test/frame/folderframe-data/worker-status.json';
+        activeSource.manifestUrl = 'https://example.test/frame/folderframe-data/library.json';
+        runtimeDiscoveryMode = 'manifest';
+    `, app.context);
+    const render = status => vm.runInContext(
+        `renderWorkerStatus(normalizeWorkerStatus(${JSON.stringify(status)}))`, app.context);
+    const base = {
+        version: 1, outcome: 'complete_with_warnings',
+        startedAt: '2026-09-27T12:00:00Z', completedAt: '2026-09-27T12:10:00Z',
+        mediaFiles: 16249, thumbnailsGenerated: 0, thumbnailsCurrent: 13940,
+        thumbnailsPruned: 0, metadataExtracted: 0, metadataReused: 14483,
+        previewFailures: 0, unchangedFailuresSkipped: 0, thumbnailPruneWarnings: 0,
+        metadataWarnings: 0, manifestErrors: 0,
+    };
+
+    render({ ...base, unchangedFailuresSkipped: 543 });
+    assert.equal(app.get('worker-status-warnings').textContent,
+        '543 previously failed thumbnails skipped. These files were not retried because they have not changed since the previous failure.');
+    assert.match(app.get('worker-status-counts').textContent, /13940 thumbnails reused/);
+    assert.match(app.get('worker-status-counts').textContent, /14483 metadata records reused/);
+    assert.doesNotMatch(app.get('worker-status-counts').textContent, /failure|warning|error/i);
+    assert.match(app.get('worker-status-button').attributes['aria-label'], /543 previously failed thumbnails skipped/);
+
+    render({ ...base, previewFailures: 2 });
+    assert.equal(app.get('worker-status-warnings').textContent, '2 new preview failures in this scan');
+    render({ ...base, thumbnailPruneWarnings: 1 });
+    assert.equal(app.get('worker-status-warnings').textContent, '1 thumbnail cleanup warning');
+    render({ ...base, metadataWarnings: 3 });
+    assert.equal(app.get('worker-status-warnings').textContent, '3 metadata warnings');
+    render({ ...base, previewFailures: 2, unchangedFailuresSkipped: 5,
+        thumbnailPruneWarnings: 1, metadataWarnings: 3 });
+    assert.match(app.get('worker-status-warnings').textContent, /2 new preview failures in this scan/);
+    assert.match(app.get('worker-status-warnings').textContent, /5 previously failed thumbnails skipped/);
+    assert.match(app.get('worker-status-warnings').textContent, /1 thumbnail cleanup warning/);
+    assert.match(app.get('worker-status-warnings').textContent, /3 metadata warnings/);
+
+    render(base);
+    assert.equal(app.get('worker-status-warnings').textContent,
+        'The server reported warnings without detailed counts. Check the worker logs.');
+    assert.ok(classes.has('is-warning'));
+
+    render({ ...base, outcome: 'complete' });
+    assert.equal(app.get('worker-status-warnings').textContent, '');
+    assert.equal(classes.has('is-warning'), false);
+    assert.ok(classes.has('is-complete'));
+
+    render({ ...base, outcome: 'failed', manifestErrors: 2 });
+    assert.equal(app.get('worker-status-warnings').textContent, '2 manifest errors');
+});
+
 test('auto discovery restores Auto Refresh when the current manifest subtree falls back to a directory', async () => {
     const config = normalizeConfigCopy({ manifestPath: 'folderframe-data/library.json' });
     const index = {
