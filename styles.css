@@ -240,8 +240,10 @@ button, select, .media-error-actions a { touch-action:manipulation; }
 .grid-item img { pointer-events:auto; -webkit-user-drag:none; }
 .grid-item video { pointer-events:none; }
 .grid-item-caption { position:absolute; bottom:0; left:0; right:0; background:linear-gradient(transparent,rgba(0,0,0,.95)); padding:28px 10px 10px; font-size:11px; font-weight:600; color:#eee; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; opacity:0; transition:opacity .2s; z-index:4; }
+.grid-item.has-video-duration .grid-item-caption { padding-right:58px; }
 .grid-item:hover .grid-item-caption,.grid-item:focus-visible .grid-item-caption { opacity:1; }
 .video-badge { position:absolute; top:10px; right:10px; background:rgba(0,0,0,.72); border:1px solid rgba(255,255,255,.1); border-radius:50%; color:#fff; width:30px; height:30px; display:flex; align-items:center; justify-content:center; z-index:3; }
+.video-duration-badge { position:absolute; right:8px; bottom:8px; z-index:5; border:1px solid rgba(255,255,255,.14); border-radius:5px; background:rgba(0,0,0,.78); color:#fff; padding:3px 5px; font-size:10px; font-weight:600; line-height:1; font-variant-numeric:tabular-nums; pointer-events:none; }
 .album-card { display:flex; flex-direction:column; align-items:center; justify-content:center; background:linear-gradient(145deg,#111827,#0b0b0d); }
 .album-icon { color:#60a5fa; opacity:.9; margin-bottom:8px; }
 .album-name { max-width:85%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:15px; font-weight:700; }

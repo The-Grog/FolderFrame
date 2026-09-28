@@ -234,10 +234,11 @@ a valid worker-running record; “Using published library” only describes brow
 discovery. Stale or unavailable status is reported without treating the current
 library as broken. A newly observed completion offers **Reload Library**, which
 remains an explicit browser action and never starts a server scan.
-Expanded warning details distinguish new preview failures from unchanged files
-whose earlier failures were cached and skipped, plus metadata and thumbnail-
-cleanup warnings. Cached failures are retried after the source file's size or
-modification time changes.
+Warnings describe operations that failed during the current scan, including new
+preview, metadata, and thumbnail-cleanup failures. Previously unavailable
+previews skipped from the failure cache remain visible as neutral details, but
+do not make an otherwise successful scan a warning. Those files may still lack
+previews and are retried after their source size or modification time changes.
 
 Put settings in `defaults` for both profiles or in `index`/`embed` to override them.
 
@@ -646,7 +647,11 @@ python generate_thumbnails.py photos --manifest folderframe-data/library.json --
 ```
 
 The helper stores path, modification time, size, and optional thumbnail,
-`captureDate`, and `exifPath` fields, with one chunk per top-level folder.
+`captureDate`, `exifPath`, and video `duration` fields, with one chunk per
+top-level folder. Duration is a positive number of seconds and is emitted only
+for MP4, MOV, WEBM, and M4V files when `ffprobe` can read it. The grid formats
+this manifest value as a compact duration badge without requesting video
+metadata in the browser.
 Capture dates are integer Unix milliseconds. Full allowlisted EXIF summaries
 stay in `exif.d/` beside the manifest rather than being inlined:
 
@@ -682,11 +687,17 @@ interpreted as UTC solely for deterministic sorting and `utcAssumed` is
 recorded.
 
 The first run backfills metadata even for current thumbnails. Later runs reuse
-a private path/size/mtime signature cache, including remembered no-EXIF results,
-and repair missing sidecars without reopening unchanged originals.
+a private path/size/mtime signature cache, including remembered no-EXIF and
+unavailable-duration results, and repair missing sidecars without reopening
+unchanged originals. An unchanged video with an unavailable duration is not
+probed repeatedly; change the source file or remove
+`exif.d/.metadata-cache.json` to retry. A run made without `ffprobe` is retried
+automatically after `ffprobe` becomes available.
 `--manifest-only` also performs metadata extraction when Pillow is installed;
-without Pillow it reports that EXIF is unavailable and still produces an
-mtime-only manifest.
+without Pillow it reports that image EXIF is unavailable and still produces
+the manifest, including video durations when `ffprobe` is available. Duration
+unavailability is optional metadata and does not turn a successful scan into a
+warning.
 
 After a complete source walk, the helper removes orphaned generated `.webp`
 previews and empty preview directories beneath the configured thumbnail root.

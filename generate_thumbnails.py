@@ -8,6 +8,8 @@ import json
 import math
 import os
 import re
+import shutil
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -20,6 +22,7 @@ THUMBNAIL_CACHE_VERSION = 1
 THUMBNAIL_CACHE_MAX_ENTRIES = 200000
 METADATA_CACHE_VERSION = 1
 METADATA_EXTRACTION_REVISION = 1
+VIDEO_DURATION_TIMEOUT = 15
 EXIF_IFD = 34665
 GPS_IFD = 34853
 EXIF_TAGS = {
@@ -100,6 +103,24 @@ def finite_number(value):
     except (TypeError, ValueError, ZeroDivisionError, OverflowError):
         return None
     return number if math.isfinite(number) else None
+
+
+def probe_video_duration(source: Path, ffprobe_path: str, timeout: int = VIDEO_DURATION_TIMEOUT):
+    """Return a positive duration in seconds, or None when optional probing fails."""
+    try:
+        result = subprocess.run([
+            ffprobe_path, "-v", "error", "-show_entries", "format=duration",
+            "-of", "json", str(source),
+        ], capture_output=True, text=True, timeout=timeout, check=False)
+        if result.returncode != 0:
+            return None
+        payload = json.loads(result.stdout)
+        format_details = payload.get("format") if isinstance(payload, dict) else None
+        raw_duration = format_details.get("duration") if isinstance(format_details, dict) else None
+        duration = None if isinstance(raw_duration, bool) else finite_number(raw_duration)
+        return duration if duration is not None and duration > 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+        return None
 
 
 def exif_value(exif, sub_ifd, tag):
@@ -406,13 +427,16 @@ def write_metadata_cache(path: Optional[Path], include_gps: bool, entries: dict)
         return False
 
 
-def metadata_manifest_fields(summary: dict, sidecar_relative: Optional[str]) -> dict:
+def metadata_manifest_fields(summary: dict, sidecar_relative: Optional[str], duration=None) -> dict:
     fields = {}
     capture_date = summary.get("captureDate")
     if isinstance(capture_date, int):
         fields["captureDate"] = capture_date
     if sidecar_relative:
         fields["exifPath"] = sidecar_relative
+    if isinstance(duration, (int, float)) and not isinstance(duration, bool) and \
+            math.isfinite(duration) and duration > 0:
+        fields["duration"] = duration
     return fields
 
 
@@ -420,18 +444,13 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
         failure_cache_path: Optional[Path] = None, manifest_path: Optional[Path] = None,
         include_gps: bool = True, thumbnails: bool = True,
         thumbnail_cache_path: Optional[Path] = None) -> dict:
+    Image = ImageOps = None
     try:
         from PIL import Image, ImageOps
     except ImportError as error:
         if thumbnails:
             raise SystemExit("Pillow is required. Install it with: python -m pip install Pillow") from error
-        print("EXIF extraction unavailable because Pillow is not installed; writing an mtime-only manifest.")
-        return {
-            "created": 0, "current": 0, "failed": 0, "skippedFailures": 0,
-            "thumbnailsPruned": 0, "thumbnailPruneWarnings": 0,
-            "changedDirectories": set(), "metadataRecords": {}, "metadataExtracted": 0,
-            "metadataReused": 0, "metadataWarnings": 1,
-        }
+        print("EXIF extraction unavailable because Pillow is not installed; image records will use file metadata only.")
     try:
         import pillow_heif
         pillow_heif.register_heif_opener()
@@ -457,6 +476,7 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
     expected_sidecars = set()
     discovery_errors = []
     metadata_enumeration_errors = []
+    ffprobe_path = shutil.which("ffprobe") if metadata_enabled else None
 
     def walk_error(error):
         discovery_errors.append(str(error))
@@ -472,35 +492,65 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
         directories[:] = [name for name in directories if not ignored_child_directory(directory, name)]
         for filename in filenames:
             source = directory / filename
-            if ignored_file_name(filename) or source.suffix.lower() not in IMAGE_TYPES:
+            if ignored_file_name(filename) or source.suffix.lower() not in MEDIA_TYPES:
                 continue
+            is_image = source.suffix.lower() in IMAGE_TYPES
+            is_video = not is_image
             relative = source.relative_to(media_root).as_posix()
             thumbnail_relative = relative + ".webp"
-            if thumbnails and thumb_root is not None:
+            if thumbnails and is_image and thumb_root is not None:
                 expected_thumbnails.add(thumbnail_relative)
             try:
                 source_stat = source.stat()
             except OSError as error:
                 discovery_errors.append(relative)
-                if thumbnails:
+                if thumbnails and is_image:
                     failed += 1
                     print(f"Preview failed for {relative}: {error}")
-                if metadata_enabled:
+                if metadata_enabled and is_image and Image is not None:
                     metadata_enumeration_errors.append(relative)
                     print(f"EXIF metadata unavailable for {relative}: {error}")
                 continue
             signature = {"size": source_stat.st_size, "mtimeNs": source_stat.st_mtime_ns}
             directory_relative = source.parent.relative_to(media_root).as_posix() if source.parent != media_root else ""
             cached_entry = cached_metadata.get(relative) if metadata_enabled else None
+
+            if is_video:
+                if not metadata_enabled:
+                    continue
+                signature_matches = isinstance(cached_entry, dict) and cached_entry.get("signature") == signature
+                duration_checked = signature_matches and cached_entry.get("durationChecked") is True
+                prior_probe_available = cached_entry.get("durationProbeAvailable") is True if signature_matches else False
+                duration_is_current = duration_checked and (prior_probe_available or ffprobe_path is None)
+                duration = cached_entry.get("duration") if duration_is_current else None
+                if not duration_is_current:
+                    duration = probe_video_duration(source, ffprobe_path) if ffprobe_path else None
+                    changed_directories.add(directory_relative)
+                    if ffprobe_path and duration is None:
+                        print(f"Video duration unavailable for {relative}; it will be retried after the source changes or metadata cache is cleared.")
+                else:
+                    metadata_reused += 1
+                retained_metadata[relative] = {
+                    "signature": signature,
+                    "metadata": {},
+                    "sidecarReady": False,
+                    "duration": duration,
+                    "durationChecked": True,
+                    "durationProbeAvailable": prior_probe_available or ffprobe_path is not None,
+                }
+                metadata_records[relative] = metadata_manifest_fields({}, None, duration)
+                continue
+
             metadata_is_current = isinstance(cached_entry, dict) and cached_entry.get("signature") == signature and \
-                isinstance(cached_entry.get("metadata"), dict)
+                isinstance(cached_entry.get("metadata"), dict) and \
+                cached_entry.get("exifExtractionAvailable") is not False
             summary = cached_entry["metadata"] if metadata_is_current else None
-            needs_metadata = metadata_enabled and not metadata_is_current
+            needs_metadata = metadata_enabled and Image is not None and not metadata_is_current
 
             target = thumb_root / thumbnail_relative if thumbnails and thumb_root is not None else None
             target_is_current = target_check_failed = thumbnail_failure_is_current = False
             target_is_usable = False
-            if thumbnails:
+            if thumbnails and is_image:
                 if target is None or not thumbnail_target_is_safe(target, thumb_root):
                     failed += 1
                     invalidated_thumbnail_entries.add(relative)
@@ -541,7 +591,7 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
                     if target_is_usable and not remove_stale_thumbnail(target, thumb_root, relative):
                         thumbnail_prune_warnings += 1
 
-            needs_thumbnail = thumbnails and not target_is_current and not target_check_failed and not thumbnail_failure_is_current
+            needs_thumbnail = thumbnails and is_image and not target_is_current and not target_check_failed and not thumbnail_failure_is_current
 
             def record_thumbnail_failure(error):
                 nonlocal failed, thumbnail_prune_warnings
@@ -622,7 +672,8 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
                 if previous_sidecar_ready is None or previous_sidecar_ready != sidecar_ready:
                     changed_directories.add(directory_relative)
                 retained_metadata[relative] = {
-                    "signature": signature, "metadata": summary, "sidecarReady": sidecar_ready
+                    "signature": signature, "metadata": summary, "sidecarReady": sidecar_ready,
+                    "exifExtractionAvailable": metadata_is_current or Image is not None,
                 }
                 metadata_records[relative] = metadata_manifest_fields(
                     summary, sidecar_relative if sidecar_ready else None
@@ -800,6 +851,16 @@ def write_manifest(media_root: Path, thumb_root: Optional[Path], manifest_path: 
     return counters
 
 
+def classify_scan_outcome(manifest_errors, thumbnail_result):
+    if manifest_errors:
+        return "failed"
+    if (thumbnail_result.get("failed", 0) or
+            thumbnail_result.get("thumbnailPruneWarnings", 0) or
+            thumbnail_result.get("metadataWarnings", 0)):
+        return "complete_with_warnings"
+    return "complete"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate FolderFrame grid thumbnails and an optional persistent manifest.")
     parser.add_argument("media", type=Path, help="Local media directory (for example photos)")
@@ -889,13 +950,7 @@ def main() -> int:
             f"reused {manifest_result['reused']}; errors {len(manifest_result['errors'])}"
         )
 
-    outcome = "failed" if manifest_result["errors"] else (
-        "complete_with_warnings"
-        if thumbnail_result["failed"] or thumbnail_result["skippedFailures"] or
-            thumbnail_result.get("thumbnailPruneWarnings", 0) or
-            thumbnail_result.get("metadataWarnings", 0)
-        else "complete"
-    )
+    outcome = classify_scan_outcome(manifest_result["errors"], thumbnail_result)
     status = {
         "version": 1,
         "completedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -925,7 +980,7 @@ def main() -> int:
         f" · {status['thumbnailsGenerated']} thumbnails generated"
         f" · {status['thumbnailsPruned']} thumbnails pruned"
         f" · {status['previewFailures']} preview failures"
-        f" · {status['unchangedFailuresSkipped']} unchanged failures skipped"
+        f" · {status['unchangedFailuresSkipped']} previously unavailable previews skipped"
         f" · {status['metadataWarnings']} metadata warnings"
     )
     return 1 if outcome == "failed" else 0

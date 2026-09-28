@@ -1373,7 +1373,7 @@ test('persistent manifest supplies listings, dates, sizes, and generated thumbna
                 path: '2026/photo.jpg', mtime: 1788177600000, size: 12345,
                 captureDate: 1788000000000, thumbnailPath: '2026/photo.jpg.webp',
                 exifPath: 'exif.d/2026/photo.jpg.json'
-            }] }
+            }, { path: '2026/clip.mp4', mtime: 1788177600001, size: 54321, duration: 12.5 }] }
         }
     };
     const app = await boot({ config, fetchHandler: async (url, options = {}) => {
@@ -1384,7 +1384,10 @@ test('persistent manifest supplies listings, dates, sizes, and generated thumbna
     } });
     const listing = await vm.runInContext("scanDirectory('2026')", app.context);
     assert.deepEqual(JSON.parse(JSON.stringify(listing)), {
-        filePaths: ['https://example.test/frame/photos/2026/photo.jpg'], folderNames: []
+        filePaths: [
+            'https://example.test/frame/photos/2026/photo.jpg',
+            'https://example.test/frame/photos/2026/clip.mp4'
+        ], folderNames: []
     });
     assert.equal(directoryRequests, 0);
     assert.equal(vm.runInContext("modifiedDateCache.get('https://example.test/frame/photos/2026/photo.jpg').size", app.context), 12345);
@@ -1393,6 +1396,7 @@ test('persistent manifest supplies listings, dates, sizes, and generated thumbna
         'https://example.test/frame/thumbs/2026/photo.jpg.webp');
     assert.equal(vm.runInContext("persistentExifUrls.get('https://example.test/frame/photos/2026/photo.jpg')", app.context),
         'https://example.test/frame/folderframe-data/exif.d/2026/photo.jpg.json');
+    assert.equal(vm.runInContext("persistentVideoDurations.get('https://example.test/frame/photos/2026/clip.mp4')", app.context), 12.5);
     assert.equal(directoryRequests, 0, 'sidecar URLs are recorded but never fetched');
     assert.equal(app.get('btn-auto-refresh').hidden, true);
     assert.equal(app.get('refresh-grid-label').textContent, 'Reload Library');
@@ -1403,6 +1407,64 @@ test('persistent manifest supplies listings, dates, sizes, and generated thumbna
     vm.runInContext("listingFromManifest(replacementRecord, '2026')", app.context);
     assert.equal(vm.runInContext("modifiedDateCache.get('https://example.test/frame/photos/2026/photo.jpg').captureDate", app.context), null);
     assert.equal(vm.runInContext("persistentExifUrls.has('https://example.test/frame/photos/2026/photo.jpg')", app.context), false);
+    assert.equal(vm.runInContext("persistentVideoDurations.has('https://example.test/frame/photos/2026/clip.mp4')", app.context), false);
+});
+
+test('manifest video durations validate, format, render accessibly, refresh in place, and clear when absent', async () => {
+    const app = await boot();
+    assert.equal(vm.runInContext('formatVideoDuration(59.9)', app.context), '0:59');
+    assert.equal(vm.runInContext('formatVideoDuration(222.4)', app.context), '3:42');
+    assert.equal(vm.runInContext('formatVideoDuration(3923)', app.context), '1:05:23');
+    assert.equal(vm.runInContext('formatVideoDuration(0.4)', app.context), '0:00');
+    for (const value of ['0', '-1', 'Infinity', 'NaN', 'null', "'12'", 'true']) {
+        assert.equal(vm.runInContext(`formatVideoDuration(${value})`, app.context), null);
+    }
+
+    app.context.durationRecord = { path: '', folders: [], files: [
+        { path: 'clip.mp4', duration: 222.4 },
+        { path: 'photo.jpg', duration: 40 },
+        { path: 'invalid.webm', duration: '90' }
+    ] };
+    vm.runInContext(`{
+        const listing = listingFromManifest(durationRecord, '');
+        mediaFiles = listing.filePaths;
+        renderGridView();
+    }`, app.context);
+    assert.equal(vm.runInContext("persistentVideoDurations.get('https://example.test/frame/photos/clip.mp4')", app.context), 222.4);
+    assert.equal(vm.runInContext("persistentVideoDurations.has('https://example.test/frame/photos/photo.jpg')", app.context), false);
+    assert.equal(vm.runInContext("persistentVideoDurations.has('https://example.test/frame/photos/invalid.webm')", app.context), false);
+    let badges = app.get('thumbnail-grid').querySelectorAll('.video-duration-badge');
+    assert.equal(badges.length, 1);
+    assert.equal(badges[0].textContent, '3:42');
+    assert.equal(badges[0].attributes['aria-hidden'], 'true');
+    const videoTile = badges[0].parentElement;
+    assert.equal(videoTile.attributes['aria-label'], 'Open clip.mp4, duration 3 minutes 42 seconds');
+
+    app.context.durationRecord.files[0].duration = 3923;
+    vm.runInContext(`{
+        const listing = listingFromManifest(durationRecord, '');
+        mediaFiles = listing.filePaths;
+        renderGridView();
+    }`, app.context);
+    badges = app.get('thumbnail-grid').querySelectorAll('.video-duration-badge');
+    assert.equal(badges[0].textContent, '1:05:23', 'same file path receives refreshed manifest metadata');
+
+    delete app.context.durationRecord.files[0].duration;
+    vm.runInContext(`{
+        const listing = listingFromManifest(durationRecord, '');
+        mediaFiles = listing.filePaths;
+        renderGridView();
+    }`, app.context);
+    assert.equal(app.get('thumbnail-grid').querySelectorAll('.video-duration-badge').length, 0);
+    assert.equal(vm.runInContext("persistentVideoDurations.has('https://example.test/frame/photos/clip.mp4')", app.context), false);
+
+    vm.runInContext("persistentVideoDurations.set('https://example.test/frame/photos/clip.mp4', 10)", app.context);
+    app.context.durationRecord.files = [];
+    vm.runInContext("listingFromManifest(durationRecord, '')", app.context);
+    assert.equal(vm.runInContext('persistentVideoDurations.size', app.context), 0, 'removed manifest files leave no stale duration');
+
+    vm.runInContext("persistentVideoDurations.set('https://example.test/frame/photos/clip.mp4', 10); resetPersistentManifest()", app.context);
+    assert.equal(vm.runInContext('persistentVideoDurations.size', app.context), 0, 'manifest/source reset clears stale durations');
 });
 
 test('manifest EXIF sidecar URLs are manifest-relative, encoded, and reject unsafe paths', async () => {
@@ -1545,6 +1607,32 @@ test('worker status polls only a configured endpoint and ignores a response canc
         'late status from a stopped lifecycle cannot update the UI');
 });
 
+test('legacy cached-only warning completion stays neutral while preserving notification and reload behavior', async () => {
+    const app = await boot();
+    const classes = new Set();
+    app.get('worker-status-button').classList = {
+        add: (...names) => names.forEach(name => classes.add(name)),
+        remove: (...names) => names.forEach(name => classes.delete(name)),
+        toggle() {},
+    };
+    vm.runInContext(`
+        activeSource.workerStatusUrl = 'https://example.test/frame/folderframe-data/worker-status.json';
+        activeSource.manifestUrl = 'https://example.test/frame/folderframe-data/library.json';
+        runtimeDiscoveryMode = 'manifest';
+        handleWorkerStatus({version:1,outcome:'complete',completedAt:'2026-09-27T12:00:00Z',
+            previewFailures:0,unchangedFailuresSkipped:0,thumbnailPruneWarnings:0,metadataWarnings:0,manifestErrors:0});
+        handleWorkerStatus({version:1,outcome:'complete_with_warnings',completedAt:'2026-09-27T13:00:00Z',
+            previewFailures:0,unchangedFailuresSkipped:543,thumbnailPruneWarnings:0,metadataWarnings:0,manifestErrors:0});
+    `, app.context);
+    assert.equal(app.get('worker-status-label').textContent, 'Update completed');
+    assert.equal(app.get('worker-status-warnings').textContent, '');
+    assert.ok(classes.has('is-complete'));
+    assert.equal(classes.has('is-warning'), false);
+    assert.equal(app.get('worker-status-reload').hidden, false);
+    assert.equal(app.get('worker-status-announcer').textContent,
+        'Update completed. Reload Library is available.');
+});
+
 test('worker warning details separate cached, current-scan, cleanup, and metadata warnings from routine counts', async () => {
     const app = await boot();
     const classes = new Set();
@@ -1570,12 +1658,13 @@ test('worker warning details separate cached, current-scan, cleanup, and metadat
     };
 
     render({ ...base, unchangedFailuresSkipped: 543 });
-    assert.equal(app.get('worker-status-warnings').textContent,
-        '543 previously failed thumbnails skipped. These files were not retried because they have not changed since the previous failure.');
+    assert.equal(app.get('worker-status-warnings').textContent, '');
     assert.match(app.get('worker-status-counts').textContent, /13940 thumbnails reused/);
     assert.match(app.get('worker-status-counts').textContent, /14483 metadata records reused/);
-    assert.doesNotMatch(app.get('worker-status-counts').textContent, /failure|warning|error/i);
-    assert.match(app.get('worker-status-button').attributes['aria-label'], /543 previously failed thumbnails skipped/);
+    assert.match(app.get('worker-status-counts').textContent, /543 previously unavailable previews skipped/);
+    assert.match(app.get('worker-status-counts').textContent, /not retried because they have not changed/);
+    assert.equal(classes.has('is-warning'), false);
+    assert.ok(classes.has('is-complete'));
 
     render({ ...base, previewFailures: 2 });
     assert.equal(app.get('worker-status-warnings').textContent, '2 new preview failures in this scan');
@@ -1586,7 +1675,8 @@ test('worker warning details separate cached, current-scan, cleanup, and metadat
     render({ ...base, previewFailures: 2, unchangedFailuresSkipped: 5,
         thumbnailPruneWarnings: 1, metadataWarnings: 3 });
     assert.match(app.get('worker-status-warnings').textContent, /2 new preview failures in this scan/);
-    assert.match(app.get('worker-status-warnings').textContent, /5 previously failed thumbnails skipped/);
+    assert.doesNotMatch(app.get('worker-status-warnings').textContent, /previously unavailable|not retried/);
+    assert.match(app.get('worker-status-counts').textContent, /5 previously unavailable previews skipped/);
     assert.match(app.get('worker-status-warnings').textContent, /1 thumbnail cleanup warning/);
     assert.match(app.get('worker-status-warnings').textContent, /3 metadata warnings/);
 
@@ -1595,10 +1685,16 @@ test('worker warning details separate cached, current-scan, cleanup, and metadat
         'The server reported warnings without detailed counts. Check the worker logs.');
     assert.ok(classes.has('is-warning'));
 
-    render({ ...base, outcome: 'complete' });
+    render({ ...base, outcome: 'complete', thumbnailsPruned: 12 });
     assert.equal(app.get('worker-status-warnings').textContent, '');
     assert.equal(classes.has('is-warning'), false);
     assert.ok(classes.has('is-complete'));
+    assert.match(app.get('worker-status-counts').textContent, /12 thumbnails pruned/);
+
+    render({ ...base, unchangedFailuresSkipped: 543, previewFailures: '0' });
+    assert.equal(app.get('worker-status-warnings').textContent,
+        'The server reported warnings without detailed counts. Check the worker logs.');
+    assert.ok(classes.has('is-warning'), 'invalid counters cannot prove a legacy warning is clean');
 
     render({ ...base, outcome: 'failed', manifestErrors: 2 });
     assert.equal(app.get('worker-status-warnings').textContent, '2 manifest errors');

@@ -440,6 +440,7 @@ const PERSISTENT_MANIFEST_VERSION = 1;
 let persistentManifestState = null;
 const persistentThumbnailUrls = new Map();
 const persistentExifUrls = new Map();
+const persistentVideoDurations = new Map();
 let manifestFailureNotice = false;
 let runtimeDiscoveryMode = 'directory';
 
@@ -483,6 +484,7 @@ function resetPersistentManifest({ cacheBust = false } = {}) {
         : null;
     persistentThumbnailUrls.clear();
     persistentExifUrls.clear();
+    persistentVideoDurations.clear();
     updatePhotoInfoAvailability();
 }
 
@@ -557,8 +559,19 @@ function listingFromManifest(record, expectedPath) {
         const exif = entry.exifPath ? manifestSidecarUrl(entry.exifPath) : null;
         if (exif) persistentExifUrls.set(file, exif);
         else persistentExifUrls.delete(file);
+        if (isVideoFile(file) && typeof entry.duration === 'number' &&
+            Number.isFinite(entry.duration) && entry.duration > 0) {
+            persistentVideoDurations.set(file, entry.duration);
+        } else persistentVideoDurations.delete(file);
         return file;
     });
+    const listedFiles = new Set(filePaths);
+    for (const file of persistentVideoDurations.keys()) {
+        const relative = settingsApi.relativeMediaPath(activeSource, file);
+        if (parentFolder(relative) === expectedPath && !listedFiles.has(file)) {
+            persistentVideoDurations.delete(file);
+        }
+    }
     return { filePaths, folderNames: [...valid.folders] };
 }
 
@@ -2036,6 +2049,22 @@ function normalizeWorkerStatus(payload) {
     return normalized;
 }
 
+const WORKER_CURRENT_FAILURE_COUNTERS = [
+    'previewFailures', 'thumbnailPruneWarnings', 'metadataWarnings', 'manifestErrors'
+];
+
+function classifyWorkerStatus(status) {
+    const outcome = status?.outcome;
+    if (outcome === 'failed' || outcome === 'running') return outcome;
+    if (WORKER_CURRENT_FAILURE_COUNTERS.some(key => status?.[key] > 0)) return 'complete_with_warnings';
+    const explicitCurrentZeros = WORKER_CURRENT_FAILURE_COUNTERS.every(key =>
+        Object.prototype.hasOwnProperty.call(status || {}, key) && status[key] === 0);
+    if (outcome === 'complete_with_warnings' && status?.unchangedFailuresSkipped > 0 && explicitCurrentZeros) {
+        return 'complete';
+    }
+    return outcome;
+}
+
 function workerCompletionKey(status) {
     return status?.completedAt && ['complete', 'complete_with_warnings'].includes(status.outcome)
         ? status.completedAt : null;
@@ -2068,11 +2097,12 @@ function renderWorkerStatus(status, { unavailable = false, newCompletion = false
     let stateClass = '';
     let announcement = '';
     let announcementKey = '';
+    const effectiveOutcome = classifyWorkerStatus(status);
     if (unavailable) {
         label = 'Status unavailable';
         summary = 'Update status is unavailable. The current library remains usable.';
         stateClass = 'is-warning';
-    } else if (status?.outcome === 'running') {
+    } else if (effectiveOutcome === 'running') {
         const stale = Date.now() - Date.parse(status.startedAt) > WORKER_STATUS_STALE_MS;
         label = stale ? 'Last reported updating' : 'Updating library';
         summary = stale
@@ -2081,13 +2111,13 @@ function renderWorkerStatus(status, { unavailable = false, newCompletion = false
         stateClass = stale ? 'is-warning' : 'is-running';
         announcement = stale ? '' : 'Updating library. Current photos remain available.';
         announcementKey = stale ? '' : `running:${status.startedAt}`;
-    } else if (status?.outcome === 'failed') {
+    } else if (effectiveOutcome === 'failed') {
         label = 'Update failed';
         summary = `The server update failed ${formatWorkerStatusAge(status.completedAt)}. The existing library remains available.`;
         stateClass = 'is-error';
         announcement = 'Library update failed. The existing library remains available.';
         announcementKey = `failed:${status.completedAt}`;
-    } else if (status?.outcome === 'complete_with_warnings') {
+    } else if (effectiveOutcome === 'complete_with_warnings') {
         label = 'Update warnings';
         summary = `The server update completed with warnings ${formatWorkerStatusAge(status.completedAt)}.`;
         stateClass = 'is-warning';
@@ -2095,7 +2125,7 @@ function renderWorkerStatus(status, { unavailable = false, newCompletion = false
             announcement = 'Update completed with warnings. Reload Library is available.';
             announcementKey = `complete:${status.completedAt}`;
         }
-    } else if (status?.outcome === 'complete') {
+    } else if (effectiveOutcome === 'complete') {
         label = workerStatusPendingCompletion === workerCompletionKey(status) ? 'Update completed' : 'Library status';
         summary = `The last server update completed ${formatWorkerStatusAge(status.completedAt)}.`;
         stateClass = 'is-complete';
@@ -2112,18 +2142,14 @@ function renderWorkerStatus(status, { unavailable = false, newCompletion = false
     if (status?.previewFailures > 0) {
         warningReasons.push(plural(status.previewFailures, 'new preview failure in this scan', 'new preview failures in this scan'));
     }
-    if (status?.unchangedFailuresSkipped > 0) {
-        warningReasons.push(`${plural(status.unchangedFailuresSkipped, 'previously failed thumbnail skipped',
-            'previously failed thumbnails skipped')}. These files were not retried because they have not changed since the previous failure.`);
-    }
     if (status?.thumbnailPruneWarnings > 0) {
         warningReasons.push(plural(status.thumbnailPruneWarnings, 'thumbnail cleanup warning'));
     }
     if (status?.metadataWarnings > 0) warningReasons.push(plural(status.metadataWarnings, 'metadata warning'));
-    if (status?.outcome === 'failed' && status?.manifestErrors > 0) {
+    if (effectiveOutcome === 'failed' && status?.manifestErrors > 0) {
         warningReasons.push(plural(status.manifestErrors, 'manifest error'));
     }
-    if (status?.outcome === 'complete_with_warnings' && !warningReasons.length) {
+    if (effectiveOutcome === 'complete_with_warnings' && !warningReasons.length) {
         warningReasons.push('The server reported warnings without detailed counts. Check the worker logs.');
     }
     $('worker-status-warnings').textContent = warningReasons.join(' · ');
@@ -2138,6 +2164,10 @@ function renderWorkerStatus(status, { unavailable = false, newCompletion = false
     addRoutineCount('thumbnailsPruned', 'thumbnails pruned');
     addRoutineCount('metadataExtracted', 'metadata records extracted');
     addRoutineCount('metadataReused', 'metadata records reused');
+    if (status?.unchangedFailuresSkipped > 0) {
+        counts.push(`${plural(status.unchangedFailuresSkipped, 'previously unavailable preview skipped',
+            'previously unavailable previews skipped')}. These files were not retried because they have not changed since the previous failure.`);
+    }
     $('worker-status-counts').textContent = counts.join(' · ');
     const completion = workerCompletionKey(status);
     const reloadAvailable = Boolean(workerStatusPendingCompletion &&
@@ -2432,6 +2462,29 @@ async function navigateToFolder(folder, { historyMode = 'push' } = {}) {
 // new arrays — checked directly here rather than re-deriving it from sort
 // rules, so this stays correct regardless of sort mode or future changes to
 // how previews are ordered.
+function formatVideoDuration(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
+    const total = Math.floor(value);
+    const seconds = total % 60;
+    const minutes = Math.floor(total / 60) % 60;
+    const hours = Math.floor(total / 3600);
+    return hours
+        ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+        : `${Math.floor(total / 60)}:${String(seconds).padStart(2, '0')}`;
+}
+
+function describeVideoDuration(value) {
+    const total = Math.floor(value);
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor(total / 60) % 60;
+    const seconds = total % 60;
+    const parts = [];
+    if (hours) parts.push(`${hours} hour${hours === 1 ? '' : 's'}`);
+    if (minutes) parts.push(`${minutes} minute${minutes === 1 ? '' : 's'}`);
+    if (seconds || !parts.length) parts.push(`${seconds} second${seconds === 1 ? '' : 's'}`);
+    return parts.join(' ');
+}
+
 function updateGridView(previousMediaFiles) {
     const session = gridSession;
     if (!session?.appendTiles || session.folder !== currentFolder || session.mode !== galleryViewMode ||
@@ -2597,6 +2650,17 @@ function renderGridView() {
             badge.className = 'video-badge';
             badge.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>';
             item.appendChild(badge);
+            const duration = persistentVideoDurations.get(file);
+            const durationText = formatVideoDuration(duration);
+            if (durationText) {
+                const durationBadge = document.createElement('span');
+                durationBadge.className = 'video-duration-badge';
+                durationBadge.textContent = durationText;
+                durationBadge.setAttribute('aria-hidden', 'true');
+                item.classList.add('has-video-duration');
+                item.setAttribute('aria-label', `Open ${filename}, duration ${describeVideoDuration(duration)}`);
+                item.appendChild(durationBadge);
+            }
         } else if (isHeicFile(file)) {
             const imgEl = document.createElement('img');
             watchThumbnail(imgEl, item);

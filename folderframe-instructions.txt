@@ -99,8 +99,8 @@ For a large recursive source, add "scanCache": true to that source in
 folderframe.config.json. FolderFrame stores a lean manifest in browser localStorage
 and validates each visited directory with an HTTP Last-Modified HEAD response.
 Unchanged listings are reused; changed listings are downloaded and parsed again.
-The manifest records directory/media paths and available timestamp, size, and
-thumbnail-path metadata. It requires no database, PHP, build step, or writable
+The manifest records directory/media paths and available timestamp, size,
+thumbnail-path, and video-duration metadata. It requires no database, PHP, build step, or writable
 server directory. Missing/invalid/full browser storage, or a server without a usable
 directory timestamp, safely falls back to the normal full scan. Clearing site data
 removes the manifest and the next scan rebuilds it.
@@ -119,6 +119,12 @@ appdata and served as an ordinary static file. Add manifestPath to the source:
 Generate thumbnails and the index together:
 
     python generate_thumbnails.py photos thumbnails --manifest folderframe-data/library.json
+
+When ffprobe is installed, MP4, MOV, WEBM, and M4V entries also receive an
+optional duration in seconds for gallery badges. Unavailable durations are
+cached for unchanged files without warning; change the video or remove
+folderframe-data/exif.d/.metadata-cache.json to retry. If ffprobe was missing,
+the next scan after it becomes available retries automatically.
 
 Or update only the index:
 

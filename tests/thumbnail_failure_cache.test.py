@@ -82,6 +82,45 @@ class ThumbnailFailureCacheTests(unittest.TestCase):
             self.assertEqual(payload["previewFailures"], 3)
             self.assertEqual(payload["unchangedFailuresSkipped"], 8)
 
+    def test_cached_failures_alone_are_a_clean_scan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            media = root / "media"
+            thumbnails = root / "thumbnails"
+            status = root / "data" / "worker-status.json"
+            media.mkdir()
+            with mock.patch.object(GENERATOR, "generate", return_value={
+                "created": 0, "current": 13940, "failed": 0,
+                "skippedFailures": 543, "thumbnailsPruned": 0,
+                "thumbnailPruneWarnings": 0, "changedDirectories": set(),
+                "metadataRecords": {}, "metadataExtracted": 0,
+                "metadataReused": 14483, "metadataWarnings": 0,
+            }), mock.patch.object(GENERATOR, "write_manifest", return_value={
+                "listed": 0, "reused": 20, "files": 16249, "errors": [],
+            }), mock.patch.object(sys, "argv", [
+                str(ROOT / "generate_thumbnails.py"), str(media), str(thumbnails),
+                "--manifest", str(root / "data" / "library.json"),
+                "--status-file", str(status),
+            ]):
+                self.assertEqual(GENERATOR.main(), 0)
+            payload = json.loads(status.read_text(encoding="utf-8"))
+            self.assertEqual(payload["outcome"], "complete")
+            self.assertEqual(payload["unchangedFailuresSkipped"], 543)
+
+    def test_outcome_classification_uses_only_current_failures(self):
+        clean = {
+            "failed": 0, "skippedFailures": 543, "current": 10,
+            "thumbnailsPruned": 12, "thumbnailPruneWarnings": 0,
+            "metadataWarnings": 0,
+        }
+        self.assertEqual(GENERATOR.classify_scan_outcome([], clean), "complete")
+        for key in ("failed", "thumbnailPruneWarnings", "metadataWarnings"):
+            with self.subTest(key=key):
+                result = dict(clean)
+                result[key] = 1
+                self.assertEqual(GENERATOR.classify_scan_outcome([], result), "complete_with_warnings")
+        self.assertEqual(GENERATOR.classify_scan_outcome(["incomplete"], clean), "failed")
+
     def test_manifest_error_still_fails_scan(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
