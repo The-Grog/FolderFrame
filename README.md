@@ -225,6 +225,16 @@ manifest, then directory listings), `"directory"` (never request a manifest), or
 `"manifest"` (require the published manifest and never scan directories). Strict
 manifest mode is intended for static hosts and ignores `scanCache`.
 
+Deployments that publicly serve the worker's JSON status can also set an
+optional per-source `workerStatusPath`, for example
+`"folderframe-data/worker-status.json"`. FolderFrame then shows a compact,
+read-only update indicator and polls only that explicit endpoint. Static hosts
+omit the setting and keep their existing behavior. “Updating library” reflects
+a valid worker-running record; “Using published library” only describes browser
+discovery. Stale or unavailable status is reported without treating the current
+library as broken. A newly observed completion offers **Reload Library**, which
+remains an explicit browser action and never starts a server scan.
+
 Put settings in `defaults` for both profiles or in `index`/`embed` to override them.
 
 | Setting | Built-in default | Allowed values / meaning |

@@ -1453,6 +1453,98 @@ test('auto discovery falls back from an invalid manifest and refresh revalidates
     assert.equal(app.get('refresh-grid-label').textContent, 'Reload Library');
 });
 
+test('optional worker status paths resolve safely and require JSON', () => {
+    const source = normalize({ sources: [{
+        id: 'photos', label: 'Photos', path: 'photos/',
+        workerStatusPath: 'folderframe-data/worker-status.json'
+    }] }).sources[0];
+    assert.equal(source.workerStatusUrl, 'https://example.test/frame/folderframe-data/worker-status.json');
+    assert.equal(normalize({ sources: [{ id: 'plain', label: 'Plain', path: 'photos/' }] })
+        .sources[0].workerStatusUrl, null);
+    for (const workerStatusPath of ['', 'file:///tmp/status.json', 'https://user:pass@example.test/status.json',
+        'status.json?old=1', 'status.txt', '..\\status.json']) {
+        assert.throws(() => normalize({ sources: [{ id: 'p', label: 'P', path: 'photos/', workerStatusPath }] }),
+            /workerStatusPath/);
+    }
+});
+
+test('worker status distinguishes live, stale, completed, warning, and failed updates without refreshing the gallery', async () => {
+    const app = await boot();
+    vm.runInContext(`
+        activeSource.workerStatusUrl = 'https://example.test/frame/folderframe-data/worker-status.json';
+        activeSource.manifestUrl = 'https://example.test/frame/folderframe-data/library.json';
+        runtimeDiscoveryMode = 'manifest';
+        globalThis.workerGalleryLoads = 0;
+        loadGallery = async () => { workerGalleryLoads++; return true; };
+        renderWorkerStatus(null);
+    `, app.context);
+    assert.equal(app.get('worker-status-button').hidden, false);
+    assert.equal(app.requests.some(url => String(url).includes('worker-status.json')), false,
+        'sources without an endpoint are never probed');
+    const now = new Date().toISOString();
+    const old = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+    vm.runInContext(`handleWorkerStatus({version:1,outcome:'complete',startedAt:'${old}',completedAt:'2026-01-01T00:00:00Z',mediaFiles:12})`, app.context);
+    assert.equal(app.get('worker-status-reload').hidden, true, 'first completion establishes the baseline');
+    vm.runInContext(`handleWorkerStatus({version:1,outcome:'running',startedAt:'${now}'})`, app.context);
+    assert.equal(app.get('worker-status-label').textContent, 'Updating library');
+    vm.runInContext(`handleWorkerStatus({version:1,outcome:'running',startedAt:'${old}'})`, app.context);
+    assert.equal(app.get('worker-status-label').textContent, 'Last reported updating');
+
+    vm.runInContext(`handleWorkerStatus({version:1,outcome:'complete_with_warnings',startedAt:'${old}',completedAt:'2026-01-02T00:00:00Z',mediaFiles:13,previewFailures:2})`, app.context);
+    assert.equal(app.get('worker-status-label').textContent, 'Update warnings');
+    assert.equal(app.get('worker-status-reload').hidden, false);
+    const announcement = app.get('worker-status-announcer').textContent;
+    vm.runInContext('renderWorkerStatus(workerStatusLastPayload)', app.context);
+    assert.equal(app.get('worker-status-reload').hidden, false, 'pending completion remains actionable after rerender');
+    vm.runInContext('handleWorkerStatus(workerStatusLastPayload)', app.context);
+    assert.equal(app.get('worker-status-announcer').textContent, announcement, 'duplicate polls are not re-announced');
+    vm.runInContext("handleWorkerStatus({version:1,outcome:'complete',startedAt:'2025-12-31T23:00:00Z',completedAt:'2025-12-31T23:30:00Z',mediaFiles:1})", app.context);
+    assert.equal(app.get('worker-status-label').textContent, 'Update warnings', 'older completions cannot replace the latest state');
+    assert.equal(app.get('worker-status-reload').hidden, false, 'older completions cannot clear the pending action');
+    assert.equal(app.get('worker-status-announcer').textContent, announcement, 'older completions are not announced');
+    assert.equal(vm.runInContext('workerGalleryLoads', app.context), 0, 'status changes never reload in the background');
+    await app.get('worker-status-reload').listeners.click({ stopPropagation() {} });
+    assert.equal(vm.runInContext('workerGalleryLoads', app.context), 1, 'reload remains an explicit user action');
+    assert.equal(app.get('worker-status-reload').hidden, true, 'successful reload acknowledges the completion');
+
+    vm.runInContext(`handleWorkerStatus({version:1,outcome:'failed',startedAt:'${old}',completedAt:'2026-01-03T00:00:00Z'})`, app.context);
+    assert.equal(app.get('worker-status-label').textContent, 'Update failed');
+    assert.equal(vm.runInContext('workerGalleryLoads', app.context), 1);
+    assert.throws(() => vm.runInContext("handleWorkerStatus({version:2,outcome:'running',startedAt:'2026-01-01T00:00:00Z'})", app.context),
+        /Unsupported worker status/);
+
+    vm.runInContext('controlsEnabled = false; renderWorkerStatus(workerStatusLastPayload)', app.context);
+    assert.equal(app.get('worker-status-button').hidden, true);
+    vm.runInContext('controlsEnabled = true; tvModeEnabled = true; renderWorkerStatus(workerStatusLastPayload)', app.context);
+    assert.equal(app.get('worker-status-button').hidden, true);
+});
+
+test('worker status polls only a configured endpoint and ignores a response cancelled by lifecycle teardown', async () => {
+    const running = { version: 1, outcome: 'running', startedAt: new Date().toISOString() };
+    const config = normalizeConfigCopy({ workerStatusPath: 'folderframe-data/worker-status.json' });
+    const responsive = await boot({ config, fetchHandler: async url => {
+        if (url.includes('worker-status.json')) return { ok: true, json: async () => running };
+        return { ok: true, url, text: async () => '' };
+    } });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(responsive.requests.filter(url => String(url).includes('worker-status.json')).length, 1);
+    assert.equal(responsive.get('worker-status-label').textContent, 'Updating library');
+
+    let releaseStatus;
+    const delayed = new Promise(resolve => { releaseStatus = resolve; });
+    const cancelled = await boot({ config, fetchHandler: async url => {
+        if (url.includes('worker-status.json')) return delayed;
+        return { ok: true, url, text: async () => '' };
+    } });
+    const generation = vm.runInContext('workerStatusGeneration', cancelled.context);
+    vm.runInContext('stopWorkerStatusPolling()', cancelled.context);
+    releaseStatus({ ok: true, json: async () => running });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.ok(vm.runInContext('workerStatusGeneration', cancelled.context) > generation);
+    assert.notEqual(cancelled.get('worker-status-label').textContent, 'Updating library',
+        'late status from a stopped lifecycle cannot update the UI');
+});
+
 test('auto discovery restores Auto Refresh when the current manifest subtree falls back to a directory', async () => {
     const config = normalizeConfigCopy({ manifestPath: 'folderframe-data/library.json' });
     const index = {
@@ -2257,16 +2349,27 @@ test('TV mode is not restored from saved preferences but explicit defaults still
     assert.equal(api.resolveSettings(normalize({ index: { tvMode: true } }), '', saved).settings.tvMode, true);
 });
 
-test('exiting fullscreen clears TV mode and pauses without stopping ordinary slideshows', async () => {
-    const app = await boot({ search: '?tv=1' });
+test('exiting fullscreen clears TV mode, pauses, and resumes worker-status polling', async () => {
+    const config = normalizeConfigCopy({ workerStatusPath: 'folderframe-data/worker-status.json' });
+    const running = { version: 1, outcome: 'running', startedAt: new Date().toISOString() };
+    const app = await boot({ search: '?tv=1', config, fetchHandler: async url => {
+        if (url.includes('worker-status.json')) return { ok: true, json: async () => running };
+        return { ok: true, url, text: async () => '' };
+    } });
+    assert.equal(app.requests.some(url => String(url).includes('worker-status.json')), false,
+        'TV mode suppresses polling');
     app.context.document.fullscreenElement = {};
     vm.runInContext('handleFullscreenChange()', app.context);
     assert.equal(vm.runInContext('tvModeEnabled', app.context), true);
     app.context.document.fullscreenElement = null;
     vm.runInContext('handleFullscreenChange()', app.context);
+    await new Promise(resolve => setImmediate(resolve));
     assert.equal(vm.runInContext('tvModeEnabled', app.context), false);
     assert.equal(app.state().slideshowPlaying, false);
     assert.equal(app.get('gallery-video').controls, true);
+    assert.equal(app.get('worker-status-button').hidden, false);
+    assert.equal(app.requests.filter(url => String(url).includes('worker-status.json')).length, 1,
+        'native fullscreen exit restarts polling once');
     for (const value of app.saved.values()) assert.equal('tvMode' in JSON.parse(value), false);
     vm.runInContext('setSlideshowPlaying(true); handleFullscreenChange()', app.context);
     assert.equal(app.state().slideshowPlaying, true);

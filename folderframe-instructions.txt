@@ -113,6 +113,7 @@ appdata and served as an ordinary static file. Add manifestPath to the source:
     { "id": "photos", "label": "Photos", "path": "photos/",
       "thumbnailPath": "thumbnails/",
       "manifestPath": "folderframe-data/library.json",
+      "workerStatusPath": "folderframe-data/worker-status.json",
       "discoveryMode": "manifest" }
 
 Generate thumbnails and the index together:
@@ -134,6 +135,13 @@ discoveryMode is configured per source:
 -   "directory" never requests the manifest and always uses directory listings.
 -   "manifest" requires a valid manifest and never attempts directory scanning.
     This mode works on static hosts such as GitHub Pages or Cloudflare Pages.
+
+workerStatusPath is optional. Configure it only when the web server exposes the
+deployment worker's JSON status file. The compact indicator distinguishes a
+server-side update from the browser loading or using a published manifest. It
+polls quietly, pauses in hidden/controls-free/TV views, backs off when status is
+unavailable, and offers Reload Library only after a newly observed completion.
+Static hosts can omit it. Reload Library never starts a server scan.
 
 Strict manifest mode accepts a valid empty index, ignores browser scanCache, and
 continues to use thumbnailPath for grid and album previews. Missing/invalid index

@@ -79,6 +79,20 @@ let showExifPanel = true;
 let showGps = true;
 let videoTranscodeFallback = 'auto';
 let videoCapabilitiesPromise = null;
+const WORKER_STATUS_POLL_MS = 15000;
+const WORKER_STATUS_MAX_BACKOFF_MS = 120000;
+const WORKER_STATUS_STALE_MS = 10 * 60 * 1000;
+let workerStatusController = null;
+let workerStatusTimer = null;
+let workerStatusGeneration = 0;
+let workerStatusRequestActive = false;
+let workerStatusFailures = 0;
+let workerStatusBaselineEstablished = false;
+let workerStatusLastCompletionTime = null;
+let workerStatusAcknowledgedCompletion = null;
+let workerStatusPendingCompletion = null;
+let workerStatusLastPayload = null;
+let workerStatusLastAnnouncement = '';
 
 function videoCapabilities() {
     if (!videoCapabilitiesPromise) videoCapabilitiesPromise = resilience.request(
@@ -843,6 +857,9 @@ const gridRefreshMenuSlot = $('grid-refresh-menu-slot');
 const btnViewMode = $('btn-view-mode');
 const btnTvMode = $('btn-tv-mode');
 const scanStatus = $('scan-status');
+const workerStatusButton = $('worker-status-button');
+const workerStatusDetails = $('worker-status-details');
+const workerStatusReload = $('worker-status-reload');
 const videoErrorOverlay = $('video-error-overlay');
 const videoErrorText = $('video-error-text');
 const videoErrorFfmpeg = $('video-error-ffmpeg');
@@ -857,6 +874,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (loaded !== false) updateFolderHistory(currentFolder, 'replace');
     updateGalleryHeaderLayout();
     startAutoRefreshTimer();
+    startWorkerStatusPolling({ reset: true });
 
     if (slideshowPlaying && mediaFiles.length > 0 && isGridViewActive) {
         enterFullScreenViewer(currentIndex);
@@ -871,7 +889,7 @@ window.addEventListener('popstate', async () => {
 });
 
 window.addEventListener('beforeunload', () => {
-    scanSession?.abort(); stopViewerSession(); stopGridSession(); clearImageBlobCache();
+    scanSession?.abort(); stopWorkerStatusPolling(); stopViewerSession(); stopGridSession(); clearImageBlobCache();
 });
 
 function isHeicFile(path) { return /\.(heic|heif)$/i.test(path); }
@@ -1859,8 +1877,7 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
     const retryPublishedManifest = usesPublishedManifest() && (!automatic || runtimeDiscoveryMode !== 'directory');
     setRuntimeDiscoveryMode(retryPublishedManifest ? 'pending' : 'directory');
     if (retryPublishedManifest) resetPersistentManifest({ cacheBust: forceCacheClear });
-    setScanStatus(retryPublishedManifest ? 'Loading media index…' :
-        (mediaFiles.length || subfolders.length ? 'Refreshing folders…' : 'Scanning folders…'));
+    setScanStatus(retryPublishedManifest ? 'Loading library…' : 'Scanning folders…');
     try {
         const listing = await scanDirectory(folder, {
             signal: session.signal, bypassCache: forceCacheClear, onDiscovery: noteDiscovery
@@ -1951,7 +1968,9 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
         showWarning(empty);
         renderBreadcrumb();
         setScanStatus(result.failedFolders.length ? 'Scan incomplete — some folders unavailable' :
-            `Updated ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`, Boolean(result.failedFolders.length));
+            (usedManifest ? 'Using published library' :
+                `Folders scanned ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`),
+            Boolean(result.failedFolders.length));
         if (!preserveView || (wasGrid && (changed || forceCacheClear)) || !mediaFiles.length) {
             renderGridView();
         } else if (!wasGrid && !retained) {
@@ -2001,6 +2020,205 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
     }
 }
 
+function normalizeWorkerStatus(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload) || payload.version !== 1) return null;
+    if (!['running', 'complete', 'complete_with_warnings', 'failed'].includes(payload.outcome)) return null;
+    const timestamp = payload.outcome === 'running' ? payload.startedAt : payload.completedAt;
+    if (typeof timestamp !== 'string' || !Number.isFinite(Date.parse(timestamp))) return null;
+    const normalized = { version: 1, outcome: payload.outcome,
+        startedAt: typeof payload.startedAt === 'string' && Number.isFinite(Date.parse(payload.startedAt)) ? payload.startedAt : null,
+        completedAt: typeof payload.completedAt === 'string' && Number.isFinite(Date.parse(payload.completedAt)) ? payload.completedAt : null };
+    for (const key of ['mediaFiles', 'thumbnailsGenerated', 'thumbnailsCurrent', 'thumbnailsPruned',
+        'previewFailures', 'unchangedFailuresSkipped', 'manifestDirectoriesListed', 'manifestDirectoriesReused',
+        'manifestErrors', 'metadataExtracted', 'metadataReused', 'metadataWarnings', 'thumbnailPruneWarnings']) {
+        if (Number.isFinite(payload[key]) && payload[key] >= 0) normalized[key] = Math.floor(payload[key]);
+    }
+    return normalized;
+}
+
+function workerCompletionKey(status) {
+    return status?.completedAt && ['complete', 'complete_with_warnings'].includes(status.outcome)
+        ? status.completedAt : null;
+}
+
+function formatWorkerStatusAge(timestamp) {
+    const elapsed = Math.max(0, Date.now() - Date.parse(timestamp));
+    const minutes = Math.floor(elapsed / 60000);
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 48) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    const days = Math.floor(hours / 24);
+    return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+function renderWorkerStatus(status, { unavailable = false, newCompletion = false } = {}) {
+    const configured = Boolean(activeSource?.workerStatusUrl);
+    const visible = configured && controlsEnabled && !tvModeEnabled;
+    $('worker-status-separator').hidden = !visible;
+    workerStatusButton.hidden = !visible;
+    if (!visible) {
+        workerStatusDetails.hidden = true;
+        workerStatusButton.setAttribute('aria-expanded', 'false');
+        return;
+    }
+    workerStatusButton.classList.remove('is-running', 'is-warning', 'is-error', 'is-complete');
+    let label = 'Library status';
+    let summary = 'No server update status has been received yet.';
+    let stateClass = '';
+    let announcement = '';
+    let announcementKey = '';
+    if (unavailable) {
+        label = 'Status unavailable';
+        summary = 'Update status is unavailable. The current library remains usable.';
+        stateClass = 'is-warning';
+    } else if (status?.outcome === 'running') {
+        const stale = Date.now() - Date.parse(status.startedAt) > WORKER_STATUS_STALE_MS;
+        label = stale ? 'Last reported updating' : 'Updating library';
+        summary = stale
+            ? `The server last reported an update ${formatWorkerStatusAge(status.startedAt)}. Current activity cannot be confirmed.`
+            : 'The server is updating library metadata or previews. Current photos remain available.';
+        stateClass = stale ? 'is-warning' : 'is-running';
+        announcement = stale ? '' : 'Updating library. Current photos remain available.';
+        announcementKey = stale ? '' : `running:${status.startedAt}`;
+    } else if (status?.outcome === 'failed') {
+        label = 'Update failed';
+        summary = `The server update failed ${formatWorkerStatusAge(status.completedAt)}. The existing library remains available.`;
+        stateClass = 'is-error';
+        announcement = 'Library update failed. The existing library remains available.';
+        announcementKey = `failed:${status.completedAt}`;
+    } else if (status?.outcome === 'complete_with_warnings') {
+        label = 'Update warnings';
+        summary = `The server update completed with warnings ${formatWorkerStatusAge(status.completedAt)}.`;
+        stateClass = 'is-warning';
+        if (newCompletion) {
+            announcement = 'Update completed with warnings. Reload Library is available.';
+            announcementKey = `complete:${status.completedAt}`;
+        }
+    } else if (status?.outcome === 'complete') {
+        label = workerStatusPendingCompletion === workerCompletionKey(status) ? 'Update completed' : 'Library status';
+        summary = `The last server update completed ${formatWorkerStatusAge(status.completedAt)}.`;
+        stateClass = 'is-complete';
+        if (newCompletion) {
+            announcement = 'Update completed. Reload Library is available.';
+            announcementKey = `complete:${status.completedAt}`;
+        }
+    }
+    if (stateClass) workerStatusButton.classList.add(stateClass);
+    $('worker-status-label').textContent = label;
+    $('worker-status-summary').textContent = summary;
+    const counts = [];
+    const addCount = (key, text) => { if (status?.[key] !== undefined) counts.push(`${status[key]} ${text}`); };
+    addCount('mediaFiles', 'media files');
+    addCount('thumbnailsGenerated', 'thumbnails generated');
+    addCount('thumbnailsCurrent', 'thumbnails reused');
+    addCount('metadataExtracted', 'metadata records extracted');
+    addCount('metadataReused', 'metadata records reused');
+    addCount('previewFailures', 'preview failures');
+    addCount('metadataWarnings', 'metadata warnings');
+    addCount('manifestErrors', 'manifest errors');
+    $('worker-status-counts').textContent = counts.join(' · ');
+    const completion = workerCompletionKey(status);
+    const reloadAvailable = Boolean(workerStatusPendingCompletion &&
+        completion === workerStatusPendingCompletion && completion !== workerStatusAcknowledgedCompletion &&
+        isPublishedManifestActive());
+    workerStatusReload.hidden = !reloadAvailable;
+    workerStatusButton.title = summary;
+    workerStatusButton.setAttribute('aria-label', `${label}. ${summary}`);
+    if (announcement && announcementKey !== workerStatusLastAnnouncement) {
+        $('worker-status-announcer').textContent = announcement;
+        workerStatusLastAnnouncement = announcementKey;
+    }
+}
+
+function handleWorkerStatus(payload) {
+    const status = normalizeWorkerStatus(payload);
+    if (!status) throw new Error('Unsupported worker status');
+    const completion = workerCompletionKey(status);
+    const completionTime = completion ? Date.parse(completion) : null;
+    let newCompletion = false;
+    if (!workerStatusBaselineEstablished) {
+        workerStatusBaselineEstablished = true;
+        if (completionTime !== null) workerStatusLastCompletionTime = completionTime;
+    } else if (completionTime !== null && workerStatusLastCompletionTime !== null &&
+        completionTime < workerStatusLastCompletionTime) {
+        return { status: workerStatusLastPayload || status, newCompletion: false, ignored: true };
+    } else if (completionTime !== null &&
+        (workerStatusLastCompletionTime === null || completionTime > workerStatusLastCompletionTime)) {
+        newCompletion = completion !== workerStatusAcknowledgedCompletion;
+        workerStatusLastCompletionTime = completionTime;
+        if (newCompletion) workerStatusPendingCompletion = completion;
+    }
+    workerStatusLastPayload = status;
+    renderWorkerStatus(status, { newCompletion });
+    return { status, newCompletion };
+}
+
+function clearWorkerStatusTimer() {
+    if (workerStatusTimer) clearTimeout(workerStatusTimer);
+    workerStatusTimer = null;
+}
+
+function scheduleWorkerStatusPoll(generation, delay) {
+    clearWorkerStatusTimer();
+    if (generation !== workerStatusGeneration || document.hidden || !activeSource?.workerStatusUrl ||
+        !controlsEnabled || tvModeEnabled) return;
+    workerStatusTimer = setTimeout(() => pollWorkerStatus(generation), delay);
+}
+
+async function pollWorkerStatus(generation = workerStatusGeneration) {
+    if (generation !== workerStatusGeneration || workerStatusRequestActive || document.hidden ||
+        !activeSource?.workerStatusUrl || !controlsEnabled || tvModeEnabled) return false;
+    workerStatusRequestActive = true;
+    const controller = new AbortController();
+    workerStatusController = controller;
+    try {
+        const payload = await resilience.request(activeSource.workerStatusUrl, {
+            signal: controller.signal, timeout: 5000, body: 'json', cache: 'no-store'
+        });
+        if (generation !== workerStatusGeneration || controller.signal.aborted) return false;
+        handleWorkerStatus(payload);
+        workerStatusFailures = 0;
+        scheduleWorkerStatusPoll(generation, WORKER_STATUS_POLL_MS);
+        return true;
+    } catch (error) {
+        if (generation !== workerStatusGeneration || controller.signal.aborted || error.name === 'AbortError') return false;
+        workerStatusFailures = Math.min(workerStatusFailures + 1, 4);
+        renderWorkerStatus(workerStatusLastPayload, { unavailable: true });
+        const delay = Math.min(WORKER_STATUS_MAX_BACKOFF_MS,
+            WORKER_STATUS_POLL_MS * (2 ** workerStatusFailures));
+        scheduleWorkerStatusPoll(generation, delay);
+        return false;
+    } finally {
+        if (workerStatusController === controller) workerStatusController = null;
+        workerStatusRequestActive = false;
+    }
+}
+
+function stopWorkerStatusPolling({ reset = false } = {}) {
+    workerStatusGeneration++;
+    clearWorkerStatusTimer();
+    workerStatusController?.abort();
+    workerStatusController = null;
+    workerStatusRequestActive = false;
+    if (reset) {
+        workerStatusFailures = 0;
+        workerStatusBaselineEstablished = false;
+        workerStatusLastCompletionTime = null;
+        workerStatusAcknowledgedCompletion = null;
+        workerStatusPendingCompletion = null;
+        workerStatusLastPayload = null;
+        workerStatusLastAnnouncement = '';
+    }
+}
+
+function startWorkerStatusPolling({ reset = false } = {}) {
+    stopWorkerStatusPolling({ reset });
+    renderWorkerStatus(workerStatusLastPayload);
+    if (!activeSource?.workerStatusUrl || !controlsEnabled || tvModeEnabled || document.hidden) return;
+    const generation = workerStatusGeneration;
+    pollWorkerStatus(generation);
+}
 function setScanStatus(text, isError = false) {
     if (scanStatus) {
         scanStatus.textContent = text;
@@ -3122,6 +3340,22 @@ function setupEventListeners() {
     });
     btnShowGrid.addEventListener('click', renderGridView);
     btnRefreshGrid.addEventListener('click', () => loadGallery({ preserveView: true, forceCacheClear: true }));
+    workerStatusButton.addEventListener('click', () => {
+        workerStatusDetails.hidden = !workerStatusDetails.hidden;
+        workerStatusButton.setAttribute('aria-expanded', String(!workerStatusDetails.hidden));
+    });
+    workerStatusReload.addEventListener('click', async event => {
+        event.stopPropagation?.();
+        const completion = workerCompletionKey(workerStatusLastPayload);
+        const loaded = await loadGallery({ preserveView: true, forceCacheClear: true });
+        if (loaded !== false && completion) {
+            workerStatusAcknowledgedCompletion = completion;
+            if (workerStatusPendingCompletion === completion) workerStatusPendingCompletion = null;
+            renderWorkerStatus(workerStatusLastPayload);
+            workerStatusDetails.hidden = true;
+            workerStatusButton.setAttribute('aria-expanded', 'false');
+        }
+    });
     btnShuffle.addEventListener('click', toggleShuffle);
     btnAutoRefresh.addEventListener('click', () => { autoRefreshEnabled = !autoRefreshEnabled; updateControlStates(); startAutoRefreshTimer(); savePreferences(); });
     btnViewMode.addEventListener('click', async () => {
@@ -3267,7 +3501,11 @@ function setupEventListeners() {
         else gridViewContainer.scrollTop = 0;
     });
     document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) requestAutomaticRefresh();
+        if (document.hidden) stopWorkerStatusPolling();
+        else {
+            requestAutomaticRefresh();
+            startWorkerStatusPolling();
+        }
     });
 }
 
@@ -3301,6 +3539,7 @@ function setRuntimeDiscoveryMode(mode) {
     const changed = runtimeDiscoveryMode !== mode;
     runtimeDiscoveryMode = mode;
     if (changed) updateControlStates();
+    renderWorkerStatus(workerStatusLastPayload);
     reconcileAutoRefreshTimer();
 }
 
@@ -3313,6 +3552,8 @@ async function toggleTvMode() {
     tvModeEnabled = !tvModeEnabled;
     video.controls = controlsEnabled && !tvModeEnabled;
     if (tvModeEnabled) {
+        stopWorkerStatusPolling();
+        renderWorkerStatus(workerStatusLastPayload);
         imageMode = 'fit';
         setShuffleEnabled(true);
         autoRefreshEnabled = true;
@@ -3340,6 +3581,7 @@ async function toggleTvMode() {
 
         updateControlStates();
         showUI();
+        startWorkerStatusPolling();
     }
     savePreferences();
 }
@@ -3551,6 +3793,7 @@ function handleFullscreenChange() {
         video.controls = controlsEnabled;
         updateControlStates();
         showUI();
+        startWorkerStatusPolling();
         savePreferences();
     }
 }

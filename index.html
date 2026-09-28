@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Rhodium+Libre&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=20260914-video-fit">
+<link rel="stylesheet" href="styles.css?v=20260927-worker-status">
 <link rel="icon" type="image/png" href="docs/images/folderframe-icon.png?v=20260828-brand">
 </head>
 <body>
@@ -206,10 +206,24 @@
                     </div>
                 </div>
             </header>
-            <div class="grid-status-stack" role="status">
+            <div class="grid-status-stack">
                 <span id="grid-count" class="index-text">0 Files</span>
                 <span class="grid-status-separator" aria-hidden="true">·</span>
-                <span id="scan-status" class="scan-status">Ready</span>
+                <span id="scan-status" class="scan-status" role="status">Ready</span>
+                <span id="worker-status-separator" class="grid-status-separator" aria-hidden="true" hidden>·</span>
+                <button id="worker-status-button" class="worker-status-button" type="button" hidden
+                        aria-expanded="false" aria-controls="worker-status-details">
+                    <span id="worker-status-dot" class="worker-status-dot" aria-hidden="true"></span>
+                    <span id="worker-status-label">Library status</span>
+                </button>
+                <div id="worker-status-details" class="worker-status-details" hidden>
+                    <div id="worker-status-summary" class="worker-status-summary"></div>
+                    <div id="worker-status-counts" class="worker-status-counts"></div>
+                    <div class="worker-status-actions">
+                        <button id="worker-status-reload" class="btn btn-secondary ff-btn" type="button" hidden>Reload Library</button>
+                    </div>
+                </div>
+                <span id="worker-status-announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></span>
             </div>
             <div id="scan-failures" role="status" hidden><span id="scan-failure-text"></span> <button id="btn-retry-scan" class="btn btn-secondary" type="button">Retry scan</button></div>
             <div id="scan-loading" class="scan-loading" role="status" hidden><span class="loading-spinner" aria-hidden="true"></span><span id="scan-loading-text">Scanning folders…</span><div id="scan-progress-track" class="scan-progress-track" role="progressbar" aria-label="Folder scan progress" aria-valuemin="0" aria-valuemax="100" hidden><div id="scan-progress-fill" class="scan-progress-fill"></div></div></div>
@@ -241,7 +255,7 @@
 
     <p id="config-notice" role="status" hidden></p>
     <script src="resilience.js?v=20260831-native-decode-queue"></script>
-<script src="settings.js?v=20260913-photo-info"></script>
-<script src="app.js?v=20260914-manifest-refresh-controls"></script>
+<script src="settings.js?v=20260927-worker-status"></script>
+<script src="app.js?v=20260927-worker-status"></script>
 </body>
 </html>

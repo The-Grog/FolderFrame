@@ -104,6 +104,17 @@
                     throw new Error('manifestPath must be an HTTP(S) JSON file without credentials, query strings, or fragments');
                 }
             }
+            let workerStatusUrl = null;
+            if (entry.workerStatusPath !== undefined) {
+                if (typeof entry.workerStatusPath !== 'string' || !entry.workerStatusPath.trim() || /[\\\x00-\x1f]/.test(entry.workerStatusPath)) {
+                    throw new Error('workerStatusPath must be a web JSON file path');
+                }
+                workerStatusUrl = new URL(entry.workerStatusPath, baseUrl);
+                if (!['http:', 'https:'].includes(workerStatusUrl.protocol) || workerStatusUrl.username || workerStatusUrl.password ||
+                    workerStatusUrl.search || workerStatusUrl.hash || !workerStatusUrl.pathname.toLowerCase().endsWith('.json')) {
+                    throw new Error('workerStatusPath must be an HTTP(S) JSON file without credentials, query strings, or fragments');
+                }
+            }
             if (entry.scanCache !== undefined && typeof entry.scanCache !== 'boolean') {
                 throw new Error('scanCache must be true or false');
             }
@@ -118,6 +129,7 @@
             return { id: entry.id, label: entry.label.trim(), path: entry.path, url: url.href,
                 thumbnailPath: entry.thumbnailPath || null, thumbnailUrl: thumbnailUrl?.href || null,
                 manifestPath: entry.manifestPath || null, manifestUrl: manifestUrl?.href || null,
+                workerStatusPath: entry.workerStatusPath || null, workerStatusUrl: workerStatusUrl?.href || null,
                 scanCache: entry.scanCache === true, discoveryMode };
         });
         return {

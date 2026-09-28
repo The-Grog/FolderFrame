@@ -693,6 +693,35 @@ button, select, .media-error-actions a { touch-action:manipulation; }
 .grid-menu-slot .btn,
 .grid-density-menu-slot .btn { width:100%; justify-content:flex-start; }
 .grid-status-stack .scan-status { margin-left:0; text-align:right; line-height:1; }
+.worker-status-button {
+    display:inline-flex; align-items:center; gap:5px; min-width:0; padding:0; border:0;
+    background:transparent; color:#a8b3c5; font-size:11px; line-height:1; cursor:pointer;
+    pointer-events:auto; white-space:nowrap;
+}
+.worker-status-button:hover { color:#fff; }
+.worker-status-button:focus-visible { outline:2px solid #60a5fa; outline-offset:4px; border-radius:3px; }
+.worker-status-dot { width:7px; height:7px; flex:0 0 7px; border-radius:50%; background:#64748b; }
+.worker-status-button.is-running .worker-status-dot { background:#60a5fa; animation:worker-status-pulse 1.8s ease-in-out infinite; }
+.worker-status-button.is-warning .worker-status-dot { background:#fbbf24; }
+.worker-status-button.is-error .worker-status-dot { background:#f87171; }
+.worker-status-button.is-complete .worker-status-dot { background:#86efac; }
+@keyframes worker-status-pulse { 50% { opacity:.38; } }
+@media (prefers-reduced-motion:reduce) {
+    .worker-status-button.is-running .worker-status-dot { animation:none; }
+}
+.worker-status-details {
+    position:absolute; left:50%; bottom:calc(100% + 8px); transform:translateX(-50%);
+    width:min(330px, calc(100vw - 24px)); padding:11px 12px; border:1px solid rgba(255,255,255,.14);
+    border-radius:10px; background:rgba(12,12,12,.97); color:#e5e7eb;
+    box-shadow:0 12px 35px rgba(0,0,0,.65); pointer-events:auto; white-space:normal; text-align:left;
+}
+.worker-status-summary { font-size:12px; line-height:1.4; }
+.worker-status-counts { margin-top:7px; color:#9ca3af; font-size:11px; line-height:1.45; }
+.worker-status-actions { display:flex; justify-content:flex-end; margin-top:9px; }
+.worker-status-actions:empty { display:none; }
+.worker-status-actions .btn { min-height:36px; padding:6px 10px; font-size:12px; }
+.sr-only { position:absolute!important; width:1px!important; height:1px!important; padding:0!important; margin:-1px!important; overflow:hidden!important; clip:rect(0,0,0,0)!important; white-space:nowrap!important; border:0!important; }
+.controls-free .grid-status-stack { display:none!important; }
 .grid-status-separator { color:#64748b; font-size:11px; line-height:1; }
 .grid-status-stack #grid-count,
 .grid-status-stack .scan-status {
