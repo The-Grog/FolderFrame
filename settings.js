@@ -115,6 +115,14 @@
                     throw new Error('workerStatusPath must be an HTTP(S) JSON file without credentials, query strings, or fragments');
                 }
             }
+            let refreshUrl = null;
+            if (entry.refreshPath !== undefined) {
+                if (typeof entry.refreshPath !== 'string' || !entry.refreshPath.trim() || /[\\\x00-\x1f]/.test(entry.refreshPath)) throw new Error('refreshPath must be a web endpoint path');
+                refreshUrl = new URL(entry.refreshPath, baseUrl);
+                if (!['http:', 'https:'].includes(refreshUrl.protocol) || refreshUrl.username || refreshUrl.password || refreshUrl.search || refreshUrl.hash || refreshUrl.origin !== new URL(baseUrl).origin) {
+                    throw new Error('refreshPath must be a same-origin HTTP(S) endpoint without credentials, query strings, or fragments');
+                }
+            }
             if (entry.scanCache !== undefined && typeof entry.scanCache !== 'boolean') {
                 throw new Error('scanCache must be true or false');
             }
@@ -130,6 +138,7 @@
                 thumbnailPath: entry.thumbnailPath || null, thumbnailUrl: thumbnailUrl?.href || null,
                 manifestPath: entry.manifestPath || null, manifestUrl: manifestUrl?.href || null,
                 workerStatusPath: entry.workerStatusPath || null, workerStatusUrl: workerStatusUrl?.href || null,
+                refreshPath: entry.refreshPath || null, refreshUrl: refreshUrl?.href || null,
                 scanCache: entry.scanCache === true, discoveryMode };
         });
         return {

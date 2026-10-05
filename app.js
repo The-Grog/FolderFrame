@@ -93,6 +93,8 @@ let workerStatusAcknowledgedCompletion = null;
 let workerStatusPendingCompletion = null;
 let workerStatusLastPayload = null;
 let workerStatusLastAnnouncement = '';
+let manualRefreshRequest = null;
+let manualRefreshApplying = false;
 
 function videoCapabilities() {
     if (!videoCapabilitiesPromise) videoCapabilitiesPromise = resilience.request(
@@ -1037,12 +1039,15 @@ function updateControlStates() {
     btnAutoRefresh.classList.remove('is-active');
     btnAutoRefresh.setAttribute('aria-pressed', String(autoRefreshEnabled));
     btnAutoRefresh.querySelector('.button-label').textContent = autoRefreshEnabled ? 'Auto Refresh On' : 'Auto Refresh Off';
-    const manifestActive = isPublishedManifestActive();
-    $('refresh-grid-label').textContent = manifestActive ? 'Reload Library' : 'Refresh Folder';
-    btnRefreshGrid.title = manifestActive
-        ? 'Reload the published media index. New files appear after the index is regenerated and redeployed.'
-        : 'Rescan the current album now';
-    btnRefreshGrid.setAttribute('aria-label', manifestActive ? 'Reload published library index' : 'Refresh current folder');
+    const manualRefreshBusy = Boolean(manualRefreshRequest && !manualRefreshRequest.completed && !manualRefreshRequest.retryable);
+    $('refresh-grid-label').textContent = manualRefreshBusy ? 'Refreshing…' : 'Refresh';
+    btnRefreshGrid.title = activeSource?.refreshUrl && isPublishedManifestActive()
+        ? 'Scan for media changes and load the updated library'
+        : isPublishedManifestActive()
+            ? 'Refresh the published media index. New files appear after it is regenerated.'
+            : 'Refresh the current library';
+    btnRefreshGrid.setAttribute('aria-label', manualRefreshBusy ? 'Refreshing library' : 'Refresh');
+    btnRefreshGrid.disabled = isScanning || manualRefreshApplying || manualRefreshBusy;
     btnViewMode.classList.remove('is-active');
     btnViewMode.setAttribute('aria-pressed', String(galleryViewMode === 'all'));
     if (btnCopyFilename) btnCopyFilename.disabled = !mediaFiles.length || isGridViewActive;
@@ -1082,7 +1087,7 @@ function updateMediaActions(filepath, filename, forceVideo = false) {
 
 function updateGalleryHeaderLayout() {
     if (!gridHeader || !gridHeaderMain || !gridActions) return;
-    // Refresh Folder / Reload Library stays in the options menu with a text label.
+    // Refresh / Refresh stays in the options menu with a text label.
     const controls = [
         { button: $('btn-grid-density'), home: gridDensitySlot, menu: gridDensityMenuSlot },
         { button: $('btn-sort'), home: gridSortSlot, menu: gridSortMenuSlot },
@@ -2008,7 +2013,7 @@ async function loadGallery({ preserveView = true, forceCacheClear = false, silen
             setScanStatus('Published library unavailable', true);
             showScanFailures([]);
             $('warning-title').textContent = 'Published Library Unavailable';
-            $('warning-message').textContent = 'The published media index is missing, invalid, or incomplete. Regenerate and redeploy it, then choose Reload Library.';
+            $('warning-message').textContent = 'The published media index is missing, invalid, or incomplete. Regenerate and redeploy it, then choose Refresh.';
             showWarning(true);
             return false;
         }
@@ -2041,6 +2046,9 @@ function normalizeWorkerStatus(payload) {
     const normalized = { version: 1, outcome: payload.outcome,
         startedAt: typeof payload.startedAt === 'string' && Number.isFinite(Date.parse(payload.startedAt)) ? payload.startedAt : null,
         completedAt: typeof payload.completedAt === 'string' && Number.isFinite(Date.parse(payload.completedAt)) ? payload.completedAt : null };
+    for (const key of ['runId', 'requestId']) {
+        if (typeof payload[key] === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(payload[key])) normalized[key] = payload[key];
+    }
     for (const key of ['mediaFiles', 'thumbnailsGenerated', 'thumbnailsCurrent', 'thumbnailsPruned',
         'previewFailures', 'unchangedFailuresSkipped', 'manifestDirectoriesListed', 'manifestDirectoriesReused',
         'manifestErrors', 'metadataExtracted', 'metadataReused', 'metadataWarnings', 'thumbnailPruneWarnings']) {
@@ -2122,7 +2130,7 @@ function renderWorkerStatus(status, { unavailable = false, newCompletion = false
         summary = `The server update completed with warnings ${formatWorkerStatusAge(status.completedAt)}.`;
         stateClass = 'is-warning';
         if (newCompletion) {
-            announcement = 'Update completed with warnings. Reload Library is available.';
+            announcement = 'Update completed with warnings. Refresh is available.';
             announcementKey = `complete:${status.completedAt}`;
         }
     } else if (effectiveOutcome === 'complete') {
@@ -2130,7 +2138,7 @@ function renderWorkerStatus(status, { unavailable = false, newCompletion = false
         summary = `The last server update completed ${formatWorkerStatusAge(status.completedAt)}.`;
         stateClass = 'is-complete';
         if (newCompletion) {
-            announcement = 'Update completed. Reload Library is available.';
+            announcement = 'Update completed. Refresh is available.';
             announcementKey = `complete:${status.completedAt}`;
         }
     }
@@ -2202,9 +2210,121 @@ function handleWorkerStatus(payload) {
     }
     workerStatusLastPayload = status;
     renderWorkerStatus(status, { newCompletion });
+    reconcileManualRefresh(status);
     return { status, newCompletion };
 }
 
+async function applyPublishedRefresh(status = workerStatusLastPayload) {
+    if (manualRefreshApplying) return false;
+    manualRefreshApplying = true;
+    updateControlStates();
+    try {
+        const completion = workerCompletionKey(status);
+        const loaded = await loadGallery({ preserveView: true, forceCacheClear: true });
+        if (loaded === false) return false;
+        if (completion) {
+            workerStatusAcknowledgedCompletion = completion;
+            if (workerStatusPendingCompletion === completion) workerStatusPendingCompletion = null;
+        }
+        manualRefreshRequest = null;
+        renderWorkerStatus(workerStatusLastPayload);
+        return true;
+    } finally {
+        manualRefreshApplying = false;
+        updateControlStates();
+    }
+}
+
+function reconcileManualRefresh(status) {
+    const request = manualRefreshRequest;
+    if (!request || status?.requestId !== request.requestId) return;
+    if (status.outcome === 'running') { request.started = true; updateControlStates(); return; }
+    request.completed = true;
+    request.result = status;
+    if (status.outcome === 'failed') {
+        manualRefreshRequest = null;
+        setScanStatus('Refresh failed. The current library remains available; try again.', true);
+        updateControlStates();
+        return;
+    }
+    if (isGridViewActive) void applyPublishedRefresh(status);
+    else {
+        request.ready = true;
+        setScanStatus('Refresh complete. The updated library will load when you return to Gallery.');
+        updateControlStates();
+    }
+}
+
+async function pollManualRefreshOutcome(generation = workerStatusGeneration, signal) {
+    const request = manualRefreshRequest;
+    if (!request || !activeSource?.refreshUrl || generation !== workerStatusGeneration) return false;
+    const url = new URL(activeSource.refreshUrl);
+    url.searchParams.set('requestId', request.requestId);
+    try {
+        const result = await resilience.request(url.href, { signal, timeout: 5000, body: 'json', cache: 'no-store' });
+        if (generation !== workerStatusGeneration || manualRefreshRequest?.requestId !== request.requestId) return false;
+        if (result?.state === 'queued' || result?.state === 'running') {
+            request.retryable = false;
+            request.started = result.state === 'running';
+            setScanStatus('Refreshing…');
+            updateControlStates();
+            return true;
+        }
+        if ((result?.state === 'complete' || result?.state === 'failed') && result.requestId === request.requestId) {
+            reconcileManualRefresh({ requestId: result.requestId,
+                outcome: result.state === 'failed' ? 'failed' : result.outcome,
+                completedAt: result.completedAt || new Date().toISOString() });
+            return true;
+        }
+    } catch (error) {
+        if (error.name === 'AbortError') return false;
+        if (error.status === 404 && manualRefreshRequest === request) {
+            request.retryable = true;
+            request.started = false;
+            setScanStatus('Refresh status is not available. Retry will safely reuse the same request.', true);
+            updateControlStates();
+        }
+    }
+    return false;
+}
+
+async function requestRefresh() {
+    if (workerStatusPendingCompletion && isPublishedManifestActive()) { await applyPublishedRefresh(workerStatusLastPayload); return; }
+    if (!activeSource?.refreshUrl || !isPublishedManifestActive()) { await loadGallery({ preserveView: true, forceCacheClear: true }); return; }
+    if (manualRefreshRequest && !manualRefreshRequest.completed && !manualRefreshRequest.retryable) return;
+    const sourceId = activeSource.id;
+    const existing = manualRefreshRequest?.retryable && manualRefreshRequest.sourceId === sourceId
+        ? manualRefreshRequest : null;
+    const clientRequestId = existing?.requestId || globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const request = existing || { requestId: clientRequestId, sourceId, completed: false };
+    manualRefreshRequest = request;
+    request.retryable = false;
+    setScanStatus('Refreshing…');
+    updateControlStates();
+    try {
+        const response = await resilience.request(activeSource.refreshUrl, {
+            method: 'POST', timeout: 8000, body: 'json', cache: 'no-store',
+            headers: { 'Accept': 'application/json', 'X-FolderFrame-Request-ID': clientRequestId }
+        });
+        if (activeSource.id !== sourceId || manualRefreshRequest !== request) return;
+        if (!response?.accepted || typeof response.requestId !== 'string') throw new Error('Invalid refresh acknowledgement');
+        request.requestId = response.requestId;
+        scheduleWorkerStatusPoll(workerStatusGeneration, 1000);
+        void pollManualRefreshOutcome(workerStatusGeneration);
+    } catch (error) {
+        if (activeSource.id !== sourceId || manualRefreshRequest !== request) return;
+        if (Number.isInteger(error.status)) {
+            manualRefreshRequest = null;
+            setScanStatus(`Refresh request failed: ${error.message}`, true);
+        } else {
+            request.retryable = true;
+            setScanStatus('Refresh acknowledgement was not received. Retry will safely reuse the same request.', true);
+            scheduleWorkerStatusPoll(workerStatusGeneration, 1000);
+            void pollManualRefreshOutcome(workerStatusGeneration);
+        }
+        updateControlStates();
+    }
+}
 function clearWorkerStatusTimer() {
     if (workerStatusTimer) clearTimeout(workerStatusTimer);
     workerStatusTimer = null;
@@ -2229,13 +2349,15 @@ async function pollWorkerStatus(generation = workerStatusGeneration) {
         });
         if (generation !== workerStatusGeneration || controller.signal.aborted) return false;
         handleWorkerStatus(payload);
+        await pollManualRefreshOutcome(generation, controller.signal);
         workerStatusFailures = 0;
-        scheduleWorkerStatusPoll(generation, WORKER_STATUS_POLL_MS);
+        scheduleWorkerStatusPoll(generation, manualRefreshRequest ? 2000 : WORKER_STATUS_POLL_MS);
         return true;
     } catch (error) {
         if (generation !== workerStatusGeneration || controller.signal.aborted || error.name === 'AbortError') return false;
         workerStatusFailures = Math.min(workerStatusFailures + 1, 4);
         renderWorkerStatus(workerStatusLastPayload, { unavailable: true });
+        await pollManualRefreshOutcome(generation, controller.signal);
         const delay = Math.min(WORKER_STATUS_MAX_BACKOFF_MS,
             WORKER_STATUS_POLL_MS * (2 ** workerStatusFailures));
         scheduleWorkerStatusPoll(generation, delay);
@@ -2260,6 +2382,8 @@ function stopWorkerStatusPolling({ reset = false } = {}) {
         workerStatusPendingCompletion = null;
         workerStatusLastPayload = null;
         workerStatusLastAnnouncement = '';
+        manualRefreshRequest = null;
+        manualRefreshApplying = false;
     }
 }
 
@@ -2374,7 +2498,7 @@ function showWarning(show) {
     previous.hidden = recovery ? !recovery.parent : warningReturnFolder === null || warningReturnFolder === currentFolder;
     root.hidden = recovery ? false : !currentFolder;
     btnRetryWarning.hidden = Boolean(recovery);
-    btnRetryWarning.textContent = manifestState ? 'Reload Library' : 'Scan Again';
+    btnRetryWarning.textContent = manifestState ? 'Refresh' : 'Scan Again';
     $('warning-source-summary').hidden = confirmedAlbumState;
     $('warning-server-help').hidden = confirmedAlbumState;
     $('warning-offline-note').hidden = confirmedAlbumState;
@@ -2524,6 +2648,9 @@ function renderGridView() {
     mediaFailed = false;
     videoErrorOverlay.style.display = 'none';
     isGridViewActive = true;
+    if (manualRefreshRequest?.ready && !manualRefreshApplying) {
+        void applyPublishedRefresh(manualRefreshRequest.result);
+    }
     thumbnailGrid.innerHTML = '';
     const total = mediaFiles.length;
     const albums = galleryViewMode === 'folders' ? subfolders.length : 0;
@@ -3424,7 +3551,7 @@ function setupEventListeners() {
         location.assign(url.href);
     });
     btnShowGrid.addEventListener('click', renderGridView);
-    btnRefreshGrid.addEventListener('click', () => loadGallery({ preserveView: true, forceCacheClear: true }));
+    btnRefreshGrid.addEventListener('click', async () => requestRefresh());
     workerStatusButton.addEventListener('click', () => {
         workerStatusDetails.hidden = !workerStatusDetails.hidden;
         workerStatusButton.setAttribute('aria-expanded', String(!workerStatusDetails.hidden));
@@ -3432,7 +3559,7 @@ function setupEventListeners() {
     workerStatusReload.addEventListener('click', async event => {
         event.stopPropagation?.();
         const completion = workerCompletionKey(workerStatusLastPayload);
-        const loaded = await loadGallery({ preserveView: true, forceCacheClear: true });
+        const loaded = await applyPublishedRefresh(workerStatusLastPayload);
         if (loaded !== false && completion) {
             workerStatusAcknowledgedCompletion = completion;
             if (workerStatusPendingCompletion === completion) workerStatusPendingCompletion = null;

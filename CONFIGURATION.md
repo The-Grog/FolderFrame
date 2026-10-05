@@ -220,10 +220,10 @@ a directory scan. Browser `scanCache` is not read or written in strict manifest
 mode; `thumbnailPath` remains independent and continues to supply previews.
 
 While FolderFrame is actively using a published manifest, the Auto Refresh
-control is hidden and the manual action is labeled **Reload Library**. It
+control is hidden and the manual action is labeled **Refresh**. It
 cache-busts and reloads the published index (including chunks used by the current
 view), but it cannot discover files that are absent from that index. In `"auto"`
-mode, Auto Refresh and the **Refresh Folder** label return if the current scan
+mode, Auto Refresh and the **Refresh** label return if the current scan
 actually falls back to directory listings. Regenerate and redeploy `library.json`
 plus `library.d/` after changing media. A scheduled helper run can keep a served
 index current; the browser cannot write server appdata itself.
@@ -431,11 +431,11 @@ with an eight-second budget for each metadata pass. Missing, failed, blocked,
 or timed-out dates fall back to filename order. Metadata is cached in localStorage
 for 24 hours, capped at 2,000 entries per app location/source. Oldest checked
 entries are evicted first. Index and embed share the same source cache; other
-sources use separate keys. Refresh Folder bypasses the cache when date sorting
+sources use separate keys. Refresh bypasses the cache when date sorting
 is selected. Filename mode skips metadata loading and HEAD requests entirely.
 
 The cache survives reloads/browser restarts, retaining dates and media URLs,
-not image data. Missing dates are cached too; Refresh Folder can retry them.
+not image data. Missing dates are cached too; Refresh can retry them.
 Expired entries are discarded on the next date sort, not by a background timer.
 Clear site storage to remove persistent metadata. This cache is independent of
 rememberPreferences and remember=0. Corrupt/denied/full storage does not prevent
@@ -479,7 +479,7 @@ from 1 to 86400. It is a config-only setting, not a saved browser preference
 or URL option. `autoRefresh: false` disables automatic rescanning. Automatic
 refresh is suspended while a published manifest is active (and while discovery
 is pending); if `auto` discovery falls back to directory listings, the saved
-Auto Refresh preference resumes. **Reload Library** remains available for an
+Auto Refresh preference resumes. **Refresh** remains available for an
 explicit, cache-busted manifest reload.
 
 Set it under `defaults` for both profiles or under `index`/`embed` separately:
@@ -493,7 +493,7 @@ This is a configuration fragment; keep your other sections and settings.
 Profile entries override shared defaults, including the explicit entries in
 the shipped file. Choose shorter refresh periods for frequently changing media
 and longer periods for stable photo-frame displays or many devices sharing one
-host. Each display scans independently. Refresh Folder still scans immediately;
+host. Each display scans independently. Refresh still scans immediately;
 returning to a visible tab also triggers a scan when Auto Refresh is enabled.
 
 Slideshow `interval` is separate: 300, 900, and 3600 seconds appear as **5m**,
@@ -503,3 +503,7 @@ videos advance on completion during a slideshow.
 
 Filename is now the default sort. Existing saved sort choices or explicit URL
 options still take precedence; use `?remember=0` to test config defaults.
+
+### Optional Docker Refresh endpoint
+
+A source may advertise `refreshPath`, a same-origin HTTP(S) endpoint without credentials, query, or fragment. FolderFrame never infers this capability from `workerStatusPath`. When present on an active manifest source, **Refresh** sends a POST request for an immediate incremental server scan and follows the correlated `requestId` through worker status. The current library stays usable; a successful requested update loads automatically in Gallery, or waits until an active viewer returns to Gallery. Scheduled completions remain explicit Refresh actions. Accepted request outcomes remain queryable after later scans, coalesced client IDs resolve to the accepted request, and an ambiguous network retry reuses the same ID instead of queueing duplicate work. Static and legacy sources retain browser-side cache-busted refresh behavior.

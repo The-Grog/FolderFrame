@@ -159,7 +159,7 @@ Navigation cancellation applies to both index and chunk requests.
 
 Missing, invalid, timed-out, or unreadable index data is a visible console
 diagnostic, never an empty gallery: FolderFrame falls back to its normal
-directory scan. A bad chunk falls back only for that subtree. Refresh Folder
+directory scan. A bad chunk falls back only for that subtree. Refresh
 explicitly bypasses persistent and browser-local manifests. The Python helper
 uses atomic writes and reuses records for unchanged directory mtimes; if the
 appdata index is deleted, its next run logs a full rebuild and recreates it.

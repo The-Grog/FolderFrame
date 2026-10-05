@@ -232,7 +232,7 @@ read-only update indicator and polls only that explicit endpoint. Static hosts
 omit the setting and keep their existing behavior. “Updating library” reflects
 a valid worker-running record; “Using published library” only describes browser
 discovery. Stale or unavailable status is reported without treating the current
-library as broken. A newly observed completion offers **Reload Library**, which
+library as broken. A newly observed completion offers **Refresh**, which
 remains an explicit browser action and never starts a server scan.
 Warnings describe operations that failed during the current scan, including new
 preview, metadata, and thumbnail-cleanup failures. Previously unavailable
@@ -319,7 +319,7 @@ from 1 to 86400. It is a config-only setting, not a saved browser preference
 or URL option. `autoRefresh: false` disables automatic rescanning. Automatic
 refresh is suspended while a published manifest is active (and while discovery
 is pending); if `auto` discovery falls back to directory listings, the saved
-Auto Refresh preference resumes. **Reload Library** remains available for an
+Auto Refresh preference resumes. **Refresh** remains available for an
 explicit, cache-busted manifest reload.
 
 Set it under `defaults` for both profiles or under `index`/`embed` separately:
@@ -333,7 +333,7 @@ This is a configuration fragment; keep your other sections and settings.
 Profile entries override shared defaults, including the explicit entries in
 the shipped file. Choose shorter refresh periods for frequently changing media
 and longer periods for stable photo-frame displays or many devices sharing one
-host. Each display scans independently. Refresh Folder still scans immediately;
+host. Each display scans independently. Refresh still scans immediately;
 returning to a visible tab also triggers a scan when Auto Refresh is enabled.
 
 Slideshow `interval` is separate: 300, 900, and 3600 seconds appear as **5m**,
@@ -514,7 +514,7 @@ album hierarchy.
 
 ### Refreshing
 
-Open the gallery’s three-dot menu and choose **Refresh Folder** to scan
+Open the gallery’s three-dot menu and choose **Refresh** to scan
 immediately. While FolderFrame is actively using a published manifest, the
 periodic Auto Refresh control is hidden and the manual action becomes **Reload
 Library**. In `"auto"` discovery mode, Auto Refresh returns if the current scan
@@ -566,7 +566,7 @@ for failure triggers, configuration, resource usage, and current limitations.
 ### Grid and album view
 
 View, sorting, and grid-density buttons remain directly accessible. Auto Refresh
-and Refresh Folder/Reload Library live in the gallery’s three-dot menu. In the
+and Refresh live in the gallery’s three-dot menu. In the
 viewer, Shuffle means shuffle is enabled and Shuffle Off means it is disabled.
 
 ### Sorting
@@ -594,7 +594,7 @@ blocked/full storage falls back to a bounded in-memory cache. It is separate
 from remembered preferences, so remember=0 does not disable this metadata cache.
 Cached media URLs and dates remain on the device until replaced, evicted, or
 site storage is cleared; expired entries are discarded when date sorting runs.
-Refresh Folder reloads dates; Filename skips date lookups entirely.
+Refresh reloads dates; Filename skips date lookups entirely.
 See CONFIGURATION.md for examples and server requirements.
 
 ### Optional scan manifest
@@ -733,7 +733,7 @@ Cloudflare Pages, and other static hosts. A valid empty index is accepted.
 Browser `scanCache` is ignored in strict manifest mode, while `thumbnailPath`
 continues to work normally.
 
-In strict manifest mode the control reads **Reload Library**. It cache-busts and
+In strict manifest mode the control reads **Refresh**. It cache-busts and
 reloads the published index, but new media appears only after regenerating and
 redeploying `library.json`, `library.d/`, and `exif.d/`. The browser never writes server
 appdata itself; run the helper manually or on a schedule.
@@ -775,7 +775,7 @@ folder icon. Covers do not recursively scan descendant albums.
 Previews load near the visible grid, with up to three album-preview jobs.
 HEIC/HEIF album covers use generated WebP previews when present and otherwise
 retain the folder placeholder, avoiding full-file browser conversion in the grid.
-Use Refresh Folder to reselect covers after changing files inside albums;
+Use Refresh to reselect covers after changing files inside albums;
 unchanged background refreshes keep existing tiles. There is no cover.jpg
 override yet.
 
@@ -834,7 +834,7 @@ successful scan.
 -   Click a photo or video to open the full viewer.
 -   Click an album card to enter that folder.
 -   Use the breadcrumb to navigate back through albums.
--   Open the three-dot gallery menu for Refresh Folder/Reload Library and
+-   Open the three-dot gallery menu for Refresh and
     Auto Refresh.
 -   Toggle “By Folder” / “All Pics” to switch between album browsing and
     recursively showing media from the current folder and its subfolders.
@@ -1142,7 +1142,7 @@ Fullscreen and autoplay remain subject to browser policies.
 
 ### Changes do not appear
 
--   Click Refresh Folder.
+-   Click Refresh.
 -   Verify Auto Refresh is enabled.
 -   Hard-refresh the browser if JavaScript/HTML/CSS files themselves
     were changed.
@@ -1208,3 +1208,6 @@ If FolderFrame is useful to you, you can support its continued development:
 FolderFrame application code is available under the MIT License. See LICENSE.
 The separate heic-to/libheif/libde265 decoder has LGPL terms; the complete
 distribution is not solely MIT. See [third-party notices](THIRD_PARTY_NOTICES.md).
+### Docker/Unraid Refresh
+
+Current Docker deployments may advertise an optional same-origin Refresh endpoint. On those manifest sources, **Refresh** requests the existing incremental thumbnail, metadata, duration, and manifest worker, keeps the current library usable, and automatically loads the correlated result when it succeeds. If a viewer is active, applying the new listing waits until Gallery. Scheduled completions remain explicit; static and older deployments keep the ordinary browser-side refresh. Capability is explicit and is never inferred from worker status.

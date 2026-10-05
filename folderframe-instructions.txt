@@ -146,13 +146,13 @@ workerStatusPath is optional. Configure it only when the web server exposes the
 deployment worker's JSON status file. The compact indicator distinguishes a
 server-side update from the browser loading or using a published manifest. It
 polls quietly, pauses in hidden/controls-free/TV views, backs off when status is
-unavailable, and offers Reload Library only after a newly observed completion.
-Static hosts can omit it. Reload Library never starts a server scan.
+unavailable, and offers Refresh only after a newly observed completion.
+Static hosts can omit it. Refresh never starts a server scan.
 
 Strict manifest mode accepts a valid empty index, ignores browser scanCache, and
 continues to use thumbnailPath for grid and album previews. Missing/invalid index
 data or unreadable chunks show a published-library error with regenerate/redeploy
-guidance. The refresh button becomes Reload Library and cache-busts the published
+guidance. The refresh button becomes Refresh and cache-busts the published
 index; it cannot discover files not yet included in that index. Regenerate and
 redeploy library.json plus library.d after media changes. The browser reads the
 manifest but cannot write server appdata, so run the helper manually or on a
@@ -295,8 +295,8 @@ album hierarchy.
 
 REFRESHING
 
-Open the gallery’s three-dot menu and choose “Refresh Folder” to scan
-immediately. Strict manifest sources show “Reload Library” instead.
+Open the gallery’s three-dot menu and choose “Refresh” to scan
+immediately. Strict manifest sources show “Refresh” instead.
 
 When Auto Refresh is enabled, the current folder is rescanned at the configured refreshInterval
 (default: one minute for index, five minutes for embed). The gallery also rescans when you return to the browser tab.
@@ -365,7 +365,7 @@ blocked/full storage falls back to a bounded in-memory cache. It is separate
 from remembered preferences, so remember=0 does not disable this metadata cache.
 Cached media URLs and dates remain on the device until replaced, evicted, or
 site storage is cleared; expired entries are discarded when date sorting runs.
-Refresh Folder reloads dates; Filename skips date lookups entirely.
+Refresh reloads dates; Filename skips date lookups entirely.
 See CONFIGURATION.md for examples and server requirements.
 
 The sticky gallery header stays available while the grid scrolls. One root control
@@ -392,7 +392,7 @@ Previews load near the visible grid, with up to three album-preview jobs and
 two shared HEIC-processing jobs at once. HEIC previews are downscaled to a
 480-pixel maximum edge; other formats still use original images. No server-side
 thumbnail generation is required. Offscreen HEIC previews release their leases.
-Use Refresh Folder to reselect covers after changing files inside albums;
+Use Refresh to reselect covers after changing files inside albums;
 unchanged background refreshes keep existing tiles. There is no cover.jpg
 override yet.
 
@@ -400,7 +400,7 @@ override yet.
 -   Click a photo or video to open the full viewer.
 -   Click an album card to enter that folder.
 -   Use the breadcrumb to navigate back through albums.
--   Open the three-dot gallery menu for Refresh Folder/Reload Library and
+-   Open the three-dot gallery menu for Refresh and
     Auto Refresh.
 -   Toggle “By Folder” / “All Pics” to switch between album browsing and
     recursively showing media from the current folder and its subfolders.
@@ -725,7 +725,7 @@ NO MEDIA FILES DETECTED
 
 CHANGES DO NOT APPEAR
 
--   Click Refresh Folder.
+-   Click Refresh.
 -   Verify Auto Refresh is enabled.
 -   Hard-refresh the browser if JavaScript/HTML/CSS files themselves
     were changed.
@@ -805,7 +805,7 @@ This is a configuration fragment; keep your other sections and settings.
 Profile entries override shared defaults, including the explicit entries in
 the shipped file. Choose shorter refresh periods for frequently changing media
 and longer periods for stable photo-frame displays or many devices sharing one
-host. Each display scans independently. Refresh Folder still scans immediately;
+host. Each display scans independently. Refresh still scans immediately;
 returning to a visible tab also triggers a scan when Auto Refresh is enabled.
 
 Slideshow `interval` is separate: 300, 900, and 3600 seconds appear as **5m**,
@@ -815,3 +815,5 @@ videos advance on completion during a slideshow.
 
 Filename is now the default sort. Existing saved sort choices or explicit URL
 options still take precedence; use `?remember=0` to test config defaults.
+DOCKER REFRESH
+A Docker source may explicitly advertise a same-origin refreshPath. Refresh then POSTs an immediate incremental request to the existing worker and loads only the correlated successful manifest result. The current gallery stays usable and an active viewer is not replaced. Scheduled completions still require an explicit Refresh. Static and legacy sources keep browser-side refresh; workerStatusPath alone does not enable server scans.

@@ -1399,7 +1399,7 @@ test('persistent manifest supplies listings, dates, sizes, and generated thumbna
     assert.equal(vm.runInContext("persistentVideoDurations.get('https://example.test/frame/photos/2026/clip.mp4')", app.context), 12.5);
     assert.equal(directoryRequests, 0, 'sidecar URLs are recorded but never fetched');
     assert.equal(app.get('btn-auto-refresh').hidden, true);
-    assert.equal(app.get('refresh-grid-label').textContent, 'Reload Library');
+    assert.equal(app.get('refresh-grid-label').textContent, 'Refresh');
 
     app.context.replacementRecord = {
         path: '2026', folders: [], files: [{ path: '2026/photo.jpg', mtime: 1788177600000, size: 12345 }]
@@ -1500,7 +1500,7 @@ test('auto discovery falls back from an invalid manifest and refresh revalidates
     assert.ok(directoryRequests >= 1);
     assert.ok(app.warnings.some(message => message.includes('persistent media index unavailable')));
     assert.equal(app.get('btn-auto-refresh').hidden, false);
-    assert.equal(app.get('refresh-grid-label').textContent, 'Refresh Folder');
+    assert.equal(app.get('refresh-grid-label').textContent, 'Refresh');
     const before = manifestRequests;
     await vm.runInContext("scanDirectory('Nested')", app.context);
     await vm.runInContext("scanDirectory('Nested/Child')", app.context);
@@ -1512,7 +1512,7 @@ test('auto discovery falls back from an invalid manifest and refresh revalidates
     assert.ok(manifestRequests > before, 'explicit refresh starts a new manifest validation');
     assert.ok(directoryRequests >= 3);
     assert.equal(app.get('btn-auto-refresh').hidden, true, 'manifest recovery hides periodic refresh');
-    assert.equal(app.get('refresh-grid-label').textContent, 'Reload Library');
+    assert.equal(app.get('refresh-grid-label').textContent, 'Refresh');
 });
 
 test('optional worker status paths resolve safely and require JSON', () => {
@@ -1630,7 +1630,7 @@ test('legacy cached-only warning completion stays neutral while preserving notif
     assert.equal(classes.has('is-warning'), false);
     assert.equal(app.get('worker-status-reload').hidden, false);
     assert.equal(app.get('worker-status-announcer').textContent,
-        'Update completed. Reload Library is available.');
+        'Update completed. Refresh is available.');
 });
 
 test('worker warning details separate cached, current-scan, cleanup, and metadata warnings from routine counts', async () => {
@@ -1721,7 +1721,7 @@ test('auto discovery restores Auto Refresh when the current manifest subtree fal
     await vm.runInContext('loadGallery()', app.context);
     assert.ok(directoryRequests >= 1);
     assert.equal(app.get('btn-auto-refresh').hidden, false);
-    assert.equal(app.get('refresh-grid-label').textContent, 'Refresh Folder');
+    assert.equal(app.get('refresh-grid-label').textContent, 'Refresh');
 });
 
 test('active manifest suppresses automatic timer, visibility, EXIF interruption, and TV mode refresh', async () => {
@@ -1872,7 +1872,7 @@ test('manifest discovery rejects an invalid index without attempting directory l
     assert.equal(directoryRequests, 0);
     assert.equal(app.get('warning-title').textContent, 'Published Library Unavailable');
     assert.match(app.get('warning-message').textContent, /Regenerate and redeploy/);
-    assert.equal(app.get('refresh-grid-label').textContent, 'Reload Library');
+    assert.equal(app.get('refresh-grid-label').textContent, 'Refresh');
     assert.equal(app.get('btn-auto-refresh').hidden, true);
     assert.match(app.get('btn-refresh-grid').title, /New files appear after/);
     assert.equal([...app.saved.keys()].some(key => key.includes('scan-manifest')), false,
@@ -1920,7 +1920,7 @@ test('directory discovery never requests a configured manifest', async () => {
     assert.equal(manifestRequests, 0);
     assert.ok(directoryRequests >= 1);
     assert.equal(app.get('btn-auto-refresh').hidden, false);
-    assert.equal(app.get('refresh-grid-label').textContent, 'Refresh Folder');
+    assert.equal(app.get('refresh-grid-label').textContent, 'Refresh');
 });
 
 test('manifest discovery treats a missing referenced chunk as a hard index error', async () => {
@@ -3372,4 +3372,126 @@ test('real startup scans the selected root and source switching keeps the embed 
     assert.equal(next.searchParams.get('profile'), 'embed');
     assert.equal(next.searchParams.get('source'), 'one');
     assert.equal(next.searchParams.get('album'), '');
+});
+test('optional refresh endpoints are explicitly configured and same-origin only', () => {
+    const source = normalize({ sources: [{ id: 'docker', label: 'Docker', path: 'photos/',
+        manifestPath: 'folderframe-data/library.json', refreshPath: 'folderframe-api/refresh' }] }).sources[0];
+    assert.equal(source.refreshUrl, 'https://example.test/frame/folderframe-api/refresh');
+    assert.equal(normalize({ sources: [{ id: 'plain', label: 'Plain', path: 'photos/' }] }).sources[0].refreshUrl, null);
+    for (const refreshPath of ['', 'https://other.test/refresh', 'https://user:pass@example.test/refresh',
+        'folderframe-api/refresh?force=1', '..\\refresh']) {
+        assert.throws(() => normalize({ sources: [{ id: 'p', label: 'P', path: 'photos/', refreshPath }] }), /refreshPath/);
+    }
+});
+test('advertised manual Refresh posts once and auto-loads only its correlated completion', async () => {
+    const app = await boot();
+    vm.runInContext(`
+        activeSource.refreshUrl = 'https://example.test/frame/folderframe-api/refresh';
+        activeSource.workerStatusUrl = 'https://example.test/frame/folderframe-data/worker-status.json';
+        activeSource.manifestUrl = 'https://example.test/frame/folderframe-data/library.json';
+        runtimeDiscoveryMode = 'manifest';
+        document.hidden = true;
+        globalThis.manualLoads = 0;
+        loadGallery = async () => { manualLoads++; return true; };
+        resilience.request = async (_url, options) => ({accepted:true, requestId:options.headers['X-FolderFrame-Request-ID']});
+    `, app.context);
+    await vm.runInContext('requestRefresh()', app.context);
+    const requestId = vm.runInContext('manualRefreshRequest.requestId', app.context);
+    assert.ok(requestId);
+    vm.runInContext("handleWorkerStatus({version:1,outcome:'complete',startedAt:'2026-01-01T00:00:00Z',completedAt:'2026-01-01T00:01:00Z',requestId:'older_request'})", app.context);
+    assert.equal(vm.runInContext('manualLoads', app.context), 0, 'an unrelated completion cannot satisfy the request');
+    vm.runInContext(`handleWorkerStatus({version:1,outcome:'complete',startedAt:'2026-01-01T00:02:00Z',completedAt:'2026-01-01T00:03:00Z',requestId:'${requestId}'})`, app.context);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(vm.runInContext('manualLoads', app.context), 1);
+    assert.equal(vm.runInContext('manualRefreshRequest', app.context), null);
+});
+test('manual Refresh reconciles retained outcomes after worker status is overwritten', async () => {
+    const app = await boot();
+    vm.runInContext(`
+        activeSource.refreshUrl = 'https://example.test/frame/folderframe-api/refresh';
+        activeSource.manifestUrl = 'https://example.test/frame/folderframe-data/library.json';
+        runtimeDiscoveryMode = 'manifest';
+        manualRefreshRequest = {requestId:'retained_request',sourceId:activeSource.id,completed:false};
+        globalThis.retainedLoads = 0;
+        loadGallery = async () => { retainedLoads++; return true; };
+        resilience.request = async url => {
+            if (String(url).includes('requestId=retained_request')) return {requestId:'retained_request',state:'complete',outcome:'complete',completedAt:'2026-10-04T12:00:00Z'};
+            throw new Error('unexpected request');
+        };
+    `, app.context);
+    await vm.runInContext('pollManualRefreshOutcome(workerStatusGeneration)', app.context);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(vm.runInContext('retainedLoads', app.context), 1);
+    assert.equal(vm.runInContext('manualRefreshRequest', app.context), null);
+});
+
+test('ambiguous Refresh retry reuses its request ID', async () => {
+    const app = await boot();
+    vm.runInContext(`
+        activeSource.refreshUrl = 'https://example.test/frame/folderframe-api/refresh';
+        activeSource.manifestUrl = 'https://example.test/frame/folderframe-data/library.json';
+        runtimeDiscoveryMode = 'manifest';
+        document.hidden = true;
+        globalThis.refreshIds = [];
+        globalThis.failRefreshAck = true;
+        resilience.request = async (_url, options) => {
+            refreshIds.push(options.headers['X-FolderFrame-Request-ID']);
+            if (failRefreshAck) throw new Error('timeout');
+            return {accepted:true,requestId:options.headers['X-FolderFrame-Request-ID']};
+        };
+    `, app.context);
+    await vm.runInContext('requestRefresh()', app.context);
+    assert.equal(vm.runInContext('manualRefreshRequest.retryable', app.context), true);
+    assert.equal(app.get('btn-refresh-grid').disabled, false);
+    vm.runInContext('failRefreshAck = false', app.context);
+    await vm.runInContext('requestRefresh()', app.context);
+    assert.deepEqual(Array.from(app.context.refreshIds), [app.context.refreshIds[0], app.context.refreshIds[0]]);
+});
+
+test('visibility changes leave a failed Refresh POST and unknown outcome retryable', async () => {
+    const app = await boot();
+    const pending = vm.runInContext(`
+        activeSource.refreshUrl = 'https://example.test/frame/folderframe-api/refresh';
+        activeSource.manifestUrl = 'https://example.test/frame/folderframe-data/library.json';
+        runtimeDiscoveryMode = 'manifest';
+        globalThis.rejectRefreshPost = null;
+        resilience.request = () => new Promise((_resolve, reject) => { rejectRefreshPost = reject; });
+        requestRefresh();
+    `, app.context);
+    await new Promise(resolve => setImmediate(resolve));
+    vm.runInContext(`
+        const originalRequestId = manualRefreshRequest.requestId;
+        document.hidden = true;
+        stopWorkerStatusPolling();
+        rejectRefreshPost(new Error('timeout'));
+        globalThis.originalRefreshRequestId = originalRequestId;
+    `, app.context);
+    await pending;
+    assert.equal(vm.runInContext('manualRefreshRequest.requestId', app.context), app.context.originalRefreshRequestId);
+    assert.equal(vm.runInContext('manualRefreshRequest.retryable', app.context), true);
+    assert.equal(app.get('btn-refresh-grid').disabled, false);
+
+    vm.runInContext(`
+        manualRefreshRequest.retryable = false;
+        resilience.request = async () => { const error = new Error('not found'); error.status = 404; throw error; };
+    `, app.context);
+    await vm.runInContext('pollManualRefreshOutcome(workerStatusGeneration)', app.context);
+    assert.equal(vm.runInContext('manualRefreshRequest.requestId', app.context), app.context.originalRefreshRequestId);
+    assert.equal(vm.runInContext('manualRefreshRequest.retryable', app.context), true);
+    assert.equal(app.get('btn-refresh-grid').disabled, false);
+});
+
+test('shared Gallery return applies a completed deferred Refresh', async () => {
+    const app = await boot();
+    vm.runInContext(`
+        globalThis.deferredLoads = 0;
+        loadGallery = async () => { deferredLoads++; return true; };
+        isGridViewActive = false;
+        manualRefreshRequest = {requestId:'deferred_request',sourceId:activeSource.id,completed:true,ready:true,
+            result:{requestId:'deferred_request',outcome:'complete',completedAt:'2026-10-04T12:00:00Z'}};
+        renderGridView();
+    `, app.context);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(vm.runInContext('deferredLoads', app.context), 1);
+    assert.equal(vm.runInContext('manualRefreshRequest', app.context), null);
 });
