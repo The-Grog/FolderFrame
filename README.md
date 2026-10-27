@@ -766,11 +766,17 @@ the right controls, with no empty full-width capsule. The viewer uses the
 FolderFrame brand icon to return to the grid and the same glow-only interaction
 states.
 
-Album tiles preview the first image directly inside that folder, using the
-natural filename order regardless of the selected sort (2.jpg before 10.jpg).
-A blue folder badge and the album name distinguish covers from individual
-photos. Empty, video-only, nested-folder-only, or failed previews keep the
-folder icon. Covers do not recursively scan descendant albums.
+Album tiles select the first eligible image or video poster in natural filename
+order, regardless of the selected sort (2.jpg before 10.jpg). Videos require an
+explicit valid manifest `thumbnailPath`; a configured thumbnail directory alone
+does not prove a poster exists. Direct-child candidates take precedence over a
+bounded descendant search (four levels, twelve listings). Failed or timed-out
+covers advance to another candidate, up to eight candidates per card. Native
+image thumbnails may fall back to their original image; HEIC and video posters
+never load the original for a cover. Album covers never create preview videos.
+A blue folder badge and album name distinguish cards from media tiles. If no
+usable cover is found, the folder icon remains and the album stays accessible;
+video-only albums are not treated as empty.
 
 Previews load near the visible grid, with up to three album-preview jobs.
 HEIC/HEIF album covers use generated WebP previews when present and otherwise

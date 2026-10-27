@@ -262,7 +262,8 @@ function queueVideoThumbnail(element, source, signal) {
 }
 
 const ALBUM_COVER_MAX_LISTINGS = 12;
-async function findAlbumCover(folder, signal) {
+const ALBUM_COVER_MAX_CANDIDATES = 8;
+async function findAlbumCover(folder, signal, { excluded = new Set(), listingCache = albumPreviewSession?.listingCache } = {}) {
     const queue = [{ folder, depth: 0 }];
     const visited = new Set();
     let listingsChecked = 0, sawMedia = false, searchIncomplete = false;
@@ -275,10 +276,11 @@ async function findAlbumCover(folder, signal) {
         const candidate = queue.shift();
         if (visited.has(candidate.folder)) continue;
         visited.add(candidate.folder); listingsChecked++;
-        let listing = albumPreviewSession?.listingCache.get(candidate.folder);
+        let listing = listingCache?.get(candidate.folder);
         if (!listing) {
             listing = await scanDirectory(candidate.folder, { signal });
-            if (albumPreviewSession && !signal.aborted) albumPreviewSession.listingCache.set(candidate.folder, listing);
+            if (signal.aborted) throw resilience.abortError();
+            listingCache?.set(candidate.folder, listing);
         }
         // A sentinel on the album itself hides that album. A sentinel found
         // deeper during cover discovery excludes only that descendant; keep
@@ -294,7 +296,10 @@ async function findAlbumCover(folder, signal) {
                 hasVideo: listing.filePaths.some(isVideoFile)
             };
         }
-        const file = listing.filePaths.find(isImageFile);
+        // A configured thumbnail root is only a naming convention. Videos need
+        // a validated, explicit manifest entry before an album may request it.
+        const file = listing.filePaths.find(file => !excluded.has(file) &&
+            (isImageFile(file) || (isVideoFile(file) && persistentThumbnailUrls.has(file))));
         if (file) return { file, confirmedEmpty: false, directCount };
         if (listing.filePaths.some(isMediaFile)) sawMedia = true;
         if (candidate.depth < ALBUM_COVER_MAX_DEPTH) {
@@ -319,23 +324,38 @@ function albumSubtitleText(counts) {
 }
 
 async function loadAlbumPreview(item, folder, signal) {
+    item.albumPreviewController?.abort();
     const controller = new AbortController();
-    const cancel = () => controller.abort();
+    item.albumPreviewController = controller;
+    let timeout, previewLoadController;
+    const cancel = () => { clearTimeout(timeout); controller.abort(); };
     signal.addEventListener('abort', cancel, { once: true });
-    let timeout;
+    controller.signal.addEventListener('abort', () => {
+        clearTimeout(timeout);
+        signal.removeEventListener('abort', cancel);
+    }, { once: true });
     let preview;
+    let advancing = false;
+    const excluded = new Set();
+    const listingCache = albumPreviewSession?.listingCache || new Map();
+    const active = () => !signal.aborted && !controller.signal.aborted && item.albumPreviewController === controller;
+    const finish = () => { clearTimeout(timeout); signal.removeEventListener('abort', cancel); };
     const fallback = () => {
-        if (signal.aborted) return;
+        if (!active()) return;
         if (preview) preview.hidden = true;
         item.classList.remove('has-album-cover');
     };
-    try {
-        if (signal.aborted) return;
-        const result = await findAlbumCover(folder, controller.signal);
+    const nextCover = async () => {
+        if (!active()) return;
+        fallback();
+        if (excluded.size >= ALBUM_COVER_MAX_CANDIDATES) { finish(); return; }
+        const result = await findAlbumCover(folder, controller.signal, { excluded, listingCache });
+        if (!active()) return;
         if (!result.file && result.confirmedEmpty) {
             item.hidden = true;
             item.dataset.emptyAlbum = 'true';
             if (result.ignored) item.dataset.ignoredAlbum = 'true';
+            finish();
             return;
         }
         if (result.directCount && !signal.aborted) {
@@ -345,11 +365,13 @@ async function loadAlbumPreview(item, folder, signal) {
             if (subtitleEl) subtitleEl.textContent = albumSubtitleText(result.directCount);
         }
         const file = result.file;
-        if (!file || signal.aborted || controller.signal.aborted) return;
-        const generatedUrl = persistentThumbnailUrl(file);
-        if (isHeicFile(file) && !generatedUrl) return;
-        let url = generatedUrl || file;
-        if (signal.aborted || controller.signal.aborted) return;
+        if (!file) { finish(); return; }
+        excluded.add(file);
+        const generatedUrl = isVideoFile(file) ? persistentThumbnailUrls.get(file) : persistentThumbnailUrl(file);
+        if ((isHeicFile(file) || isVideoFile(file)) && !generatedUrl) {
+            await nextCover();
+            return;
+        }
         preview = item.coverImage || document.createElement('img');
         item.coverImage = preview;
         preview.className = 'album-cover';
@@ -357,51 +379,60 @@ async function loadAlbumPreview(item, folder, signal) {
         preview.draggable = false;
         preview.hidden = true;
         preview.decoding = 'async';
-        let previewLoadController = null;
+        let originalTried = false;
         const loadPreview = source => {
             previewLoadController?.abort();
-            previewLoadController = new AbortController();
-            const cancel = () => previewLoadController?.abort();
-            signal.addEventListener('abort', cancel, { once: true });
-            const operation = queueNativeImageSource(preview, source, previewLoadController.signal, {
+            const owner = new AbortController();
+            previewLoadController = owner;
+            const cancelLoad = () => owner.abort();
+            controller.signal.addEventListener('abort', cancelLoad, { once: true });
+            const operation = queueNativeImageSource(preview, source, owner.signal, {
                 priority: NATIVE_IMAGE_PRIORITY.album,
                 onStart: () => {
                     clearTimeout(timeout);
                     timeout = setTimeout(() => {
-                        fallback();
-                        previewLoadController?.abort();
+                        if (!active() || previewLoadController !== owner) return;
+                        clearMediaSource(preview);
+                        preview.onerror?.();
+                        owner.abort();
                     }, MEDIA_TIMEOUT);
                 }
             });
             operation.then(
-                () => signal.removeEventListener('abort', cancel),
-                () => signal.removeEventListener('abort', cancel)
+                () => controller.signal.removeEventListener('abort', cancelLoad),
+                () => controller.signal.removeEventListener('abort', cancelLoad)
             );
             return operation;
         };
         preview.onload = () => {
-            if (signal.aborted) return;
-            clearTimeout(timeout);
+            if (!active()) return;
+            finish();
             preview.hidden = false;
             item.classList.add('has-album-cover');
         };
         preview.onerror = () => {
+            if (!active() || advancing) return;
             clearTimeout(timeout);
-            if (generatedUrl && !isHeicFile(file) && preview.src === generatedUrl && !signal.aborted) {
-                url = file;
-                loadPreview(url);
+            if (generatedUrl && !isHeicFile(file) && !isVideoFile(file) && !originalTried) {
+                originalTried = true;
+                loadPreview(file);
                 return;
             }
             fallback();
+            advancing = true;
+            void nextCover().catch(() => { fallback(); finish(); })
+                .finally(() => { advancing = false; });
         };
-        signal.addEventListener('abort', () => clearTimeout(timeout), { once: true });
         if (!preview.parentNode) item.appendChild(preview);
-        loadPreview(url);
+        loadPreview(generatedUrl || file);
+    };
+    try {
+        if (signal.aborted) { cancel(); finish(); return; }
+        await nextCover();
     } catch (error) {
         // An unavailable preview never prevents opening the album.
         fallback();
-    } finally {
-        signal.removeEventListener('abort', cancel);
+        finish();
     }
 }
 let refreshInterval = 60; // Seconds; resolved per index/embed profile.

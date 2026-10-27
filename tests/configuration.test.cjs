@@ -1141,6 +1141,154 @@ test('album preview selects the first naturally sorted image, skipping videos', 
     assert.equal(app.requests.some(url => url.endsWith('/Nested/')), false);
 });
 
+async function albumPosterFixture(entries, folderNames = []) {
+    const app = await boot();
+    app.context.coverStarts = [];
+    app.context.coverEntries = entries;
+    app.context.coverFolders = folderNames;
+    app.context.coverScans = [];
+    app.context.albumItem = app.get('poster-album');
+    const create = app.context.document.createElement;
+    app.context.document.createElement = tag => {
+        assert.notEqual(tag, 'video', 'album covers never create preview videos');
+        return create(tag);
+    };
+    vm.runInContext(`
+        activeSource = { ...activeSource, thumbnailUrl: 'https://example.test/frame/thumbs/' };
+        queueNativeImageSource = (image, source, signal, options) => {
+            coverStarts.push({ image, source, signal });
+            options.onStart?.();
+            return Promise.resolve();
+        };
+        scanDirectory = async folder => {
+            coverScans.push(folder);
+            return listingFromManifest({ path: folder, files: coverEntries,
+                folders: coverFolders }, folder);
+        };
+    `, app.context);
+    return app;
+}
+async function flushAlbumCover() { for (let index = 0; index < 25; index++) await Promise.resolve(); }
+
+test('album cover chooses a manifest video poster before an image and preserves direct counts', async () => {
+    const app = await albumPosterFixture([
+        { path: 'Family/1.mp4', thumbnailPath: 'Family/1.mp4.webp' },
+        { path: 'Family/2.jpg' }
+    ], ['Nested']);
+    await vm.runInContext("loadAlbumPreview(albumItem, 'Family', new AbortController().signal)", app.context);
+    assert.equal(app.context.coverStarts[0].source, 'https://example.test/frame/thumbs/Family/1.mp4.webp');
+    assert.equal(app.context.albumItem.dataset.directFiles, '2');
+    assert.equal(app.context.albumItem.dataset.directFolders, '1');
+    assert.deepEqual(Array.from(app.context.coverScans), ['Family']);
+    app.context.albumItem.coverImage.onload();
+    assert.equal(app.context.albumItem.coverImage.hidden, false);
+    assert.equal(app.context.coverStarts.length, 1);
+    assert.equal(app.requests.some(url => String(url).endsWith('.mp4')), false);
+});
+
+test('video-only album gets a poster cover; missing or invalid explicit posters skip to images', async () => {
+    for (const thumbnailPath of [undefined, '../unsafe.webp', 'Family/1.mov.webp']) {
+        const app = await albumPosterFixture([
+            { path: 'Family/1.mov', thumbnailPath },
+            ...(thumbnailPath === 'Family/1.mov.webp' ? [] : [{ path: 'Family/2.jpg' }])
+        ]);
+        await vm.runInContext("loadAlbumPreview(albumItem, 'Family', new AbortController().signal)", app.context);
+        assert.match(app.context.coverStarts[0].source,
+            thumbnailPath === 'Family/1.mov.webp' ? /1\.mov\.webp$/ : /2\.jpg\.webp$/);
+        assert.equal(app.context.albumItem.hidden, false);
+    }
+});
+
+test('failed video posters advance through direct candidates without loading original videos', async () => {
+    const app = await albumPosterFixture([
+        { path: 'Family/1.mp4', thumbnailPath: 'Family/1.mp4.webp' },
+        { path: 'Family/2.webm', thumbnailPath: 'Family/2.webm.webp' }
+    ]);
+    await vm.runInContext("loadAlbumPreview(albumItem, 'Family', new AbortController().signal)", app.context);
+    app.context.albumItem.coverImage.onerror();
+    app.context.albumItem.coverImage.onerror();
+    await flushAlbumCover();
+    assert.match(app.context.coverStarts[1].source, /2\.webm\.webp$/);
+    app.context.albumItem.coverImage.onerror();
+    await flushAlbumCover();
+    assert.equal(app.context.coverStarts.length, 2);
+    assert.equal(app.context.albumItem.coverImage.hidden, true);
+    assert.equal(app.context.albumItem.hidden, false, 'failed video covers do not hide a nonempty album');
+    assert.deepEqual(Array.from(app.context.coverScans), ['Family'], 'fallback reuses the listing');
+    assert.ok(app.context.coverStarts.every(load => load.source.endsWith('.webp')));
+});
+
+test('video poster timeouts advance once and cancellation prevents late fallback', async () => {
+    const app = await albumPosterFixture([
+        { path: 'Family/1.mp4', thumbnailPath: 'Family/1.mp4.webp' },
+        { path: 'Family/2.mp4', thumbnailPath: 'Family/2.mp4.webp' }
+    ]);
+    const timers = new Map(); let timerId = 0;
+    app.context.setTimeout = (fn, delay) => { timers.set(++timerId, { fn, delay }); return timerId; };
+    app.context.clearTimeout = id => timers.delete(id);
+    app.context.coverOwner = new AbortController();
+    await vm.runInContext("loadAlbumPreview(albumItem, 'Family', coverOwner.signal)", app.context);
+    const expired = [...timers.values()].find(timer => timer.delay === 30000);
+    expired.fn();
+    await flushAlbumCover();
+    assert.equal(app.context.coverStarts.length, 2);
+    const lateError = app.context.albumItem.coverImage.onerror;
+    app.context.coverOwner.abort();
+    lateError();
+    await flushAlbumCover();
+    assert.equal(app.context.coverStarts.length, 2);
+    assert.equal(timers.size, 0);
+});
+
+test('album poster fallback is bounded and ignored descendants retain the visible album', async () => {
+    const app = await albumPosterFixture(Array.from({ length: 10 }, (_, i) => ({
+        path: `Family/${i}.mp4`, thumbnailPath: `Family/${i}.mp4.webp`
+    })));
+    await vm.runInContext("loadAlbumPreview(albumItem, 'Family', new AbortController().signal)", app.context);
+    for (let index = 0; index < 10; index++) {
+        app.context.albumItem.coverImage.onerror();
+        await flushAlbumCover();
+    }
+    assert.equal(app.context.coverStarts.length, 8);
+    assert.equal(app.context.coverScans.length, 1);
+    assert.equal(app.context.albumItem.hidden, false);
+    assert.equal(app.context.albumItem.dataset.directFiles, '10');
+});
+
+test('refreshing manifest poster availability replaces or removes album video cover eligibility', async () => {
+    const app = await albumPosterFixture([{ path: 'Family/1.m4v' }, { path: 'Family/2.jpg' }]);
+    await vm.runInContext("loadAlbumPreview(albumItem, 'Family', new AbortController().signal)", app.context);
+    assert.match(app.context.coverStarts.at(-1).source, /2\.jpg\.webp$/);
+    app.context.coverEntries[0].thumbnailPath = 'Family/1.m4v.webp';
+    vm.runInContext('resetPersistentManifest(); startAlbumPreviews()', app.context);
+    await vm.runInContext("loadAlbumPreview(albumItem, 'Family', new AbortController().signal)", app.context);
+    assert.match(app.context.coverStarts.at(-1).source, /1\.m4v\.webp$/);
+    delete app.context.coverEntries[0].thumbnailPath;
+    vm.runInContext('resetPersistentManifest(); startAlbumPreviews()', app.context);
+    await vm.runInContext("loadAlbumPreview(albumItem, 'Family', new AbortController().signal)", app.context);
+    assert.match(app.context.coverStarts.at(-1).source, /2\.jpg\.webp$/);
+});
+
+test('failed video cover tries the direct image before descending and cancelled listings cannot publish', async () => {
+    const app = await albumPosterFixture([
+        { path: 'Family/1.mp4', thumbnailPath: 'Family/1.mp4.webp' }, { path: 'Family/2.jpg' }
+    ], ['Nested']);
+    await vm.runInContext("loadAlbumPreview(albumItem, 'Family', new AbortController().signal)", app.context);
+    app.context.albumItem.coverImage.onerror();
+    await flushAlbumCover();
+    assert.match(app.context.coverStarts.at(-1).source, /Family\/2\.jpg\.webp$/);
+    assert.deepEqual(Array.from(app.context.coverScans), ['Family']);
+    const stale = await albumPosterFixture([]);
+    let resolve;
+    stale.context.scanDirectory = () => new Promise(done => { resolve = done; });
+    stale.context.coverOwner = new AbortController();
+    const pending = vm.runInContext("loadAlbumPreview(albumItem, 'Family', coverOwner.signal)", stale.context);
+    stale.context.coverOwner.abort();
+    resolve({ filePaths: ['https://example.test/frame/photos/Family/photo.jpg'], folderNames: [] });
+    await pending;
+    assert.equal(stale.context.coverStarts.length, 0);
+});
+
 test('optional persistent manifest paths resolve safely and require JSON', () => {
     const source = normalize({ sources: [{
         id: 'photos', label: 'Photos', path: 'photos/',

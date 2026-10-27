@@ -44,6 +44,15 @@ used by grid tiles and album covers. Missing or broken previews leave the existi
 placeholder and do not trigger `heic-to`; opening the item still uses the full
 viewer HEIC and QuickTime reclassification path.
 
+Album covers also accept video posters explicitly supplied by a validated
+manifest. Configured/guessed poster URLs alone do not qualify videos. Natural
+direct-child order takes priority over the bounded descendant search. At most
+eight cover candidates and twelve distinct listings across four descendant
+levels are considered per card; retries reuse those listings. A failed or timed-out
+video poster advances to another eligible cover without loading an original
+video or creating a preview video. Native image fallback is retained. Exhaustion
+keeps the folder icon and an accessible album; video-only albums are not empty.
+
 An ignored subtree is terminated when its directory listing contains
 `folderframe.ignore` (or the server-visible `.frameignore` alias). No extra probe
 request is made for every live folder: album cards use their existing lazy cover

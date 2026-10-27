@@ -395,16 +395,19 @@ identity/path cluster and one around the right controls, with no empty full-widt
 capsule. Auto Refresh remains in that menu. The viewer uses the FolderFrame
 brand icon to return to the grid and the same glow-only interaction states.
 
-Album tiles preview the first image directly inside that folder, using the
-natural filename order regardless of the selected sort (2.jpg before 10.jpg).
-A blue folder badge and the album name distinguish covers from individual
-photos. Empty, video-only, nested-folder-only, or failed previews keep the
-folder icon. Covers do not recursively scan descendant albums.
+Album tiles choose the first eligible image or video poster in natural filename
+order. Videos require an explicit valid manifest thumbnailPath; guessed URLs
+are not eligible. Direct media precedes a bounded descendant search (four levels,
+twelve listings). Failed covers try another candidate, up to eight candidates.
+Video posters and HEIC covers never load their original file. Other image
+thumbnails can fall back to the original image. Covers never create preview
+videos. Cards retain their folder icon and remain accessible if all covers fail;
+video-only albums are not empty. Refresh reselects covers and poster availability.
 
-Previews load near the visible grid, with up to three album-preview jobs and
-two shared HEIC-processing jobs at once. HEIC previews are downscaled to a
-480-pixel maximum edge; other formats still use original images. No server-side
-thumbnail generation is required. Offscreen HEIC previews release their leases.
+Previews load near the visible grid, with up to three album-preview jobs using
+the shared native thumbnail queue. HEIC covers use generated images only.
+Offscreen requests are cancelled. No server-side generation is required for
+browser-native image covers.
 Use Refresh to reselect covers after changing files inside albums;
 unchanged background refreshes keep existing tiles. There is no cover.jpg
 override yet.
