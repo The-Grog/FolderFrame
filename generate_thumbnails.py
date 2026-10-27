@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -23,6 +24,47 @@ THUMBNAIL_CACHE_MAX_ENTRIES = 200000
 METADATA_CACHE_VERSION = 1
 METADATA_EXTRACTION_REVISION = 1
 VIDEO_DURATION_TIMEOUT = 15
+VIDEO_POSTER_TIMEOUT = 30
+VIDEO_POSTER_REVISION = 1
+
+
+def generate_video_poster(source, target, ffmpeg_path, size, quality, duration=None):
+    """Decode one frame at a time; validate before atomically publishing it."""
+    from PIL import Image
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not isinstance(duration, (int, float)) or isinstance(duration, bool) or not math.isfinite(duration):
+        duration = None
+    seek = min(1.0, duration / 4) if duration and duration > 0 else 1.0
+    descriptor, temporary_name = tempfile.mkstemp(prefix=".poster-", suffix=".webp", dir=target.parent)
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        for position in (seek, 0):
+            result = subprocess.run([
+                ffmpeg_path, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+                "-threads", "1", "-ss", str(position), "-i", str(source),
+                "-map", "0:v:0", "-frames:v", "1", "-an", "-sn", "-dn",
+                "-vf", f"scale=w='min({size},iw)':h='min({size},ih)':force_original_aspect_ratio=decrease",
+                "-filter_threads", "1", "-c:v", "libwebp", "-threads", "1",
+                "-quality", str(quality), str(temporary),
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=VIDEO_POSTER_TIMEOUT / 2, check=False)
+            if result.returncode == 0 and temporary.stat().st_size > 0:
+                try:
+                    with Image.open(temporary) as image:
+                        image.load()
+                        if image.format != "WEBP" or min(image.size) <= 0 or max(image.size) > size:
+                            raise ValueError("invalid video poster")
+                    os.replace(temporary, target)
+                    return
+                except (OSError, ValueError):
+                    pass
+            temporary.write_bytes(b"")
+        raise ValueError("FFmpeg could not extract a usable video frame")
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 EXIF_IFD = 34665
 GPS_IFD = 34853
 EXIF_TAGS = {
@@ -443,7 +485,7 @@ def metadata_manifest_fields(summary: dict, sidecar_relative: Optional[str], dur
 def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: int,
         failure_cache_path: Optional[Path] = None, manifest_path: Optional[Path] = None,
         include_gps: bool = True, thumbnails: bool = True,
-        thumbnail_cache_path: Optional[Path] = None) -> dict:
+        thumbnail_cache_path: Optional[Path] = None, video_thumbnails: bool = True) -> dict:
     Image = ImageOps = None
     try:
         from PIL import Image, ImageOps
@@ -461,6 +503,9 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
     thumbnails_pruned = thumbnail_prune_warnings = 0
     metadata_extracted = metadata_reused = metadata_warnings = 0
     changed_directories = set()
+    if thumbnails and thumb_root is not None:
+        failure_cache_path = failure_cache_path or thumb_root / ".thumbnail-failures.json"
+        thumbnail_cache_path = thumbnail_cache_path or thumb_root / ".thumbnail-cache.json"
     cached_failures = read_failure_cache(failure_cache_path)
     retained_failures = {}
     cached_thumbnails = read_thumbnail_cache(thumbnail_cache_path)
@@ -477,6 +522,10 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
     discovery_errors = []
     metadata_enumeration_errors = []
     ffprobe_path = shutil.which("ffprobe") if metadata_enabled else None
+    ffmpeg_path = shutil.which("ffmpeg") if thumbnails and video_thumbnails else None
+    poster_settings = {"revision": VIDEO_POSTER_REVISION, "size": size, "quality": quality}
+    if thumbnails and video_thumbnails and not ffmpeg_path:
+        print("Video posters unavailable: FFmpeg is not installed; browser video previews remain available. Install FFmpeg and scan again to backfill posters.")
 
     def walk_error(error):
         discovery_errors.append(str(error))
@@ -498,7 +547,7 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
             is_video = not is_image
             relative = source.relative_to(media_root).as_posix()
             thumbnail_relative = relative + ".webp"
-            if thumbnails and is_image and thumb_root is not None:
+            if thumbnails and thumb_root is not None:
                 expected_thumbnails.add(thumbnail_relative)
             try:
                 source_stat = source.stat()
@@ -516,21 +565,19 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
             cached_entry = cached_metadata.get(relative) if metadata_enabled else None
 
             if is_video:
-                if not metadata_enabled:
-                    continue
                 signature_matches = isinstance(cached_entry, dict) and cached_entry.get("signature") == signature
                 duration_checked = signature_matches and cached_entry.get("durationChecked") is True
                 prior_probe_available = cached_entry.get("durationProbeAvailable") is True if signature_matches else False
                 duration_is_current = duration_checked and (prior_probe_available or ffprobe_path is None)
                 duration = cached_entry.get("duration") if duration_is_current else None
-                if not duration_is_current:
+                if metadata_enabled and not duration_is_current:
                     duration = probe_video_duration(source, ffprobe_path) if ffprobe_path else None
                     changed_directories.add(directory_relative)
                     if ffprobe_path and duration is None:
                         print(f"Video duration unavailable for {relative}; it will be retried after the source changes or metadata cache is cleared.")
-                else:
+                elif metadata_enabled:
                     metadata_reused += 1
-                retained_metadata[relative] = {
+                video_metadata = {
                     "signature": signature,
                     "metadata": {},
                     "sidecarReady": False,
@@ -538,7 +585,61 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
                     "durationChecked": True,
                     "durationProbeAvailable": prior_probe_available or ffprobe_path is not None,
                 }
-                metadata_records[relative] = metadata_manifest_fields({}, None, duration)
+                if metadata_enabled:
+                    retained_metadata[relative] = video_metadata
+                    metadata_records[relative] = metadata_manifest_fields({}, None, duration)
+                if thumbnails and thumb_root is not None:
+                    target = thumb_root / thumbnail_relative
+                    entry = cached_thumbnails.get(relative)
+                    failure_key = {"signature": signature, "posterSettings": poster_settings}
+                    # Disabling posters or temporarily losing FFmpeg must not
+                    # erase a completed failed attempt's retry identity.
+                    if cached_failures.get(relative) == failure_key:
+                        retained_failures[relative] = failure_key
+                    safe = thumbnail_target_is_safe(target, thumb_root)
+                    usable = safe and thumbnail_cache_entry_is_current(entry, relative, signature, target)
+                    settings_current = isinstance(entry, dict) and entry.get("posterSettings") == poster_settings
+                    if usable and (settings_current or not video_thumbnails):
+                        current += 1
+                        retained_thumbnails[relative] = entry
+                    elif video_thumbnails and ffmpeg_path and safe:
+                        if cached_failures.get(relative) == failure_key:
+                            skipped_failures += 1
+                            retained_failures[relative] = failure_key
+                        else:
+                            try:
+                                generate_video_poster(source, target, ffmpeg_path, size, quality, duration)
+                                entry = thumbnail_cache_record(relative, signature, target)
+                                if entry is None:
+                                    raise OSError("could not validate generated poster")
+                                entry["posterSettings"] = poster_settings
+                                retained_thumbnails[relative] = entry
+                                created += 1
+                                usable = True
+                                changed_directories.add(directory_relative)
+                            except (OSError, ValueError, subprocess.SubprocessError):
+                                failed += 1
+                                retained_failures[relative] = failure_key
+                                if failed <= 10:
+                                    print(f"Preview failed for {relative}: video frame extraction failed or timed out.")
+                                usable = False
+                        if relative not in retained_thumbnails:
+                            usable = False
+                    elif usable:
+                        # Missing tooling retains an already confirmed poster.
+                        retained_thumbnails[relative] = entry
+                        current += 1
+                    if not usable:
+                        invalidated_thumbnail_entries.add(relative)
+                        if safe and not remove_stale_thumbnail(target, thumb_root, relative):
+                            thumbnail_prune_warnings += 1
+                    poster_path = thumbnail_relative if usable else None
+                    previous_poster = cached_entry.get("posterPath") if isinstance(cached_entry, dict) else None
+                    if not isinstance(cached_entry, dict) or "posterPath" not in cached_entry or previous_poster != poster_path:
+                        changed_directories.add(directory_relative)
+                    video_metadata["posterPath"] = poster_path
+                    if metadata_enabled:
+                        metadata_records[relative]["thumbnailPath"] = poster_path
                 continue
 
             metadata_is_current = isinstance(cached_entry, dict) and cached_entry.get("signature") == signature and \
@@ -869,6 +970,8 @@ def main() -> int:
     parser.add_argument("--quality", type=int, default=80, help="WebP quality 1-100 (default: 80)")
     parser.add_argument("--manifest", type=Path, help="Write a persistent manifest index to this JSON file")
     parser.add_argument("--manifest-only", action="store_true", help="Skip thumbnail generation and update only the manifest")
+    parser.add_argument("--no-video-thumbnails", action="store_true",
+        help="Stop generating video posters; retain confirmed cached posters for unchanged videos")
     parser.add_argument("--failure-cache", type=Path,
         help="Cache unchanged thumbnail failures in this JSON file")
     parser.add_argument("--thumbnail-cache", type=Path,
@@ -915,7 +1018,7 @@ def main() -> int:
         thumbnail_result = generate(
             media_root, thumb_root, args.size, args.quality, failure_cache_path,
             args.manifest.resolve() if args.manifest else None, args.include_gps, True,
-            thumbnail_cache_path,
+            thumbnail_cache_path, video_thumbnails=not args.no_video_thumbnails,
         )
         changed_thumbnail_dirs = thumbnail_result["changedDirectories"]
         print(

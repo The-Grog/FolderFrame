@@ -61,6 +61,19 @@ Subfolders under photos/ automatically appear as albums.
 
 OPTIONAL GENERATED THUMBNAILS
 
+With FFmpeg installed, the helper also generates cached WebP posters for
+MP4/MOV/WEBM/M4V videos. Docker/Unraid enables these by default. Set
+FOLDERFRAME_VIDEO_THUMBNAILS=false (Unraid: Video Thumbnails) or pass
+--no-video-thumbnails to stop new video posters while retaining confirmed
+unchanged posters. FOLDERFRAME_THUMBNAILS=false disables all generation;
+--manifest-only never generates previews. First scans take longer; unchanged
+posters reuse source/settings signatures. Failed attempts remain cached until
+the source/settings change or the corresponding thumbnail-failure cache entry
+is removed. Missing FFmpeg retries automatically after installation. The grid
+uses posters without loading videos and falls back once to browser previews
+when missing/broken. Thumbnail status totals include images and video posters.
+Originals remain read-only. See README.md for cache paths and details.
+
 Large libraries can use a parallel directory of small WebP grid previews.
 Add thumbnailPath to the matching source in folderframe.config.json:
 

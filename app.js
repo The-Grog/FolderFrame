@@ -2722,7 +2722,7 @@ function renderGridView() {
             else el.onerror?.();
         } else {
             const generated = persistentThumbnailUrl(state.file);
-            el.fallbackSrc = generated ? state.file : null;
+            el.fallbackSrc = generated && !isVideoFile(state.file) ? state.file : null;
             el.queueImageSource(generated || state.file);
         }
     };
@@ -2753,6 +2753,18 @@ function renderGridView() {
         else updateThumbnail(el, true);
     };
 
+    const createVideoPreview = (item, file) => {
+        const vid = document.createElement('video');
+        watchThumbnail(vid, item, true);
+        vid.preload = 'none';
+        vid.disablePictureInPicture = true;
+        vid.muted = true;
+        vid.playsInline = true;
+        item.mediaElement = vid;
+        item.appendChild(vid);
+        observeImage(vid, file, false, item);
+        return vid;
+    };
     const createMediaTile = index => {
         const file = mediaFiles[index];
         const filename = decodeURIComponent(file.split('/').pop());
@@ -2764,15 +2776,31 @@ function renderGridView() {
         if (returnPosition?.file === file) returnTile = item;
 
         if (isVideoFile(file)) {
-            const vid = document.createElement('video');
-            watchThumbnail(vid, item, true);
-            vid.preload = 'none';
-            vid.disablePictureInPicture = true;
-            vid.muted = true;
-            vid.playsInline = true;
-            observeImage(vid, file, false, item);
-            item.mediaElement = vid;
-            item.appendChild(vid);
+            const poster = persistentThumbnailUrl(file);
+            if (poster) {
+                const img = document.createElement('img');
+                watchThumbnail(img, item);
+                img.alt = filename;
+                img.draggable = false;
+                img.decoding = 'async';
+                img.generatedFallback = async () => {
+                    const state = observed.get(img);
+                    if (!state || session.controller.signal.aborted || img.resourceActive === false) return;
+                    session.observer?.unobserve?.(img);
+                    state.cleanup();
+                    session.cleanups.delete(state.cleanup);
+                    img.thumbnailCleanup();
+                    session.cleanups.delete(img.thumbnailCleanup);
+                    observed.delete(img);
+                    img.resourceActive = false;
+                    img.remove();
+                    const vid = createVideoPreview(item, file);
+                    if (!session.observer || isWithinLoadMargin(item)) updateThumbnail(vid, true);
+                };
+                item.mediaElement = img;
+                item.appendChild(img);
+                observeImage(img, file, false, item);
+            } else createVideoPreview(item, file);
             const badge = document.createElement('div');
             badge.className = 'video-badge';
             badge.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>';

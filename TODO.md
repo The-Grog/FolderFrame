@@ -11,6 +11,8 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ## Completed
 
+- [x] **Generated video poster thumbnails** — Sequential FFmpeg WebP extraction uses source/settings signatures, atomic publication, failure caching, and safe orphan pruning. Docker/Unraid defaults on with independent video and master disable switches. Gallery posters preserve video badges and fall back once to browser previews. Fixture tests cover cache and manifest behavior; desktop/mobile visual acceptance remains to be recorded.
+
 - [x] **v0.8.7 coordinated Refresh release** — Core `v0.8.7` (`50a5670`) and deployment revisions `29da69f`, `5282e3f`, and `e407f4d` were published by workflow run `37264112624`. The verified index `sha256:b61d3d165ddb7cc99743ddd7effbadbd8a5b04f6c31359d0318583e9cc2f7ea6` contains `linux/amd64` and `linux/arm64`; GHCR and Docker Hub release/stable tags resolve to that index.
 - [x] **Live Unraid and browser/device acceptance** — The owner completed representative large-library Unraid validation and target browser/device checks covering current slideshow/TV-mode behavior, media loading and failures, controls-free embeds, manifest reuse, generated metadata, scrolling, navigation, refresh, and moved/deleted-media recovery.
 - [x] **Safe orphan-thumbnail reconciliation** — Successful preview signatures are cached by relative path, size, and nanosecond mtime. Changed sources regenerate even when an older preview appears newer, failed regeneration removes stale output, and complete scans prune orphaned generated WebPs and empty preview directories. Incomplete discovery retains uncertain previews; symlinks and paths outside the thumbnail root are not followed.

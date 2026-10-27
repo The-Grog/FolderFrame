@@ -3145,6 +3145,63 @@ test('slideshow skips errors after a bounded delay and Pause cancels the skip', 
     assert.equal(vm.runInContext('slideshowTimer', app.context), null);
 });
 
+test('video posters use image queue and fall back once while preserving badges and activation', async () => {
+    const app = await boot();
+    app.context.posterStarts = [];
+    app.context.previewStarts = [];
+    vm.runInContext(`
+        mediaFiles = ['https://example.test/frame/photos/clip.mp4'];
+        persistentThumbnailUrls.set(mediaFiles[0], 'https://example.test/frame/thumbs/clip.mp4.webp');
+        persistentVideoDurations.set(mediaFiles[0], 75);
+        queueNativeImageSource = (el, source, signal) => { posterStarts.push({ el, source, signal }); };
+        queueVideoThumbnail = (el, source, signal) => { previewStarts.push({ el, source, signal }); };
+        renderGridView();
+    `, app.context);
+    const tile = app.get('thumbnail-grid').children.find(child => child.className === 'virtual-window').children[0];
+    assert.equal(tile.mediaElement.tagName, 'IMG');
+    assert.equal(tile.children.filter(child => child.tagName === 'VIDEO').length, 0);
+    assert.equal(app.context.posterStarts.length, 1);
+    assert.equal(app.context.previewStarts.length, 0);
+    assert.match(tile.attributes['aria-label'], /duration 1 minute 15 seconds/);
+    assert.equal(tile.children.find(child => child.className === 'video-duration-badge').textContent, '1:15');
+    const poster = tile.mediaElement;
+    poster.onload();
+    assert.equal(app.context.previewStarts.length, 0);
+    poster.onerror();
+    await Promise.resolve();
+    assert.equal(tile.mediaElement.tagName, 'VIDEO');
+    assert.equal(app.context.previewStarts.length, 1);
+    assert.equal(poster.onerror, null);
+    assert.equal(app.context.posterStarts[0].signal.aborted, true);
+    tile.mediaElement.onerror();
+    assert.equal(app.context.previewStarts.length, 1);
+    app.context.document.createElement = tag => { throw new Error('activation does not create a preview'); };
+    vm.runInContext('enterFullScreenViewer = index => { globalThis.openedVideo = mediaFiles[index]; }', app.context);
+    await tile.listeners.click();
+    assert.match(app.context.openedVideo, /clip.mp4$/);
+});
+
+test('legacy video tiles retain browser previews and detached posters cannot start fallback', async () => {
+    const app = await boot();
+    app.context.previewStarts = [];
+    vm.runInContext(`
+        mediaFiles = ['https://example.test/frame/photos/clip.webm'];
+        queueVideoThumbnail = (el, source, signal) => { previewStarts.push({ el, source, signal }); };
+        renderGridView();
+    `, app.context);
+    assert.equal(app.context.previewStarts.length, 1);
+    vm.runInContext(`
+        persistentThumbnailUrls.set(mediaFiles[0], 'https://example.test/frame/thumbs/clip.webm.webp');
+        queueNativeImageSource = () => {};
+        renderGridView();
+    `, app.context);
+    const tile = app.get('thumbnail-grid').children.find(child => child.className === 'virtual-window').children[0];
+    const oldFallback = tile.mediaElement.generatedFallback;
+    vm.runInContext('stopGridSession()', app.context);
+    await oldFallback();
+    assert.equal(app.context.previewStarts.length, 1);
+});
+
 async function boot({ search = '', config = shipped, configFailure = false, storageBlocked = false,
     empty = false, initialStorage = new Map(), fetchHandler = null, mobile = false, trackIntervals = false } = {}) {
     class Element {

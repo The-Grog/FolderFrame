@@ -818,6 +818,33 @@ unsupported formats cleanly. It preserves subfolders, uses the first GIF frame,
 skips current outputs, and never modifies originals. Run it again after adding
 or changing media.
 
+With FFmpeg installed, the same scan generates one WebP poster per MP4, MOV,
+WEBM, or M4V video (case-insensitive). `Family/clip.mov` maps to
+`thumbnails/Family/clip.mov.webp`, published through the existing manifest
+`thumbnailPath`. Posters preserve orientation and aspect ratio, never upscale,
+and use `--size` and `--quality`. Extraction runs sequentially with one FFmpeg
+thread and a bounded timeout; validated output is published atomically.
+The grid displays the poster with the play/duration badges. Missing or broken
+posters fall back once to the bounded browser video preview. Opening a tile
+still plays the original video.
+
+Video posters default on in Docker/Unraid, including existing installs without
+the new variable. Set `FOLDERFRAME_VIDEO_THUMBNAILS=false` (Unraid: **Video
+Thumbnails**) to stop new posters while continuing image thumbnails. Confirmed
+cached posters for unchanged videos are retained. The master
+`FOLDERFRAME_THUMBNAILS=false` disables all generation; `--manifest-only` never
+generates posters. Standalone users can pass `--no-video-thumbnails`.
+
+First scans take longer. Subsequent scans reuse posters by source size/mtime
+and generation settings/revision. Missing posters, changed sources, or changed
+size/quality trigger regeneration. Failed attempts are cached; later unchanged
+failures are informational. To retry, change the source/settings or remove its
+entry from the failure cache (default `thumbnails/.thumbnail-failures.json`;
+Docker: `/config/folderframe-data/thumbnail-failures.json`). Missing FFmpeg is
+reported once per scan without counting each video as a failure; installing it
+allows backfill on the next scan. Existing generated/reused/failure status
+counters include image thumbnails and video posters. Originals remain read-only.
+
 The official Docker and Unraid deployment generates persistent thumbnails in
 the configured appdata directory by default. It processes media in the
 background, skips current previews, safely prunes old cache entries after a

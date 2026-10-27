@@ -41,3 +41,4 @@ jobs:
           python tests/thumbnail_pruning_signature.test.py
           python tests/exif_metadata.test.py
           python tests/video_duration.test.py
+          python tests/video_posters.test.py

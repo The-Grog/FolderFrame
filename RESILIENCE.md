@@ -27,7 +27,8 @@ Navigation resets the video element with `load()` so the old stream disconnects.
 | Viewer HEIC processing | 2 active jobs; grid and album covers use generated thumbnails only |
 | Native viewer JPEG/PNG/WebP/GIF display | 2 active full-resolution loads |
 | Native grid/album thumbnail display | 12 active loads; album work has priority over grid work within the thumbnail queue |
-| Video grid previews | 2 concurrent first-frame loads; 8-second timeout; offscreen requests cancelled |
+| Video grid previews | Generated posters use the native thumbnail queue without creating a video element; missing/broken posters fall back once to 2 concurrent first-frame loads, with an 8-second timeout and offscreen cancellation |
+| Optional generated video posters | One FFmpeg job at a time, 1 thread, at most 30 seconds per video across frame attempts; source/settings signatures and cached failures avoid repeated extraction |
 | Orphaned queued job | 250 ms grace for reattachment |
 | Viewer converted-image cache | 32 entries / 64 MiB of Blob data |
 | HEIC thumbnail cache | 128 entries / 16 MiB; maximum 480-pixel edge |

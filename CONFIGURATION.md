@@ -1,5 +1,13 @@
 # Configuring FolderFrame
 
+Generated video posters use the existing source `thumbnailPath` and optional
+manifest; no new browser setting is required. Docker/Unraid defaults
+`FOLDERFRAME_VIDEO_THUMBNAILS=true`. Set it to `false` to stop new video posters
+while retaining confirmed cached posters; `FOLDERFRAME_THUMBNAILS=false` is the
+master generation switch. The standalone generator accepts
+`--no-video-thumbnails`; `--manifest-only` never creates previews. See the
+README's generated-thumbnail section for caching, retry, and fallback behavior.
+
 Edit `folderframe.config.json` beside `index.html`; no JavaScript edits or
 build step are needed. Reload the page after saving. The app fetches this
 file without using its HTTP cache on each startup.
