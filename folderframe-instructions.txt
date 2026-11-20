@@ -833,3 +833,12 @@ Filename is now the default sort. Existing saved sort choices or explicit URL
 options still take precedence; use `?remember=0` to test config defaults.
 DOCKER REFRESH
 A Docker source may explicitly advertise a same-origin refreshPath. Refresh then POSTs an immediate incremental request to the existing worker and loads only the correlated successful manifest result. The current gallery stays usable and an active viewer is not replaced. Scheduled completions still require an explicit Refresh. Static and legacy sources keep browser-side refresh; workerStatusPath alone does not enable server scans.
+
+Large-library cache reuse: there is no 200,000-entry thumbnail validation cap.
+Unchanged cache/manifest JSON is not rewritten; scan status still updates.
+Keep existing caches when upgrading. Previously discarded video poster records
+may need one final regeneration. Caches still load into memory; changing one
+record rewrites its JSON file. No SQL or new cache partitioning is introduced.
+Docker/Unraid FOLDERFRAME_THUMBNAIL_INTERVAL remains 3600 seconds after each scan.
+Consider 21600 for large libraries with occasional imports, or 86400 for archives.
+Startup scans and manual Refresh can run sooner.

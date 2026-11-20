@@ -20,7 +20,6 @@ MEDIA_TYPES = IMAGE_TYPES | {".mp4", ".mov", ".webm", ".m4v"}
 MANIFEST_VERSION = 1
 FAILURE_CACHE_VERSION = 1
 THUMBNAIL_CACHE_VERSION = 1
-THUMBNAIL_CACHE_MAX_ENTRIES = 200000
 METADATA_CACHE_VERSION = 1
 METADATA_EXTRACTION_REVISION = 1
 VIDEO_DURATION_TIMEOUT = 15
@@ -120,6 +119,19 @@ def atomic_json(path: Path, payload: dict) -> None:
         json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
         handle.write("\n")
     os.replace(temporary, path)
+
+
+def write_json_if_changed(path: Path, payload: dict, previous=None, *, timestamps=()) -> bool:
+    """Compare already-loaded content, never serialized copies; status writes stay unconditional."""
+    if isinstance(previous, dict) and path.is_file():
+        keys = payload.keys() - set(timestamps)
+        if keys == previous.keys() - set(timestamps) and all(payload[key] == previous[key] for key in keys):
+            return False
+    atomic_json(path, payload)
+    return True
+
+
+_UNREAD = object()
 
 
 def read_json(path: Path):
@@ -284,23 +296,24 @@ def extract_metadata(image, include_gps=True):
         return {}
 
 
-def read_failure_cache(path: Optional[Path]) -> dict:
-    payload = read_json(path) if path else None
+def read_failure_cache(path: Optional[Path], *, payload=_UNREAD) -> dict:
+    if payload is _UNREAD:
+        payload = read_json(path) if path else None
     if not isinstance(payload, dict) or payload.get("version") != FAILURE_CACHE_VERSION:
         return {}
     failures = payload.get("failures")
     return failures if isinstance(failures, dict) else {}
 
 
-def write_failure_cache(path: Optional[Path], failures: dict) -> None:
+def write_failure_cache(path: Optional[Path], failures: dict, previous=None) -> None:
     if path is None:
         return
     try:
-        atomic_json(path, {
+        write_json_if_changed(path, {
             "version": FAILURE_CACHE_VERSION,
             "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "failures": failures,
-        })
+        }, previous, timestamps=("updatedAt",))
     except OSError as error:
         print(f"Could not update thumbnail failure cache {path}: {error}")
 
@@ -343,29 +356,24 @@ def thumbnail_cache_entry_is_current(entry, relative: str, signature: dict, targ
         return False
 
 
-def read_thumbnail_cache(path: Optional[Path]) -> dict:
-    payload = read_json(path) if path else None
+def read_thumbnail_cache(path: Optional[Path], *, payload=_UNREAD) -> dict:
+    if payload is _UNREAD:
+        payload = read_json(path) if path else None
     if not isinstance(payload, dict) or payload.get("version") != THUMBNAIL_CACHE_VERSION:
         return {}
     entries = payload.get("entries")
     return entries if isinstance(entries, dict) else {}
 
 
-def write_thumbnail_cache(path: Optional[Path], entries: dict) -> None:
+def write_thumbnail_cache(path: Optional[Path], entries: dict, previous=None) -> None:
     if path is None:
         return
-    bounded_entries = {
-        relative: entries[relative]
-        for relative in sorted(entries)[:THUMBNAIL_CACHE_MAX_ENTRIES]
-    }
-    if len(entries) > len(bounded_entries):
-        print(f"Thumbnail success cache is capped at {THUMBNAIL_CACHE_MAX_ENTRIES} entries.")
     try:
-        atomic_json(path, {
+        write_json_if_changed(path, {
             "version": THUMBNAIL_CACHE_VERSION,
             "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "entries": bounded_entries,
-        })
+            "entries": entries,
+        }, previous, timestamps=("updatedAt",))
     except OSError as error:
         print(f"Could not update thumbnail success cache {path}: {error}")
 
@@ -442,8 +450,9 @@ def prune_orphan_thumbnails(thumb_root: Path, expected: set[str]) -> tuple[int, 
                 warnings += 1
                 print(f"Could not remove empty thumbnail directory {directory}: {error}")
     return pruned, warnings
-def read_metadata_cache(path: Optional[Path], include_gps: bool) -> dict:
-    payload = read_json(path) if path else None
+def read_metadata_cache(path: Optional[Path], include_gps: bool, *, payload=_UNREAD) -> dict:
+    if payload is _UNREAD:
+        payload = read_json(path) if path else None
     if not isinstance(payload, dict) or payload.get("version") != METADATA_CACHE_VERSION or \
             payload.get("extractionRevision") != METADATA_EXTRACTION_REVISION or \
             payload.get("includeGps") is not include_gps:
@@ -452,17 +461,17 @@ def read_metadata_cache(path: Optional[Path], include_gps: bool) -> dict:
     return entries if isinstance(entries, dict) else {}
 
 
-def write_metadata_cache(path: Optional[Path], include_gps: bool, entries: dict) -> bool:
+def write_metadata_cache(path: Optional[Path], include_gps: bool, entries: dict, previous=None) -> bool:
     if path is None:
         return False
     try:
-        atomic_json(path, {
+        write_json_if_changed(path, {
             "version": METADATA_CACHE_VERSION,
             "extractionRevision": METADATA_EXTRACTION_REVISION,
             "includeGps": include_gps,
             "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "entries": entries,
-        })
+        }, previous, timestamps=("updatedAt",))
         return True
     except (OSError, ValueError) as error:
         print(f"Could not update EXIF metadata cache {path}: {error}")
@@ -506,16 +515,19 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
     if thumbnails and thumb_root is not None:
         failure_cache_path = failure_cache_path or thumb_root / ".thumbnail-failures.json"
         thumbnail_cache_path = thumbnail_cache_path or thumb_root / ".thumbnail-cache.json"
-    cached_failures = read_failure_cache(failure_cache_path)
+    previous_failures = read_json(failure_cache_path) if failure_cache_path else None
+    cached_failures = read_failure_cache(failure_cache_path, payload=previous_failures)
     retained_failures = {}
-    cached_thumbnails = read_thumbnail_cache(thumbnail_cache_path)
+    previous_thumbnails = read_json(thumbnail_cache_path) if thumbnail_cache_path else None
+    cached_thumbnails = read_thumbnail_cache(thumbnail_cache_path, payload=previous_thumbnails)
     retained_thumbnails = {}
     invalidated_thumbnail_entries = set()
     expected_thumbnails = set()
     metadata_enabled = manifest_path is not None
     exif_root = manifest_path.parent / "exif.d" if metadata_enabled else None
     metadata_cache_path = exif_root / ".metadata-cache.json" if exif_root else None
-    cached_metadata = read_metadata_cache(metadata_cache_path, include_gps)
+    previous_metadata = read_json(metadata_cache_path) if metadata_cache_path else None
+    cached_metadata = read_metadata_cache(metadata_cache_path, include_gps, payload=previous_metadata)
     retained_metadata = {}
     metadata_records = {}
     expected_sidecars = set()
@@ -563,6 +575,12 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
             signature = {"size": source_stat.st_size, "mtimeNs": source_stat.st_mtime_ns}
             directory_relative = source.parent.relative_to(media_root).as_posix() if source.parent != media_root else ""
             cached_entry = cached_metadata.get(relative) if metadata_enabled else None
+            # A previous incomplete scan may have rebuilt a directory manifest
+            # without visiting this source. Re-publish cached metadata once the
+            # source is visible again, even if its signature and directory mtime
+            # are unchanged. The reconstructed cache entry clears this marker.
+            if isinstance(cached_entry, dict) and cached_entry.get("manifestNeedsReconciliation") is True:
+                changed_directories.add(directory_relative)
 
             if is_video:
                 signature_matches = isinstance(cached_entry, dict) and cached_entry.get("signature") == signature
@@ -586,7 +604,6 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
                     "durationProbeAvailable": prior_probe_available or ffprobe_path is not None,
                 }
                 if metadata_enabled:
-                    retained_metadata[relative] = video_metadata
                     metadata_records[relative] = metadata_manifest_fields({}, None, duration)
                 if thumbnails and thumb_root is not None:
                     target = thumb_root / thumbnail_relative
@@ -640,6 +657,8 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
                     video_metadata["posterPath"] = poster_path
                     if metadata_enabled:
                         metadata_records[relative]["thumbnailPath"] = poster_path
+                if metadata_enabled:
+                    retained_metadata[relative] = cached_entry if cached_entry == video_metadata else video_metadata
                 continue
 
             metadata_is_current = isinstance(cached_entry, dict) and cached_entry.get("signature") == signature and \
@@ -772,21 +791,28 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
                                 print(f"Could not remove stale EXIF sidecar {sidecar_path}: {cleanup_error}")
                 if previous_sidecar_ready is None or previous_sidecar_ready != sidecar_ready:
                     changed_directories.add(directory_relative)
-                retained_metadata[relative] = {
+                image_metadata = {
                     "signature": signature, "metadata": summary, "sidecarReady": sidecar_ready,
                     "exifExtractionAvailable": metadata_is_current or Image is not None,
                 }
+                retained_metadata[relative] = cached_entry if cached_entry == image_metadata else image_metadata
                 metadata_records[relative] = metadata_manifest_fields(
                     summary, sidecar_relative if sidecar_ready else None
                 )
 
     if thumbnails:
-        write_failure_cache(failure_cache_path, retained_failures)
-        cache_to_write = dict(cached_thumbnails) if discovery_errors else {}
-        cache_to_write.update(retained_thumbnails)
+        if discovery_errors:
+            # Unvisited sources are uncertain, not deleted. Share their existing records.
+            for relative, entry in cached_failures.items():
+                if relative not in retained_thumbnails:
+                    retained_failures.setdefault(relative, entry)
+            for relative, entry in cached_thumbnails.items():
+                retained_thumbnails.setdefault(relative, entry)
+        write_failure_cache(failure_cache_path, retained_failures, previous_failures)
+        cache_to_write = retained_thumbnails
         for relative in invalidated_thumbnail_entries:
             cache_to_write.pop(relative, None)
-        write_thumbnail_cache(thumbnail_cache_path, cache_to_write)
+        write_thumbnail_cache(thumbnail_cache_path, cache_to_write, previous_thumbnails)
         if discovery_errors:
             print("Thumbnail pruning skipped because source discovery was incomplete.")
         elif thumb_root is not None:
@@ -794,7 +820,18 @@ def generate(media_root: Path, thumb_root: Optional[Path], size: int, quality: i
             thumbnails_pruned += pruned
             thumbnail_prune_warnings += prune_warnings
     if metadata_enabled:
-        if not write_metadata_cache(metadata_cache_path, include_gps, retained_metadata):
+        if discovery_errors:
+            for relative, entry in cached_metadata.items():
+                if relative not in retained_metadata:
+                    # Retain extraction results, but do not treat their manifest
+                    # publication as complete: write_manifest may see a directory
+                    # that this walk could not enumerate and publish fewer fields.
+                    retained_metadata[relative] = (
+                        {**entry, "manifestNeedsReconciliation": True}
+                        if isinstance(entry, dict) and entry.get("manifestNeedsReconciliation") is not True
+                        else entry
+                    )
+        if not write_metadata_cache(metadata_cache_path, include_gps, retained_metadata, previous_metadata):
             metadata_warnings += 1
         if not discovery_errors and exif_root.exists():
             for sidecar in exif_root.rglob("*.json"):
@@ -871,7 +908,7 @@ def directory_record(media_root: Path, relative: str, old_record, thumb_root: Op
     return {"path": relative, "mtimeNs": mtime_ns, "files": files, "folders": folders}
 
 
-def safe_old_chunk(manifest_path: Path, old_index, top_folder: str):
+def safe_old_chunk(manifest_path: Path, old_index, top_folder: str, *, full_payload=False):
     descriptor = old_index.get("chunks", {}).get(top_folder) if isinstance(old_index, dict) else None
     if not isinstance(descriptor, dict) or not isinstance(descriptor.get("file"), str):
         return {}
@@ -881,7 +918,7 @@ def safe_old_chunk(manifest_path: Path, old_index, top_folder: str):
         candidate.relative_to(base)
         payload = read_json(candidate)
         if payload and payload.get("version") == MANIFEST_VERSION and isinstance(payload.get("directories"), dict):
-            return payload["directories"]
+            return payload if full_payload else payload["directories"]
     except (OSError, ValueError):
         pass
     return {}
@@ -906,7 +943,8 @@ def write_manifest(media_root: Path, thumb_root: Optional[Path], manifest_path: 
     chunks, live_chunk_files = {}, set()
 
     for top_folder in root_record["folders"]:
-        old_directories = safe_old_chunk(manifest_path, old_index, top_folder)
+        old_chunk = safe_old_chunk(manifest_path, old_index, top_folder, full_payload=True)
+        old_directories = old_chunk.get("directories", {})
         directories, stack = {}, [top_folder]
         while stack:
             relative = stack.pop()
@@ -925,11 +963,11 @@ def write_manifest(media_root: Path, thumb_root: Optional[Path], manifest_path: 
         digest = hashlib.sha256(top_folder.encode("utf-8")).hexdigest()[:16]
         chunk_name = f"{digest}.json"
         chunk_path = chunk_directory / chunk_name
-        atomic_json(chunk_path, {
+        write_json_if_changed(chunk_path, {
             "version": MANIFEST_VERSION,
             "root": top_folder,
             "directories": directories,
-        })
+        }, old_chunk)
         relative_chunk = f"{chunk_directory.name}/{chunk_name}"
         live_chunk_files.add(chunk_path.resolve())
         chunks[top_folder] = {"file": relative_chunk, "directories": len(directories)}
@@ -948,7 +986,7 @@ def write_manifest(media_root: Path, thumb_root: Optional[Path], manifest_path: 
         "chunks": chunks,
         "errors": counters["errors"],
     }
-    atomic_json(manifest_path, payload)
+    write_json_if_changed(manifest_path, payload, old_index, timestamps=("generatedAt",))
     return counters
 
 

@@ -11,6 +11,8 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ## Completed
 
+- [x] **Uncapped thumbnail validation and unchanged-write suppression** — Retain all thumbnail/poster validation records, reuse unchanged metadata records, avoid the final cache dictionary copy, and skip unchanged cache/manifest publication while keeping scan status current. Preserve incomplete-discovery records. Interval guidance keeps the one-hour default and suggests six or 24 hours for less frequently changing libraries.
+
 - [x] **Generated video poster thumbnails** — Sequential FFmpeg WebP extraction uses source/settings signatures, atomic publication, failure caching, and safe orphan pruning. Docker/Unraid defaults on with independent video and master disable switches. Gallery posters preserve video badges and fall back once to browser previews. Fixture tests cover cache and manifest behavior; desktop/mobile visual acceptance remains to be recorded.
 
 - [x] **v0.8.7 coordinated Refresh release** — Core `v0.8.7` (`50a5670`) and deployment revisions `29da69f`, `5282e3f`, and `e407f4d` were published by workflow run `37264112624`. The verified index `sha256:b61d3d165ddb7cc99743ddd7effbadbd8a5b04f6c31359d0318583e9cc2f7ea6` contains `linux/amd64` and `linux/arm64`; GHCR and Docker Hub release/stable tags resolve to that index.

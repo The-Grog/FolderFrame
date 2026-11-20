@@ -42,3 +42,4 @@ jobs:
           python tests/exif_metadata.test.py
           python tests/video_duration.test.py
           python tests/video_posters.test.py
+          python tests/incremental_cache.test.py

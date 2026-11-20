@@ -987,6 +987,24 @@ Browsers generally require a user gesture before true fullscreen is
 allowed, so automatic URL startup can configure TV behavior but may not
 be able to force fullscreen by itself.
 
+### Large-library cache reuse
+
+Thumbnail validation records are retained for every generated image thumbnail and
+video poster; there is no fixed entry cap. Existing JSON caches remain compatible.
+Previously discarded records may require a one-time regeneration, especially for
+video posters, before subsequent scans can reuse them reliably. Do not delete
+working caches as part of the upgrade.
+
+Unchanged thumbnail, failure, and metadata caches and manifest files are not
+rewritten. Cache `updatedAt` and manifest `generatedAt` timestamps change only when
+the corresponding file is published; use worker status for the latest scan time.
+Worker status still updates after every run, including runs with no media changes.
+Changed files are replaced atomically. A one-entry cache change still rewrites that
+JSON cache; this is not an in-place record store. The worker still loads caches and
+checks source files, so very large libraries require adequate RAM and scan time.
+Records for unvisited sources are retained when discovery is incomplete; complete
+scans remove obsolete records and safely reconcile orphaned thumbnails.
+
 ## Saved settings
 
 The gallery stores preferences in the browser’s localStorage.
