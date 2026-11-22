@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Rhodium+Libre&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=20260928-video-duration">
+<link rel="stylesheet" href="styles.css?v=20261122-about-menu">
 <link rel="icon" type="image/png" href="docs/images/folderframe-icon.png?v=20260828-brand">
 </head>
 <body>
@@ -126,6 +126,7 @@
                             <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11zM8 12h8v2H8v-2zm0 4h8v2H8v-2z"/></svg>
                             <span class="button-label">Copy Filename</span>
                         </button>
+                        <button id="btn-about-viewer" class="btn btn-secondary ff-btn about-menu-item" type="button" role="menuitem" aria-haspopup="dialog" aria-controls="about-dialog"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path fill="currentColor" d="M11 10h2v7h-2zm0-4h2v2h-2z"/></svg><span class="button-label">About FolderFrame</span></button>
                     </div>
                 </div>
             </div>
@@ -202,6 +203,7 @@
                                 <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 6V3l-4 4 4 4V8c2.76 0 5 2.24 5 5 0 .75-.17 1.46-.46 2.1l1.46 1.46A6.96 6.96 0 0 0 19 13c0-3.87-3.13-7-7-7zm-5.54.9L5 5.44A6.96 6.96 0 0 0 4 9c0 3.87 3.13 7 7 7v3l4-4-4-4v3c-2.76 0-5-2.24-5-5 0-.75.17-1.46.46-2.1z"/></svg>
                                 <span class="button-label">Auto Refresh On</span>
                             </button>
+                            <button id="btn-about-grid" class="btn btn-secondary ff-btn about-menu-item" type="button" role="menuitem" aria-haspopup="dialog" aria-controls="about-dialog"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path fill="currentColor" d="M11 10h2v7h-2zm0-4h2v2h-2z"/></svg><span class="button-label">About FolderFrame</span></button>
                         </div>
                     </div>
                 </div>
@@ -232,6 +234,24 @@
             <button id="btn-back-to-top" class="btn btn-secondary back-to-top" type="button" hidden aria-label="Back to top">↑ Top</button>
         </div>
 
+        <dialog id="about-dialog" class="about-dialog" aria-labelledby="about-title" aria-describedby="about-description">
+            <div class="photo-info-heading about-heading">
+                <h2 id="about-title">About FolderFrame</h2>
+                <button id="btn-close-about" class="btn btn-secondary ff-btn ff-btn-icon" type="button" aria-label="Close About FolderFrame" autofocus>×</button>
+            </div>
+            <p id="about-version" class="about-version">Development / unknown version</p>
+            <p id="about-revision" class="about-revision" hidden></p>
+            <p id="about-description">A lightweight, folder-first photo and video gallery. Your folders are your albums—no database required.</p>
+            <nav class="about-links" aria-label="FolderFrame project links">
+                <a class="photo-info-link" href="https://folderframe.com/" target="_blank" rel="noopener noreferrer">folderframe.com</a>
+                <a class="photo-info-link" href="https://github.com/The-Grog/FolderFrame" target="_blank" rel="noopener noreferrer">GitHub</a>
+                <a id="about-release-notes" class="photo-info-link" href="https://github.com/The-Grog/FolderFrame/releases" target="_blank" rel="noopener noreferrer">All releases</a>
+            </nav>
+            <button id="btn-copy-version" class="btn btn-secondary ff-btn" type="button">Copy version info</button>
+            <p id="about-status" class="about-status" role="status" aria-live="polite"></p>
+            <textarea id="about-copy-text" class="about-copy-text" aria-label="Version info to copy" rows="5" readonly hidden></textarea>
+        </dialog>
+
         <div id="help-hint"><span>Scroll to Zoom • Drag to Pan • ←/→ Browse • Space Play/Pause • Enter Fit/Original • R Rotate • F Fullscreen • G Gallery • S Shuffle</span></div>
 
         <div id="warning-overlay" class="warning-container" style="display:none;">
@@ -257,6 +277,7 @@
     <p id="config-notice" role="status" hidden></p>
     <script src="resilience.js?v=20260831-native-decode-queue"></script>
 <script src="settings.js?v=20261004-unified-refresh"></script>
-<script src="app.js?v=20261027-album-video-posters"></script>
+<script src="about.js?v=20261122-about"></script>
+<script src="app.js?v=20261122-about"></script>
 </body>
 </html>

@@ -1245,3 +1245,27 @@ button, select, .media-error-actions a { touch-action:manipulation; }
         align-self: flex-start !important;
     }
 }
+
+/* About shares Photo Info's dark surface and links; it never replaces that panel. */
+.about-dialog {
+    box-sizing:border-box; position:fixed; margin:auto; inset:0;
+    width:min(420px, calc(100vw - 32px)); max-height:calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overflow:auto; padding:20px; border:1px solid rgba(255,255,255,.18); border-radius:14px;
+    background:rgba(18,18,18,.98); color:#eee; box-shadow:0 12px 40px rgba(0,0,0,.45);
+    font:14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    text-align:left; user-select:text; -webkit-user-select:text;
+}
+.about-dialog:not([open]) { display:none; }
+.about-dialog::backdrop { background:rgba(0,0,0,.6); }
+.about-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.about-heading h2 { margin:0; font-size:18px; }
+.about-heading button { flex-shrink:0; font-size:24px; }
+.about-dialog .ff-btn.btn { min-width:44px; min-height:44px; }
+.about-version { margin:12px 0 0; font-size:16px; font-weight:600; }
+.about-revision { margin:4px 0 0; color:#aaa; font-size:12px; overflow-wrap:anywhere; }
+.about-links { display:flex; flex-wrap:wrap; gap:0 18px; margin:12px 0; }
+.about-links a { display:inline-flex; align-items:center; min-height:44px; }
+.about-status { color:#bbb; font-size:12px; margin:10px 0 0; }
+.about-status:empty { display:none; }
+.about-copy-text { box-sizing:border-box; width:100%; margin-top:12px; padding:10px; background:#242424; color:#eee; border:1px solid #666; border-radius:6px; resize:vertical; }
+.about-dialog :focus-visible { outline:2px solid #60a5fa; outline-offset:3px; }

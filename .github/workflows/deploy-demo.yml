@@ -11,6 +11,9 @@ on:
       - "docs/images/folderframe-logo.png"
       - "docs/images/folderframe-logo-back.png"
       - "app.js"
+      - "about.js"
+      - "build-info.json"
+      - "scripts/write_build_info.py"
       - "settings.js"
       - "resilience.js"
       - "styles.css"
@@ -19,6 +22,11 @@ on:
       - "vendor/**"
       - "THIRD_PARTY_NOTICES.md"
   workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Optional release tag or commit to deploy (run this workflow from main)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -35,6 +43,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -59,7 +70,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p _site/docs/images
-          cp index.html app.js settings.js resilience.js styles.css THIRD_PARTY_NOTICES.md LICENSE _site/
+          cp index.html app.js about.js settings.js resilience.js styles.css THIRD_PARTY_NOTICES.md LICENSE _site/
           cp -R vendor _site/
           cp docs/images/folderframe-logo.png docs/images/folderframe-logo-back.png docs/images/folderframe-icon.png _site/docs/images/
           cp -R demo-photos demo-thumbnails demo-manifest _site/
@@ -140,10 +151,18 @@ jobs:
           )
           PY
 
+      - name: Stamp installed demo build
+        shell: bash
+        run: |
+          version=$(git describe --tags --exact-match HEAD 2>/dev/null || true)
+          python scripts/write_build_info.py --version "$version" --revision "$(git rev-parse HEAD)" --output _site/build-info.json
+
       - name: Verify static demo
         shell: bash
         run: |
           test -s _site/index.html
+          test -s _site/about.js
+          test -s _site/build-info.json
           test -s _site/vendor/heic-to-1.5.2/heic-to.js
           test -s _site/THIRD_PARTY_NOTICES.md
           test -s _site/docs/images/folderframe-logo.png

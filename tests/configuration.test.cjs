@@ -3351,7 +3351,7 @@ test('legacy video tiles retain browser previews and detached posters cannot sta
 });
 
 async function boot({ search = '', config = shipped, configFailure = false, storageBlocked = false,
-    empty = false, initialStorage = new Map(), fetchHandler = null, mobile = false, trackIntervals = false } = {}) {
+    empty = false, initialStorage = new Map(), fetchHandler = null, mobile = false, trackIntervals = false, aboutApi = null } = {}) {
     class Element {
         constructor() { this.style = {}; this.children = []; this.listeners = {}; this.dataset = {}; this.hidden = false; this._innerHTML = ''; this.classList = { add() {}, remove() {}, toggle() {} }; }
         addEventListener(name, fn) { this.listeners[name] = fn; }
@@ -3431,7 +3431,7 @@ async function boot({ search = '', config = shipped, configFailure = false, stor
         ClipboardItem: class { constructor(items) { this.items = items; } },
         navigator: { clipboard: { writeText: async () => {}, write: async () => {} } },
         console: { warn(...items) { warnings.push(items.map(String).join(' ')); }, info() {}, log() {}, error() {} },
-        window: { FolderFrameSettings: api, isSecureContext: true, innerWidth: mobile ? 480 : 1280,
+        window: { FolderFrameAbout: aboutApi, FolderFrameSettings: api, isSecureContext: true, innerWidth: mobile ? 480 : 1280,
             matchMedia() { return { matches: mobile }; }, addEventListener(name, fn) { listeners[name] = fn; },
             history: { state: null, pushState(state, title, url) { this.state = state; historyCalls.push.push(String(url)); },
                 replaceState(state, title, url) { this.state = state; historyCalls.replace.push(String(url)); } } },
@@ -3699,4 +3699,24 @@ test('shared Gallery return applies a completed deferred Refresh', async () => {
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(vm.runInContext('deferredLoads', app.context), 1);
     assert.equal(vm.runInContext('manualRefreshRequest', app.context), null);
+});
+
+
+test('About suspends viewer playback, blocks shortcuts, and preserves Photo Info', async () => {
+    let hooks;
+    const app = await boot({ aboutApi: { init(value) { hooks = value; } } });
+    vm.runInContext("mediaFiles.push('https://example.test/frame/photos/other.jpg'); enterFullScreenViewer(0); setSlideshowPlaying(true)", app.context);
+    app.get('photo-info-panel').hidden = false;
+    app.get('about-dialog').open = true;
+    hooks.onOpen();
+    assert.equal(app.state().slideshowPlaying, false);
+    assert.equal(app.get('photo-info-panel').hidden, false);
+    app.windowListeners.keydown({ key: 'ArrowRight', preventDefault() { throw new Error('About owns the keyboard'); } });
+    app.windowListeners.click({ target: { closest() { return null; } } });
+    assert.equal(vm.runInContext('currentIndex', app.context), 0);
+    assert.equal(app.get('photo-info-panel').hidden, false);
+    app.get('about-dialog').open = false;
+    hooks.onClose();
+    assert.equal(app.state().slideshowPlaying, true);
+    assert.equal(app.get('photo-info-panel').hidden, false);
 });

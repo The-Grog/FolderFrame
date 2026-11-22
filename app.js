@@ -3589,6 +3589,28 @@ function handleWheel(e) {
 }
 
 function setupEventListeners() {
+    let aboutPlayback = null;
+    window.FolderFrameAbout?.init({
+        onOpen() {
+            aboutPlayback = { playing: slideshowPlaying, videoPlaying: !video.paused,
+                file: mediaFiles[currentIndex], grid: isGridViewActive };
+            setViewerOptionsOpen(false);
+            setGridOptionsOpen(false);
+            setSlideshowPlaying(false);
+            video.pause();
+            showUI();
+            if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+        },
+        onClose() {
+            const previous = aboutPlayback;
+            aboutPlayback = null;
+            if (previous && !previous.grid && !isGridViewActive && previous.file === mediaFiles[currentIndex]) {
+                setSlideshowPlaying(previous.playing);
+                if (previous.videoPlaying && !isPhotoActive()) video.play().catch(() => {});
+            }
+            if (!isGridViewActive) resetIdleTimer();
+        }
+    });
     $('btn-sort').addEventListener('click', cycleSort);
     $('btn-grid-density')?.addEventListener('click', cycleGridDensity);
     $('btn-retry-scan').addEventListener('click', () => {
@@ -3685,7 +3707,7 @@ function setupEventListeners() {
     $('btn-next-media-error').addEventListener('click', nextMedia);
 
     window.addEventListener('keydown', e => {
-        if (!controlsEnabled) return;
+        if ($('about-dialog')?.open || !controlsEnabled) return;
         if (e.defaultPrevented || e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return;
         if (e.target?.isContentEditable || e.target?.closest?.('a, select, input, textarea, video, [contenteditable]:not([contenteditable="false"])')) return;
         if (isGridViewActive) {
@@ -3755,6 +3777,7 @@ function setupEventListeners() {
         });
     });
     window.addEventListener('click', event => {
+        if ($('about-dialog')?.open) return;
         if (!event.target?.closest?.('#viewer-options')) setViewerOptionsOpen(false);
         if (!photoInfoPanel.hidden && !event.target?.closest?.('#photo-info-panel, #btn-photo-info, #viewer-options, #nav-left, #nav-right')) {
             closePhotoInfo();
@@ -4098,6 +4121,7 @@ function showUI() {
     resetIdleTimer();
 }
 function hideUI() {
+    if ($('about-dialog')?.open) return;
     if (isGridViewActive || isDragging || isPinching || mediaFailed || !photoInfoPanel.hidden) return;
     if (document.activeElement?.matches?.(':focus-visible') &&
         document.activeElement?.closest?.('#overlay-header, .nav-arrow')) return;
@@ -4109,6 +4133,7 @@ function hideUI() {
     document.body.classList.add('cursor-hidden');
 }
 function resetIdleTimer() {
+    if ($('about-dialog')?.open) return;
     if (!controlsEnabled) return;
     if (idleTimer) clearTimeout(idleTimer);
     if (isGridViewActive) return;

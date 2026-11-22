@@ -831,6 +831,14 @@ videos advance on completion during a slideshow.
 
 Filename is now the default sort. Existing saved sort choices or explicit URL
 options still take precedence; use `?remember=0` to test config defaults.
+ABOUT FOLDERFRAME
+About FolderFrame is the last item in both options menus, including mobile. It
+shows installed build identity and project/release links; Photo Info stays separate.
+Copy version info contains only the release and public source revisions, with a
+selectable manual-copy fallback on HTTP. Include about.js and build-info.json in
+static uploads. Missing build metadata displays Development / unknown version.
+See README for release/build stamping; no latest-release lookup is performed.
+
 DOCKER REFRESH
 A Docker source may explicitly advertise a same-origin refreshPath. Refresh then POSTs an immediate incremental request to the existing worker and loads only the correlated successful manifest result. The current gallery stays usable and an active viewer is not replaced. Scheduled completions still require an explicit Refresh. Static and legacy sources keep browser-side refresh; workerStatusPath alone does not enable server scans.
 

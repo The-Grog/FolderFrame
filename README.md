@@ -1005,6 +1005,42 @@ checks source files, so very large libraries require adequate RAM and scan time.
 Records for unvisited sources are retained when discovery is incomplete; complete
 scans remove obsolete records and safely reconcile orphaned thumbnails.
 
+## About FolderFrame
+
+**About FolderFrame** is the last item in the gallery and viewer options menus,
+including on mobile. It shows the installed build's version, a short description,
+and links to folderframe.com, GitHub, and that version's release notes. Photo Info
+remains a separate action, and scan statistics stay in the library-status area.
+The dialog supports keyboard focus containment, Escape, and focus restoration;
+viewer playback pauses while it is open and resumes its previous state on close.
+
+**Copy version info** includes only the release and available public app/deployment
+revisions. It excludes media names, paths, GPS, configuration, and browsing state.
+On plain HTTP or when clipboard permission is denied, a selectable text field
+provides manual copying.
+
+The client reads the local `build-info.json` on demand and never queries GitHub's
+latest release to infer what is installed. Missing, invalid, or unavailable build
+metadata displays **Development / unknown version** without affecting browsing.
+Docker publication stamps the resolved release and revisions. Pages stamps its
+checked-out commit and exact release tag, when available. To rebuild the demo
+after publishing a release, run **Deploy FolderFrame demo** from `main` with
+`source_ref` set to that release tag. Running from `main` respects the existing
+Pages environment policy; the app assets still come from the selected tag.
+Untagged demo commits remain explicitly unversioned.
+
+For a manually hosted copy, deploy `about.js` and `build-info.json` with the other
+app assets. To attach the identity of a **clean, verified release checkout**, run
+this before uploading (replace the example tag with the tag checked out):
+
+```bash
+python scripts/write_build_info.py --version v1.2.3 --revision "$(git rev-parse HEAD)"
+```
+
+Omit `--version` for a development checkout. The supplied source file is deliberately
+unversioned; a downloaded source archive is not automatically a stamped deployment.
+Do not label modified files as an unchanged published release.
+
 ## Saved settings
 
 The gallery stores preferences in the browser’s localStorage.

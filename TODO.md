@@ -11,6 +11,8 @@ manual checks; automated tests do not verify browser layout or codecs.
 
 ## Completed
 
+- [x] **About FolderFrame and installed version** — Last in gallery and viewer options, including mobile. Accessible dialog matches Photo Info styling, links to the website, GitHub and release notes, and copies only public version identity. Release builds stamp local metadata; unstamped copies show an honest development fallback. Desktop/mobile viewport, keyboard and Photo Info coexistence checks passed; container build verification remains pending.
+
 - [x] **Uncapped thumbnail validation and unchanged-write suppression** — Retain all thumbnail/poster validation records, reuse unchanged metadata records, avoid the final cache dictionary copy, and skip unchanged cache/manifest publication while keeping scan status current. Preserve incomplete-discovery records. Interval guidance keeps the one-hour default and suggests six or 24 hours for less frequently changing libraries.
 
 - [x] **Generated video poster thumbnails** — Sequential FFmpeg WebP extraction uses source/settings signatures, atomic publication, failure caching, and safe orphan pruning. Docker/Unraid defaults on with independent video and master disable switches. Gallery posters preserve video badges and fall back once to browser previews. Fixture tests cover cache and manifest behavior; desktop/mobile visual acceptance remains to be recorded.

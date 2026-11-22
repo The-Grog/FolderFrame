@@ -28,12 +28,14 @@ jobs:
       - name: Validate JavaScript syntax
         run: |
           node --check app.js
+          node --check about.js
           node --check settings.js
           node --check resilience.js
       - name: Run application tests
         run: |
           node --test tests/configuration.test.cjs
           node --test tests/resilience.test.cjs
+          node --test tests/about.test.cjs
       - name: Validate thumbnail generator
         run: |
           python -m py_compile generate_thumbnails.py
@@ -43,3 +45,4 @@ jobs:
           python tests/video_duration.test.py
           python tests/video_posters.test.py
           python tests/incremental_cache.test.py
+          python tests/build_info.test.py
