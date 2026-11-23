@@ -1172,18 +1172,18 @@ async function flushAlbumCover() { for (let index = 0; index < 25; index++) awai
 
 test('album cover chooses a manifest video poster before an image and preserves direct counts', async () => {
     const app = await albumPosterFixture([
-        { path: 'Family/1.mp4', thumbnailPath: 'Family/1.mp4.webp' },
+        { path: 'Family/1.AVI', thumbnailPath: 'Family/1.AVI.webp' },
         { path: 'Family/2.jpg' }
     ], ['Nested']);
     await vm.runInContext("loadAlbumPreview(albumItem, 'Family', new AbortController().signal)", app.context);
-    assert.equal(app.context.coverStarts[0].source, 'https://example.test/frame/thumbs/Family/1.mp4.webp');
+    assert.equal(app.context.coverStarts[0].source, 'https://example.test/frame/thumbs/Family/1.AVI.webp');
     assert.equal(app.context.albumItem.dataset.directFiles, '2');
     assert.equal(app.context.albumItem.dataset.directFolders, '1');
     assert.deepEqual(Array.from(app.context.coverScans), ['Family']);
     app.context.albumItem.coverImage.onload();
     assert.equal(app.context.albumItem.coverImage.hidden, false);
     assert.equal(app.context.coverStarts.length, 1);
-    assert.equal(app.requests.some(url => String(url).endsWith('.mp4')), false);
+    assert.equal(app.requests.some(url => String(url).endsWith('.AVI')), false);
 });
 
 test('video-only album gets a poster cover; missing or invalid explicit posters skip to images', async () => {
@@ -2265,6 +2265,48 @@ test('video fallback is lazy, checks original availability, and transitions only
     assert.equal(app.get('video-error-overlay').style.display, 'flex');
 });
 
+test('compatible playback can recover a video with no native decode error', async () => {
+    const app = await boot();
+    const requests = [];
+    app.context.fetch = async (url, options) => {
+        requests.push([url, options.method]);
+        return { ok: true, json: async () => ({ videoTranscode: true, mediaPath: '/photos/' }), text: async () => '' };
+    };
+    vm.runInContext("mediaFiles = ['https://example.test/photos/clip.WMV', 'https://example.test/photos/photo.jpg']; enterFullScreenViewer(0)", app.context);
+    const video = app.get('gallery-video');
+    video.oncanplay();
+    assert.equal(requests.length, 0);
+    vm.runInContext('setViewerOptionsOpen(true)', app.context);
+    await flushAlbumCover();
+    const action = app.get('btn-compatible-playback');
+    assert.equal(action.hidden, false);
+    assert.match(video.src, /\/clip.WMV$/);
+    assert.equal(requests.length, 1);
+
+    action.listeners.click();
+    action.listeners.click();
+    await flushAlbumCover();
+    assert.match(video.src, /folderframe-api\/transcode\?path=clip.WMV$/);
+    assert.equal(action.hidden, true);
+    assert.equal(requests.filter(([, method]) => method === 'HEAD').length, 1);
+    vm.runInContext('nextMedia()', app.context);
+    assert.equal(action.hidden, true);
+});
+
+test('static playback leaves compatible action hidden and offers the original', async () => {
+    const app = await boot();
+    app.context.fetch = async () => ({ ok: false, status: 404 });
+    vm.runInContext("mediaFiles = ['https://example.test/photos/clip.ASF']; enterFullScreenViewer(0); setViewerOptionsOpen(true)", app.context);
+    await flushAlbumCover();
+    assert.equal(app.get('btn-compatible-playback').hidden, true);
+    const video = app.get('gallery-video');
+    assert.match(video.src, /\/clip.ASF$/);
+    video.error = { code: 4 };
+    await video.onerror();
+    assert.equal(app.get('video-error-overlay').style.display, 'flex');
+    assert.equal(app.get('media-error-original').href, 'https://example.test/photos/clip.ASF');
+});
+
 test('unavailable originals and services, network errors, and autoplay denial do not transcode', async () => {
     for (const failure of ['missing', 'service', 'network', 'autoplay', 'off']) {
         const app = await boot();
@@ -2425,18 +2467,19 @@ test('common image and video extensions use native directory-listing paths', asy
     for (const extension of ['jpg', 'png', 'avif', 'bmp']) {
         assert.equal(vm.runInContext(`isImageFile('photo.${extension}')`, app.context), true);
     }
-    for (const extension of ['mp4', 'mov', 'webm', 'm4v']) {
+    const videoExtensions = ['mp4', 'mov', 'webm', 'm4v', 'AVI', 'wmv', 'ASF', 'mpg', 'mpeg', 'mkv', '3gp', '3g2'];
+    for (const extension of videoExtensions) {
         assert.equal(vm.runInContext(`isVideoFile('clip.${extension}')`, app.context), true);
     }
     assert.equal(vm.runInContext("isHeicFile('photo.avif')", app.context), false);
     assert.equal(vm.runInContext("isHeicFile('photo.heic')", app.context), true);
+    const supportedFiles = ['photo.avif', 'scan.bmp', ...videoExtensions.map(extension => `clip.${extension}`)];
     app.context.DOMParser = class { parseFromString() {
-        return { querySelectorAll: () => ['photo.avif', 'scan.bmp', 'movie.webm', 'camera.m4v', 'notes.txt']
+        return { querySelectorAll: () => [...supportedFiles, 'notes.txt', 'camcorder.m2ts', 'script.ts']
             .map(href => ({ getAttribute: () => href })) };
     } };
     const listing = await vm.runInContext("scanDirectory('Formats', { bypassCache: true })", app.context);
-    assert.deepEqual(Array.from(listing.filePaths).map(file => file.split('/').pop()),
-        ['camera.m4v', 'movie.webm', 'photo.avif', 'scan.bmp']);
+    assert.deepEqual(Array.from(listing.filePaths, file => file.split('/').pop()).sort(), supportedFiles.sort());
 });
 
 test('mislabeled HEIC becomes a Live Photo video without a second download and has specific HEVC guidance', async () => {

@@ -51,6 +51,7 @@ function stopViewerSession() {
     video.pause();
     video.onended = video.onerror = video.onpause = null;
     clearMediaSource(video);
+    btnCompatiblePlayback.hidden = true;
 }
 function stopGridSession() {
     stopAlbumPreviews();
@@ -104,13 +105,19 @@ function videoCapabilities() {
     return videoCapabilitiesPromise;
 }
 
-async function videoFallbackUrl(filepath, signal) {
+async function compatibleVideoSource(filepath, signal) {
     if (videoTranscodeFallback === 'off') return null;
     const source = new URL(filepath, location.href);
     if (source.origin !== new URL(location.href).origin || source.search || source.hash) return null;
     const capability = await videoCapabilities();
     if (signal.aborted || !capability || capability.mediaPath !== '/photos/' ||
         !source.pathname.startsWith(capability.mediaPath)) return null;
+    return source;
+}
+
+async function videoFallbackUrl(filepath, signal) {
+    const source = await compatibleVideoSource(filepath, signal);
+    if (!source || signal.aborted) return null;
     // Error 4 can also mean a 403/404 or an unreachable source. Confirm HTTP
     // availability before asking the optional server to spend CPU on decoding.
     try {
@@ -118,7 +125,7 @@ async function videoFallbackUrl(filepath, signal) {
     } catch { return null; }
     if (signal.aborted) return null;
     const url = new URL('/folderframe-api/transcode', location.href);
-    url.searchParams.set('path', decodeURIComponent(source.pathname.slice(capability.mediaPath.length)));
+    url.searchParams.set('path', decodeURIComponent(source.pathname.slice('/photos/'.length)));
     return url.href;
 }
 let swipeStart = null;
@@ -467,7 +474,7 @@ const DATE_CACHE_TTL = 24 * 60 * 60 * 1000;
 const DATE_CACHE_LIMIT = 2000;
 let dateCacheKey = null;
 let scanManifest = null, scanManifestKey = null;
-const SCAN_MANIFEST_VERSION = 2;
+const SCAN_MANIFEST_VERSION = 3; // Previous directory lists excluded the newly recognized videos.
 const SCAN_MANIFEST_DIRECTORY_LIMIT = 5000;
 const PERSISTENT_MANIFEST_VERSION = 1;
 let persistentManifestState = null;
@@ -857,6 +864,7 @@ const btnCopyLink = $('btn-copy-link');
 const btnCopyFilename = $('btn-copy-filename');
 const btnViewerOptions = $('btn-viewer-options');
 const viewerOptionsMenu = $('viewer-options-menu');
+const btnCompatiblePlayback = $('btn-compatible-playback');
 const btnPhotoInfo = $('btn-photo-info');
 const photoInfoDesktopSlot = $('photo-info-desktop-slot');
 const photoInfoMenuSlot = $('photo-info-menu-slot');
@@ -940,7 +948,7 @@ window.addEventListener('beforeunload', () => {
 
 function isHeicFile(path) { return /\.(heic|heif)$/i.test(path); }
 function isImageFile(path) { return /\.(jpe?g|png|webp|gif|avif|bmp|heic|heif)$/i.test(path); }
-function isVideoFile(path) { return /\.(mp4|mov|webm|m4v)$/i.test(path); }
+function isVideoFile(path) { return /\.(mp4|mov|webm|m4v|avi|wmv|asf|mpg|mpeg|mkv|3gp|3g2)$/i.test(path); }
 function isMediaFile(path) { return isImageFile(path) || isVideoFile(path); }
 
 function currentDirectoryUrl(folder = currentFolder) {
@@ -1146,6 +1154,7 @@ function setViewerOptionsOpen(open) {
     const expanded = Boolean(open);
     viewerOptionsMenu.hidden = !expanded;
     btnViewerOptions.setAttribute('aria-expanded', String(expanded));
+    if (expanded) void viewerSession?.offerCompatiblePlayback?.();
 }
 
 function mobileViewerControls() {
@@ -3238,28 +3247,47 @@ function showMedia(index, { preservePhotoInfo = false } = {}) {
         video.onwaiting = video.onstalled = () => { if (isCurrent() && !mediaFailed && !video.paused) { setMediaLoading('Buffering video…'); watch(); } };
         video.onpause = clearWatchdog;
         video.oncanplay = video.onplaying = () => { if (isCurrent() && !mediaFailed) { clearWatchdog(); setMediaLoading(); } };
-        video.onerror = async () => {
-            if (!isCurrent()) return;
-            const error = video.error;
-            if (session.videoMode === 'original' && !session.videoFallbackAttempted && [3, 4].includes(error?.code)) {
-                session.videoFallbackAttempted = true;
-                clearWatchdog();
-                let fallback = null;
-                try { fallback = await videoFallbackUrl(filepath, session.controller.signal); } catch { /* Normal error UI below. */ }
-                if (!isCurrent()) return;
-                if (fallback) {
-                    session.videoMode = 'transcoded';
-                    playVideoSource(fallback, livePhoto);
-                    setMediaLoading('Preparing compatible video…');
-                    return;
+        const tryCompatiblePlayback = async () => {
+            if (!isCurrent() || session.videoMode !== 'original' || session.videoFallbackAttempted) return false;
+            session.videoFallbackAttempted = true;
+            session.videoFallbackPending = true;
+            btnCompatiblePlayback.hidden = true;
+            clearWatchdog();
+            const fallback = await videoFallbackUrl(filepath, session.controller.signal).catch(() => null);
+            session.videoFallbackPending = false;
+            if (!isCurrent() || !fallback) return false;
+            session.videoMode = 'transcoded';
+            setMediaLoading('Preparing compatible video…');
+            playVideoSource(fallback, livePhoto);
+            return true;
+        };
+        if (session.videoMode === 'original') {
+            session.offerCompatiblePlayback = async () => {
+                const eligible = await compatibleVideoSource(filepath, session.controller.signal).catch(() => null);
+                if (isCurrent()) btnCompatiblePlayback.hidden = !eligible || session.videoFallbackAttempted;
+            };
+            session.useCompatiblePlayback = async () => {
+                if (btnCompatiblePlayback.hidden || session.videoFallbackAttempted) return;
+                setViewerOptionsOpen(false);
+                btnViewerOptions.focus();
+                if (!await tryCompatiblePlayback() && isCurrent()) {
+                    showMediaError(livePhoto ? 'live-photo' : 'video', filepath);
                 }
-            }
+            };
+            if (!viewerOptionsMenu.hidden) void session.offerCompatiblePlayback();
+        }
+        video.onerror = async () => {
+            if (!isCurrent() || session.videoFallbackPending) return;
+            const error = video.error;
+            if ([3, 4].includes(error?.code) && await tryCompatiblePlayback()) return;
             if (isCurrent()) showMediaError(livePhoto ? 'live-photo' : 'video', filepath, error);
         };
+        const playbackMode = session.videoMode;
         video.play().catch(err => {
             // Format errors are handled by MediaError, never inferred from a
             // rejected play() promise (which can simply be autoplay denial).
-            if (isCurrent() && !mediaFailed && err.name !== 'AbortError' && err.name !== 'NotSupportedError' &&
+            if (isCurrent() && session.videoMode === playbackMode && !session.videoFallbackPending &&
+                !mediaFailed && err.name !== 'AbortError' && err.name !== 'NotSupportedError' &&
                 (!session.videoFallbackAttempted || err.name === 'NotAllowedError')) showMediaError(livePhoto ? 'live-photo' : 'video', filepath, err);
         });
         video.onended = () => { if (isCurrent() && slideshowPlaying) nextSlideshowMedia(); };
@@ -3674,6 +3702,7 @@ function setupEventListeners() {
     });
     btnClosePhotoInfo.addEventListener('click', () => closePhotoInfo({ restoreFocus: true }));
     btnViewerOptions.addEventListener('click', () => setViewerOptionsOpen(viewerOptionsMenu.hidden));
+    btnCompatiblePlayback.addEventListener('click', () => void viewerSession?.useCompatiblePlayback?.());
     btnGridOptions.addEventListener('click', () => setGridOptionsOpen(gridOptionsMenu.hidden));
     viewport.addEventListener('wheel', handleWheel, { passive: false });
     viewport.addEventListener('mousedown', handleMouseDown);

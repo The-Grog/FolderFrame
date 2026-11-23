@@ -12,7 +12,7 @@ maintained media list.
 
 The gallery supports: - Thumbnail grid view - Subfolders as albums,
 including nested albums - Breadcrumb navigation - JPG, JPEG, PNG, WebP, GIF,
-AVIF, BMP, and HEIC/HEIF images - MP4, MOV, WEBM, and M4V video detection/playback (browser codec
+AVIF, BMP, and HEIC/HEIF images - MP4, MOV, WEBM, M4V, AVI, WMV/ASF, MPG/MPEG, MKV, and 3GP/3G2 video detection/playback (browser codec
 support still applies) - Content-aware handling of mislabeled HEIC
 files - Slideshow playback with selectable intervals - Shuffle mode -
 Configurable automatic folder rescanning - TV / photo-frame mode -
@@ -62,7 +62,7 @@ Subfolders under photos/ automatically appear as albums.
 OPTIONAL GENERATED THUMBNAILS
 
 With FFmpeg installed, the helper also generates cached WebP posters for
-MP4/MOV/WEBM/M4V videos. Docker/Unraid enables these by default. Set
+supported videos. Docker/Unraid enables these by default. Set
 FOLDERFRAME_VIDEO_THUMBNAILS=false (Unraid: Video Thumbnails) or pass
 --no-video-thumbnails to stop new video posters while retaining confirmed
 unchanged posters. FOLDERFRAME_THUMBNAILS=false disables all generation;
@@ -133,7 +133,7 @@ Generate thumbnails and the index together:
 
     python generate_thumbnails.py photos thumbnails --manifest folderframe-data/library.json
 
-When ffprobe is installed, MP4, MOV, WEBM, and M4V entries also receive an
+When ffprobe can read the duration, video entries also receive an
 optional duration in seconds for gallery badges. Unavailable durations are
 cached for unchanged files without warning; change the video or remove
 folderframe-data/exif.d/.metadata-cache.json to retry. If ffprobe was missing,
@@ -279,7 +279,7 @@ participate in slideshows like other images.
 
 Browser-native images: .jpg .jpeg .png .webp .gif .avif .bmp
 Converted images: .heic .heif
-Videos: .mp4 .mov .webm .m4v
+Videos: .mp4 .mov .webm .m4v .avi .wmv .asf .mpg .mpeg .mkv .3gp .3g2
 
 AVIF and BMP display when supported by the browser. WEBM and M4V follow normal
 HTML5 video codec support, like MP4 and MOV. The thumbnail helper attempts AVIF

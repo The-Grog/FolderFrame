@@ -16,8 +16,12 @@ from pathlib import Path
 from typing import Optional
 
 IMAGE_TYPES = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp", ".heic", ".heif"}
-MEDIA_TYPES = IMAGE_TYPES | {".mp4", ".mov", ".webm", ".m4v"}
+MEDIA_TYPES = IMAGE_TYPES | {
+    ".mp4", ".mov", ".webm", ".m4v", ".avi", ".wmv", ".asf",
+    ".mpg", ".mpeg", ".mkv", ".3gp", ".3g2",
+}
 MANIFEST_VERSION = 1
+MEDIA_DISCOVERY_REVISION = 1
 FAILURE_CACHE_VERSION = 1
 THUMBNAIL_CACHE_VERSION = 1
 METADATA_CACHE_VERSION = 1
@@ -933,11 +937,13 @@ def write_manifest(media_root: Path, thumb_root: Optional[Path], manifest_path: 
     else:
         print("Loaded persistent manifest; checking directory mtimes for changes.")
 
+    # Previously excluded extensions can become visible without a directory mtime change.
+    discovery_changed = old_index.get("mediaDiscoveryRevision") != MEDIA_DISCOVERY_REVISION
     counters = {"listed": 0, "reused": 0, "files": 0, "errors": []}
     old_root = old_index.get("root") if isinstance(old_index, dict) else None
     changed_thumbnail_dirs = changed_thumbnail_dirs or set()
     root_record = directory_record(media_root, "", old_root, thumb_root, counters, metadata_records,
-        force="" in changed_thumbnail_dirs)
+        force=discovery_changed or "" in changed_thumbnail_dirs)
     chunk_directory = manifest_path.with_name(manifest_path.stem + ".d")
     chunk_directory.mkdir(parents=True, exist_ok=True)
     chunks, live_chunk_files = {}, set()
@@ -951,7 +957,7 @@ def write_manifest(media_root: Path, thumb_root: Optional[Path], manifest_path: 
             try:
                 record = directory_record(media_root, relative, old_directories.get(relative), thumb_root, counters,
                     metadata_records,
-                    force=relative in changed_thumbnail_dirs)
+                    force=discovery_changed or relative in changed_thumbnail_dirs)
             except OSError as error:
                 counters["errors"].append(relative)
                 print(f"Manifest could not read {relative}: {error}")
@@ -981,6 +987,7 @@ def write_manifest(media_root: Path, thumb_root: Optional[Path], manifest_path: 
 
     payload = {
         "version": MANIFEST_VERSION,
+        "mediaDiscoveryRevision": MEDIA_DISCOVERY_REVISION,
         "generatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "root": root_record,
         "chunks": chunks,

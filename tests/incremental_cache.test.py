@@ -66,6 +66,33 @@ class IncrementalCacheTests(unittest.TestCase):
             self.scan()
         writes.assert_not_called()
 
+    def test_manifest_upgrade_discovers_existing_videos_without_tools_or_mtime_changes(self):
+        names = ("root.AVI", "one/clip.WMV", "one/clip.ASF", "one/clip.MPG",
+                 "two/clip.MPEG", "two/clip.MKV", "two/clip.3GP", "two/clip.3G2")
+        for name in names:
+            (self.media / name).write_bytes(b"synthetic video")
+        old_media_types = G.IMAGE_TYPES | {".mp4", ".mov", ".webm", ".m4v"}
+        with mock.patch.object(G, "MEDIA_TYPES", old_media_types):
+            old = G.write_manifest(self.media, None, self.manifest)
+        self.assertEqual(old["files"], 3)
+        index = G.read_json(self.manifest)
+        del index["mediaDiscoveryRevision"]
+        G.atomic_json(self.manifest, index)
+
+        update = G.write_manifest(self.media, None, self.manifest)
+        self.assertEqual(update["files"], 3 + len(names))
+        index = G.read_json(self.manifest)
+        paths = {record["path"] for record in index["root"]["files"]}
+        for descriptor in index["chunks"].values():
+            chunk = G.read_json(self.manifest.parent / descriptor["file"])
+            for directory in chunk["directories"].values():
+                paths.update(record["path"] for record in directory["files"])
+        self.assertTrue(set(names) <= paths)
+        with mock.patch.object(G, "atomic_json", wraps=G.atomic_json) as writes:
+            stable = G.write_manifest(self.media, None, self.manifest)
+        self.assertEqual(stable["listed"], 0)
+        writes.assert_not_called()
+
     def test_cache_retains_more_than_old_limit(self):
         path = self.root / "large.json"
         entries = {f"{i}.mp4": {"success": True} for i in range(200001)}

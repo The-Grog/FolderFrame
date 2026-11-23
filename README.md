@@ -104,7 +104,7 @@ generated static manifest, so there is no database, PHP, or build step.
 
 - **Folder-based albums:** thumbnail grid, image cover previews with folder badges, nested albums, breadcrumbs, and recursive All Pics view.
 - **Flexible sorting:** Natural Filename order by default, plus Newest and Oldest, with separate index/embed defaults. Date sorting uses server modification dates, not photo capture dates.
-- **Photos and videos:** JPEG, PNG, WebP, GIF, AVIF, BMP, and HEIC/HEIF images plus MP4, MOV, WEBM, and M4V video. AVIF/BMP use browser-native image support; video codec support still applies.
+- **Photos and videos:** JPEG, PNG, WebP, GIF, AVIF, BMP, and HEIC/HEIF images, plus MP4, MOV, WebM, M4V, AVI, WMV/ASF, MPG/MPEG, MKV, and 3GP/3G2 video.
 - **Slideshow and TV mode:** selectable intervals, Shuffle, fullscreen, automatic rescans, and automatic skipping of failed media.
 - **Responsive viewer:** compact mobile controls, pinch zoom, pan, display-only 90° rotation, and Fit/Original sizing.
 - **Embeddable:** iframe example and an optional controls-free, muted-video slideshow.
@@ -486,13 +486,16 @@ Browser-native images: .jpg .jpeg .png .webp .gif .avif .bmp
 
 Converted images: .heic .heif
 
-Videos: .mp4 .mov .webm .m4v
+Videos: .mp4 .mov .webm .m4v .avi .wmv .asf .mpg .mpeg .mkv .3gp .3g2
 
 AVIF and BMP display when the browser supports them. WEBM and M4V use normal
 HTML5 video playback and remain codec-dependent, like MP4 and MOV.
 
-The browser must support the codec contained inside a video file. A .mov
-or .mp4 extension alone does not guarantee browser playback.
+Native playback depends on the browser's support for both the container and its
+codecs. The Docker image can stream an H.264/AAC version through FFmpeg. In the
+viewer, choose **Try compatible playback** from **Viewer options** if the
+original plays without a picture. On static hosts, use **Open original** from
+the playback error panel to open the file in a local player.
 
 ### Albums
 
@@ -648,8 +651,8 @@ python generate_thumbnails.py photos --manifest folderframe-data/library.json --
 
 The helper stores path, modification time, size, and optional thumbnail,
 `captureDate`, `exifPath`, and video `duration` fields, with one chunk per
-top-level folder. Duration is a positive number of seconds and is emitted only
-for MP4, MOV, WEBM, and M4V files when `ffprobe` can read it. The grid formats
+top-level folder. Duration is a positive number of seconds and is emitted for
+recognized videos when `ffprobe` can read it. The grid formats
 this manifest value as a compact duration badge without requesting video
 metadata in the browser.
 Capture dates are integer Unix milliseconds. Full allowlisted EXIF summaries
@@ -824,8 +827,8 @@ unsupported formats cleanly. It preserves subfolders, uses the first GIF frame,
 skips current outputs, and never modifies originals. Run it again after adding
 or changing media.
 
-With FFmpeg installed, the same scan generates one WebP poster per MP4, MOV,
-WEBM, or M4V video (case-insensitive). `Family/clip.mov` maps to
+With FFmpeg installed, the same scan generates one WebP poster per supported
+video when it can decode a frame. `Family/clip.mov` maps to
 `thumbnails/Family/clip.mov.webp`, published through the existing manifest
 `thumbnailPath`. Posters preserve orientation and aspect ratio, never upscale,
 and use `--size` and `--quality`. Extraction runs sequentially with one FFmpeg
@@ -1259,9 +1262,9 @@ from network and decoding errors. Originals are never modified.
 ### Video fails
 
 A recognized filename can still contain a codec the browser cannot
-decode. Check the browser console for playback errors. Converting the
-video to a browser-friendly H.264/AAC MP4 is generally the most
-compatible option.
+decode. On Docker, use **Try compatible playback** from **Viewer options**
+if the video plays audio without a picture. On a static host, try the original
+in a local player or export an H.264/AAC MP4 copy.
 
 ### Another device cannot connect to the Python server
 
