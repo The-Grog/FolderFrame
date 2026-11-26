@@ -152,15 +152,22 @@ test('viewer options menu owns secondary controls and closes before Escape exits
     const app = await boot();
     vm.runInContext('enterFullScreenViewer(0)', app.context);
     const panel = app.get('viewer-options-menu');
+    panel.getBoundingClientRect = () => ({ top: 62.5 });
+    panel.style.setProperty = (name, value) => { panel.style[name] = value; };
     assert.equal(panel.hidden, true);
     app.get('btn-viewer-options').listeners.click();
     assert.equal(panel.hidden, false);
+    assert.equal(panel.style['--viewer-options-top'], '63px');
+    vm.runInContext('hideUI()', app.context);
+    assert.equal(vm.runInContext('uiVisible', app.context), true);
     let prevented = false;
     app.windowListeners.keydown({ key: 'Escape', target: app.get('btn-viewer-options'),
         preventDefault() { prevented = true; } });
     assert.equal(prevented, true);
     assert.equal(panel.hidden, true);
     assert.equal(app.state().isGridViewActive, false);
+    vm.runInContext('hideUI()', app.context);
+    assert.equal(vm.runInContext('uiVisible', app.context), false);
     app.windowListeners.keydown({ key: 'Escape', target: app.get('btn-viewer-options'), preventDefault() {} });
     assert.equal(app.state().isGridViewActive, true);
 });

@@ -1150,11 +1150,24 @@ function updateGalleryHeaderLayout() {
     gridHeader.classList.toggle('actions-collapsed', controls.some(({ button, menu }) => button.parentElement === menu));
 }
 
+function sizeViewerOptionsMenu() {
+    if (viewerOptionsMenu.hidden) return;
+    const top = viewerOptionsMenu.getBoundingClientRect?.().top;
+    if (Number.isFinite(top)) {
+        viewerOptionsMenu.style.setProperty('--viewer-options-top', `${Math.ceil(top)}px`);
+    }
+}
+
 function setViewerOptionsOpen(open) {
     const expanded = Boolean(open);
+    const wasOpen = !viewerOptionsMenu.hidden;
     viewerOptionsMenu.hidden = !expanded;
     btnViewerOptions.setAttribute('aria-expanded', String(expanded));
-    if (expanded) void viewerSession?.offerCompatiblePlayback?.();
+    if (expanded) {
+        sizeViewerOptionsMenu();
+        void viewerSession?.offerCompatiblePlayback?.();
+    }
+    if (expanded !== wasOpen) resetIdleTimer();
 }
 
 function mobileViewerControls() {
@@ -3802,6 +3815,7 @@ function setupEventListeners() {
             updateGalleryHeaderLayout();
             updatePhotoInfoPlacement();
             updatePhotoInfoAvailability();
+            sizeViewerOptionsMenu();
             if (!isGridViewActive && isPhotoActive()) applyImageRotation();
         });
     });
@@ -4151,7 +4165,7 @@ function showUI() {
 }
 function hideUI() {
     if ($('about-dialog')?.open) return;
-    if (isGridViewActive || isDragging || isPinching || mediaFailed || !photoInfoPanel.hidden) return;
+    if (isGridViewActive || isDragging || isPinching || mediaFailed || !photoInfoPanel.hidden || !viewerOptionsMenu.hidden) return;
     if (document.activeElement?.matches?.(':focus-visible') &&
         document.activeElement?.closest?.('#overlay-header, .nav-arrow')) return;
     uiVisible = false;
@@ -4174,7 +4188,7 @@ function resetIdleTimer() {
         helpHint.classList.remove('ui-hidden');
         document.body.classList.remove('cursor-hidden');
     }
-    if (!photoInfoPanel.hidden) return;
+    if (!photoInfoPanel.hidden || !viewerOptionsMenu.hidden) return;
     idleTimer = setTimeout(hideUI, tvModeEnabled ? 1800 : 3000);
 }
 

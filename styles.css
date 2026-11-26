@@ -504,7 +504,12 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     #overlay-header .timer-control select { width:100%; height:44px; }
 }
 @media (max-height:500px) and (orientation:landscape) {
-    #overlay-header { max-height:45dvh; overflow-y:auto; }
+    #viewer-options-menu {
+        max-height:calc(100dvh - var(--viewer-options-top, 64px) - max(8px, env(safe-area-inset-bottom)));
+        overflow-y:auto;
+        overscroll-behavior-y:contain;
+    }
+    #viewer-options-menu > * { flex-shrink:0; }
 }
 /* Reserve desktop control space before allocating room to the filename. */
 @media (min-width:901px) and (pointer:fine) {
