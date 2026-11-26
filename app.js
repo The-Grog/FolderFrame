@@ -1150,11 +1150,11 @@ function updateGalleryHeaderLayout() {
     gridHeader.classList.toggle('actions-collapsed', controls.some(({ button, menu }) => button.parentElement === menu));
 }
 
-function sizeViewerOptionsMenu() {
-    if (viewerOptionsMenu.hidden) return;
-    const top = viewerOptionsMenu.getBoundingClientRect?.().top;
+function sizeOptionsMenu(menu) {
+    if (menu.hidden) return;
+    const top = menu.getBoundingClientRect?.().top;
     if (Number.isFinite(top)) {
-        viewerOptionsMenu.style.setProperty('--viewer-options-top', `${Math.ceil(top)}px`);
+        menu.style.setProperty('--options-menu-top', `${Math.ceil(top)}px`);
     }
 }
 
@@ -1164,7 +1164,7 @@ function setViewerOptionsOpen(open) {
     viewerOptionsMenu.hidden = !expanded;
     btnViewerOptions.setAttribute('aria-expanded', String(expanded));
     if (expanded) {
-        sizeViewerOptionsMenu();
+        sizeOptionsMenu(viewerOptionsMenu);
         void viewerSession?.offerCompatiblePlayback?.();
     }
     if (expanded !== wasOpen) resetIdleTimer();
@@ -1440,6 +1440,7 @@ function setGridOptionsOpen(open) {
     const expanded = Boolean(open);
     gridOptionsMenu.hidden = !expanded;
     btnGridOptions.setAttribute('aria-expanded', String(expanded));
+    if (expanded) sizeOptionsMenu(gridOptionsMenu);
 }
 
 function imageClipboardBlob() {
@@ -3752,13 +3753,21 @@ function setupEventListeners() {
     window.addEventListener('keydown', e => {
         if ($('about-dialog')?.open || !controlsEnabled) return;
         if (e.defaultPrevented || e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return;
+        if (e.key === 'Escape') {
+            const [menu, opener, setOpen] = isGridViewActive
+                ? [gridOptionsMenu, btnGridOptions, setGridOptionsOpen]
+                : [viewerOptionsMenu, btnViewerOptions, setViewerOptionsOpen];
+            if (!menu.hidden) {
+                e.preventDefault();
+                setOpen(false);
+                opener.focus?.();
+                return;
+            }
+        }
         if (e.target?.isContentEditable || e.target?.closest?.('a, select, input, textarea, video, [contenteditable]:not([contenteditable="false"])')) return;
         if (isGridViewActive) {
             if (e.key === 'Escape') {
-                if (!gridOptionsMenu.hidden) {
-                    e.preventDefault();
-                    setGridOptionsOpen(false);
-                } else if (currentFolder) {
+                if (currentFolder) {
                     e.preventDefault();
                     navigateToFolder(parentFolder(currentFolder));
                 }
@@ -3780,23 +3789,19 @@ function setupEventListeners() {
         }
         const key = e.key.toLowerCase();
         if (!['arrowleft', 'arrowright', ' ', 'enter', 's', 'f', 't', 'r', 'g', 'escape'].includes(key)) return;
-        // Viewer shortcuts own these keys even after a toolbar/arrow button is
-        // clicked. Prevent native Space/Enter activation of the focused button.
+        // Enter and Space activate the focused button through the browser.
+        if ((key === ' ' || key === 'enter') && e.target?.closest?.('button')) return;
         e.preventDefault();
         if (e.repeat && key !== 'arrowleft' && key !== 'arrowright') return;
         const browsingWithArrows = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
         if (e.key === 'ArrowLeft') prevMedia({ preservePhotoInfo: true });
         if (e.key === 'ArrowRight') nextMedia({ preservePhotoInfo: true });
-        if (e.key === ' ') { e.preventDefault(); toggleSlideshow(); }
-        if (e.key === 'Enter') { e.preventDefault(); toggleImageMode(); }
+        if (e.key === ' ') toggleSlideshow();
+        if (e.key === 'Enter') toggleImageMode();
         if (e.key.toLowerCase() === 's') toggleShuffle();
         if (e.key.toLowerCase() === 'f') toggleFullscreen();
         if (e.key.toLowerCase() === 't') toggleTvMode();
         if (e.key.toLowerCase() === 'r') rotateImage();
-        if (e.key === 'Escape' && !viewerOptionsMenu.hidden) {
-            setViewerOptionsOpen(false);
-            return;
-        }
         if (e.key === 'Escape' && !photoInfoPanel.hidden) {
             closePhotoInfo({ restoreFocus: true });
             return;
@@ -3816,7 +3821,8 @@ function setupEventListeners() {
             updateGalleryHeaderLayout();
             updatePhotoInfoPlacement();
             updatePhotoInfoAvailability();
-            sizeViewerOptionsMenu();
+            sizeOptionsMenu(gridOptionsMenu);
+            sizeOptionsMenu(viewerOptionsMenu);
             if (!isGridViewActive && isPhotoActive()) applyImageRotation();
         });
     });

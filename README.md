@@ -887,7 +887,7 @@ successful scan.
 ### Slideshow
 
 -   Click Play / Pause to start or stop the slideshow.
--   Press Space to start/pause from the full viewer.
+-   Press Space to start or pause when focus is on the viewer background.
 -   Available intervals are: 3 seconds 5 seconds 10 seconds 15 seconds
     30 seconds 60 seconds 5 minutes 15 minutes 60 minutes
 
@@ -951,8 +951,9 @@ Use the image sizing button to switch between:
     Original Size
     Fit Screen
 
-The selected mode is remembered by the browser. Press Enter in the full
-viewer to switch between Fit Screen and Original Size.
+The selected mode is remembered by the browser. Press Enter when focus is on the
+viewer background to switch between Fit Screen and Original Size. Enter and
+Space activate the focused button when you navigate the controls with Tab.
 
 ### Fullscreen
 

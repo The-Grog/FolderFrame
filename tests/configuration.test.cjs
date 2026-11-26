@@ -22,35 +22,32 @@ function bmff(major, compatible = []) {
     return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 }
 
-test('viewer shortcuts override focused buttons without native Space/Enter clicks', async () => {
+test('viewer Enter and Space preserve native buttons and still work on the background', async () => {
     const app = await boot();
     vm.runInContext("mediaFiles.push('https://example.test/frame/photos/b.jpg'); enterFullScreenViewer(0)", app.context);
-    for (const id of ['btn-image-mode', 'nav-next', 'btn-play-pause']) {
-        const button = app.get(id);
-        button.closest = selector => selector.split(',').map(s => s.trim()).includes('button') ? button : null;
-        let nativeClicks = 0;
-        const press = key => {
-            let prevented = false;
-            app.windowListeners.keydown({ key, target: button, preventDefault() { prevented = true; } });
-            // Browsers activate a focused button on Enter keydown or Space keyup
-            // unless keydown's default action was cancelled.
-            if (!prevented && (key === ' ' || key === 'Enter')) nativeClicks++;
-            assert.equal(prevented, true);
-        };
-        vm.runInContext('currentIndex = 0; setSlideshowPlaying(false)', app.context);
-        press('ArrowRight');
-        assert.equal(vm.runInContext('currentIndex', app.context), 1);
-        press('ArrowLeft');
-        assert.equal(vm.runInContext('currentIndex', app.context), 0);
-        const mode = app.state().imageMode;
-        press(' ');
-        assert.equal(app.state().slideshowPlaying, true);
-        assert.equal(app.state().imageMode, mode);
-        assert.equal(vm.runInContext('currentIndex', app.context), 0);
-        press('Enter');
-        assert.notEqual(app.state().imageMode, mode);
-        assert.equal(nativeClicks, 0);
-    }
+    const button = app.get('btn-viewer-options');
+    button.closest = selector => selector === 'button' ? button : null;
+    const press = (key, target) => {
+        let prevented = false;
+        app.windowListeners.keydown({ key, target, preventDefault() { prevented = true; } });
+        return prevented;
+    };
+    const mode = app.state().imageMode;
+    assert.equal(press('Enter', button), false);
+    assert.equal(press(' ', button), false);
+    assert.equal(app.state().imageMode, mode);
+    assert.equal(app.state().slideshowPlaying, false);
+
+    assert.equal(press('ArrowRight', button), true);
+    assert.equal(vm.runInContext('currentIndex', app.context), 1);
+    assert.equal(press('ArrowLeft', button), true);
+    assert.equal(vm.runInContext('currentIndex', app.context), 0);
+
+    const background = app.get('media-viewport');
+    assert.equal(press('Enter', background), true);
+    assert.notEqual(app.state().imageMode, mode);
+    assert.equal(press(' ', background), true);
+    assert.equal(app.state().slideshowPlaying, true);
 });
 
 test('shortcuts preserve native fields and modifiers, and ignore repeated toggles', async () => {
@@ -157,19 +154,46 @@ test('viewer options menu owns secondary controls and closes before Escape exits
     assert.equal(panel.hidden, true);
     app.get('btn-viewer-options').listeners.click();
     assert.equal(panel.hidden, false);
-    assert.equal(panel.style['--viewer-options-top'], '63px');
+    assert.equal(panel.style['--options-menu-top'], '63px');
     vm.runInContext('hideUI()', app.context);
     assert.equal(vm.runInContext('uiVisible', app.context), true);
     let prevented = false;
-    app.windowListeners.keydown({ key: 'Escape', target: app.get('btn-viewer-options'),
+    const interval = app.get('select-interval');
+    interval.closest = selector => selector.includes('select') ? interval : null;
+    app.windowListeners.keydown({ key: 'Escape', target: interval,
         preventDefault() { prevented = true; } });
     assert.equal(prevented, true);
     assert.equal(panel.hidden, true);
     assert.equal(app.state().isGridViewActive, false);
+    assert.equal(app.get('btn-viewer-options').focused, true);
     vm.runInContext('hideUI()', app.context);
     assert.equal(vm.runInContext('uiVisible', app.context), false);
     app.windowListeners.keydown({ key: 'Escape', target: app.get('btn-viewer-options'), preventDefault() {} });
     assert.equal(app.state().isGridViewActive, true);
+});
+
+test('gallery options remeasure while open on resize and restore focus on Escape', async () => {
+    const app = await boot();
+    const menu = app.get('grid-options-menu');
+    const opener = app.get('btn-grid-options');
+    let top = 58.2;
+    menu.getBoundingClientRect = () => ({ top });
+    menu.style.setProperty = (name, value) => { menu.style[name] = value; };
+    opener.listeners.click();
+    assert.equal(menu.hidden, false);
+    assert.equal(menu.style['--options-menu-top'], '59px');
+
+    let resize;
+    app.context.requestAnimationFrame = callback => { resize = callback; return 1; };
+    top = 81;
+    app.windowListeners.resize();
+    resize();
+    assert.equal(menu.style['--options-menu-top'], '81px');
+    assert.equal(menu.hidden, false);
+
+    app.windowListeners.keydown({ key: 'Escape', target: app.get('btn-about-grid'), preventDefault() {} });
+    assert.equal(menu.hidden, true);
+    assert.equal(opener.focused, true);
 });
 
 test('gallery glow controls keep reload adaptive and the unified path bar owns logo and count', async () => {

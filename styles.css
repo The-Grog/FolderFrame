@@ -73,10 +73,13 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     position:absolute; top:calc(100% + 7px); right:0;
     display:flex; flex-direction:column; gap:7px;
     width:180px; padding:9px;
+    max-height:calc(100dvh - var(--options-menu-top, 64px) - max(8px, env(safe-area-inset-bottom)));
+    overflow-y:auto; overscroll-behavior-y:contain;
     border:1px solid rgba(255,255,255,.14); border-radius:10px;
     background:rgba(12,12,12,.97); box-shadow:0 12px 35px rgba(0,0,0,.65);
     z-index:20;
 }
+.viewer-options-menu > * { flex-shrink:0; }
 .viewer-options-menu .timer-control { justify-content:space-between; }
 .viewer-options-menu .custom-select { width:72px; }
 .viewer-options-menu .btn { width:100%; justify-content:flex-start; }
@@ -502,14 +505,6 @@ button, select, .media-error-actions a { touch-action:manipulation; }
     #overlay-header .header-right > * { min-width:0; width:100%; }
     #overlay-header .header-right .btn { padding:6px 4px; white-space:normal; height:auto; min-height:44px; }
     #overlay-header .timer-control select { width:100%; height:44px; }
-}
-@media (max-height:500px) and (orientation:landscape) {
-    #viewer-options-menu {
-        max-height:calc(100dvh - var(--viewer-options-top, 64px) - max(8px, env(safe-area-inset-bottom)));
-        overflow-y:auto;
-        overscroll-behavior-y:contain;
-    }
-    #viewer-options-menu > * { flex-shrink:0; }
 }
 /* Reserve desktop control space before allocating room to the filename. */
 @media (min-width:901px) and (pointer:fine) {
