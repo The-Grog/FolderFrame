@@ -1126,7 +1126,9 @@ function updateMediaActions(filepath, filename, forceVideo = false) {
 
 function updateGalleryHeaderLayout() {
     if (!gridHeader || !gridHeaderMain || !gridActions) return;
-    // Refresh / Refresh stays in the options menu with a text label.
+    const available = gridHeader.clientWidth;
+    if (!available) return; // The viewer hides the gallery, so there is nothing to measure yet.
+    // Refresh stays in the options menu with a text label.
     const controls = [
         { button: $('btn-grid-density'), home: gridDensitySlot, menu: gridDensityMenuSlot },
         { button: $('btn-sort'), home: gridSortSlot, menu: gridSortMenuSlot },
@@ -1139,9 +1141,7 @@ function updateGalleryHeaderLayout() {
         if (button.parentElement !== home) home.appendChild(button);
         button.setAttribute('role', 'button');
     });
-    const available = gridHeader.clientWidth || 0;
-    const doesNotFit = () => available > 0 &&
-        (gridHeaderMain.scrollWidth || 0) + (gridActions.scrollWidth || 0) + 18 > available;
+    const doesNotFit = () => (gridHeaderMain.scrollWidth || 0) + (gridActions.scrollWidth || 0) + 18 > available;
     controls.forEach(({ button, menu }) => {
         if (!doesNotFit()) return;
         menu.appendChild(button);
@@ -3145,6 +3145,7 @@ function renderGridView() {
     };
 
     gridViewContainer.style.display = 'flex';
+    updateGalleryHeaderLayout();
     if (returnPosition) {
         gridViewContainer.scrollTop = returnPosition.scrollTop;
         if (returnTile) {

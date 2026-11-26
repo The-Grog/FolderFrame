@@ -2692,6 +2692,43 @@ test('returning to the grid restores the original tile and scroll position after
     assert.equal(vm.runInContext('gridReturn', app.context), null);
 });
 
+test('gallery controls refit after rotating while the photo viewer is open', async () => {
+    const app = await boot();
+    const controls = ['btn-view-mode', 'btn-sort', 'btn-grid-density'];
+    const slots = ['grid-view-mode', 'grid-sort', 'grid-density'];
+    let width = 740;
+    const grid = app.get('grid-view-container');
+    Object.defineProperty(app.get('grid-header'), 'clientWidth', {
+        get: () => grid.style.display === 'none' ? 0 : width
+    });
+    vm.runInContext(`
+        gridHeaderMain.scrollWidth = 215;
+        Object.defineProperty(gridActions, 'scrollWidth', {
+            get: () => 56 + 90 * [gridViewModeSlot, gridSortSlot, gridDensitySlot]
+                .filter(slot => slot.children.length > 0).length
+        });
+        updateGalleryHeaderLayout();
+    `, app.context);
+    const currentSlots = () => controls.map(id => app.get(id).parentElement);
+    const inline = slots.map(slot => app.get(slot + '-slot'));
+    const menu = slots.map(slot => app.get(slot + '-menu-slot'));
+    assert.deepEqual(currentSlots(), inline);
+
+    vm.runInContext('enterFullScreenViewer(0)', app.context);
+    width = 360;
+    vm.runInContext('updateGalleryHeaderLayout()', app.context);
+    assert.deepEqual(currentSlots(), inline);
+    app.get('btn-show-grid').listeners.click();
+    assert.deepEqual(currentSlots(), menu);
+
+    vm.runInContext('enterFullScreenViewer(0)', app.context);
+    width = 740;
+    vm.runInContext('updateGalleryHeaderLayout()', app.context);
+    assert.deepEqual(currentSlots(), menu);
+    app.get('btn-show-grid').listeners.click();
+    assert.deepEqual(currentSlots(), inline);
+});
+
 test('TV mode is not restored from saved preferences but explicit defaults still apply', () => {
     const saved = () => JSON.stringify({ tvMode: true, interval: 10 });
     const resolved = api.resolveSettings(normalize({}), '', saved);
